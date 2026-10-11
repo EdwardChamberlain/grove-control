@@ -17,12 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
-from backend.app.models.printer import Printer
+from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem, physical_holding_clause
 from backend.app.models.user import User
 from backend.app.services.job_identity import find_job, normalize_id, telemetry_identity
 from backend.app.services.lifecycle import clock, effects
-from backend.app.services.lifecycle.engine import hold_printer, transfer_hold, transition_queue_item
+from backend.app.services.lifecycle.engine import settle_replaced_hold, transition_queue_item, writer
 from backend.app.services.lifecycle.preheating import shut_down_inherited
 from backend.app.services.printer_manager import printer_manager
 
@@ -39,7 +38,6 @@ class Completion:
     owner_id: int | None
     owner: tuple[int, str] | None
     queue_status: str
-    auto_off: bool
     archive_id: int | None
     remote_filename: str | None
     archive_filename: str | None
@@ -53,11 +51,7 @@ async def on_enter(change, row) -> None:
 
 
 async def on_exit(change, row) -> None:
-    """Exit: a failed or stopped print shuts down the heaters its soak left on.
-
-    A print that ends in the transaction that confirmed it announces only its
-    end: the queue start re-reads the job after commit and finds it ended.
-    """
+    """Exit: a failed or stopped print shuts down the heaters its soak left on."""
     await shut_down_inherited(change, row)
 
 
@@ -169,13 +163,20 @@ async def observe_print(
     The existing unique active-printer index also fences scheduler dispatch.
     Never displace a different or unidentifiable active reservation. Fresh
     telemetry can establish a new external run on a plate still held by an
-    ended job, which then transfers its hold in this transaction.
+    ended job, which is settled before the new job is recorded.
     """
     if not identity:
         return None, False
-    await hold_printer(db, printer_id)
-    locked = await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
-    if not locked.rowcount:
+    async with writer(printer_id):
+        return await _observe_print(
+            db, printer_id, identity, observed_state=observed_state, active_snapshot=active_snapshot
+        )
+
+
+async def _observe_print(
+    db: AsyncSession, printer_id: int, identity: str | None, *, observed_state=None, active_snapshot: bool = False
+) -> tuple[PrintQueueItem | None, bool]:
+    if not identity:
         return None, False
     item = await find_job(db, printer_id, identity)
     if item:
@@ -196,15 +197,31 @@ async def observe_print(
     )
     if ended is not None:
         return None, False  # A duplicate/delayed start cannot revive a finished job.
+    # The sole external-entry case must be a live, identity-matched printer
+    # report. A delayed event on its own cannot create a job for a stale print.
+    live_start = bool(
+        observed_state is not None
+        and observed_state.connected
+        and getattr(observed_state, "job_telemetry_ready", False)
+        and telemetry_identity(observed_state) == identity
+        and (
+            observed_state.state in ACTIVE or (active_snapshot and observed_state.state in ("FINISH", "FAILED", "IDLE"))
+        )
+    )
+    if not live_start:
+        return None, False
     held = await db.scalar(
         select(PrintQueueItem)
-        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+        .where(
+            PrintQueueItem.printer_id == printer_id,
+            physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
+        )
         .execution_options(populate_existing=True)
     )
     if held is not None:
         # Check the live, mutable state after acquiring the printer/row locks.
         # A start that waited behind another callback may now be stale.
-        replace_awaiting = (
+        fresh_external_start = (
             observed_state is not None
             and observed_state.connected
             and getattr(observed_state, "job_telemetry_ready", True)
@@ -214,7 +231,12 @@ async def observe_print(
                 or (active_snapshot and observed_state.state in ("FINISH", "FAILED", "IDLE"))
             )
         )
-        if not replace_awaiting or not await transfer_hold(db, held, identity):
+        if not fresh_external_start:
+            return None, False
+        if held.status in AWAITING_PLATE_CLEAR_STATUSES:
+            if not await settle_replaced_hold(db, held, identity):
+                return None, False
+        elif not await _settle_replaced_active_job(db, held, identity, observed_state):
             return None, False
     item = PrintQueueItem(
         printer_id=printer_id, status="printing", dispatch_subtask_id=identity, started_at=clock.now()
@@ -225,21 +247,66 @@ async def observe_print(
     return item, False
 
 
-async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: bool, memory) -> None:
+async def _settle_replaced_active_job(db, held: PrintQueueItem, identity: str, observed_state) -> bool:
+    """Close a proven-unsent or superseded attempt before adopting a live external print."""
+    from backend.app.services.lifecycle.final import end as end_final
+    from backend.app.services.lifecycle.intake import print_memory
+
+    reason = f"Printer started a different print ({identity}) before this job was confirmed complete"
+    if held.status == "preheating" or (held.status == "dispatching" and held.dispatched_at is None):
+        await transition_queue_item(
+            db,
+            held,
+            held.status,
+            "failed",
+            action="dispatch_failure",
+            values={"error_message": reason, "completed_at": clock.now()},
+        )
+        await end_final(db, held, "external_replacement", error_message=reason)
+        return True
+
+    # Once the print command was sent, a different telemetry identity cannot
+    # prove whether that attempt started. Keep its reservation and plate hold.
+    if held.status == "dispatching":
+        return False
+    if held.status not in ("printing", "paused", "cancelled") or not superseded_by(held, observed_state):
+        return False
+    old_identity = normalize_id(held.dispatch_subtask_id)
+    filename = ""
+    if held.archive_id is not None:
+        archive = await db.get(PrintArchive, held.archive_id)
+        filename = archive.filename if archive else ""
+    await end(
+        db,
+        held,
+        {
+            "status": "failed",
+            "filename": filename,
+            "submission_id": old_identity,
+            "raw_data": {"subtask_id": old_identity},
+        },
+        memory=print_memory,
+    )
+    await end_final(db, held, "external_replacement", error_message=reason)
+    return True
+
+
+async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, memory) -> None:
     """Exit for the printer's report that the print ended, into the awaiting state for its outcome.
 
-    ``stopped`` is a Grove Stop from the printer controls. The completion
-    effects run once the caller commits.
+    The job row records Grove Stop intent so attribution survives restarts.
+    Completion effects run once the caller commits.
     """
     from backend.app.services.print_effects import (
+        _clean_sd_card,
         _format_hms_error_summary,
         derive_failure_reason,
         print_completed,
     )
 
     printer_id, reported = job.printer_id, data.get("status", "completed")
-    grove_stop = job.status == "cancelled" or stopped
-    cancelled = job.status == "cancelled" or (stopped and reported == "failed")
+    grove_stop = job.stop_requested_at is not None
+    cancelled = job.status == "cancelled" or (grove_stop and reported == "failed")
     queue_status = "cancelled" if reported == "aborted" or (reported != "completed" and cancelled) else reported
     # A stop from Grove is reported as "cancelled", now also after a restart.
     # Every other outcome, including a touchscreen "aborted", keeps the
@@ -285,7 +352,6 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: boo
         owner_id=job.created_by_id,
         owner=await owner_of(db, job),
         queue_status=queue_status,
-        auto_off=bool(job.auto_off_after),
         archive_id=job.archive_id,
         remote_filename=remote_filename,
         archive_filename=archive_filename,
@@ -296,6 +362,11 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: boo
             "plate_id": job.plate_id if job.plate_id is not None else data.get("plate_id"),
         },
     )
+    # Delete the uploaded file while the printer is still powered. Queue Auto
+    # Off after that cleanup but before the remaining completion bookkeeping.
+    effects.after_commit_task(db, partial(_clean_sd_card, completion), key=("print_sd_cleanup", job.id))
+    if job.physical_outcome == "completed" and job.auto_off_after:
+        effects.queue_auto_off(db, job.id, printer_id)
     effects.after_commit_task(db, partial(print_completed, completion, memory=memory), key=("print_complete", job.id))
 
 
@@ -335,13 +406,13 @@ async def adopt_legacy_prints(db: AsyncSession) -> None:
         live = state and state.connected and getattr(state, "job_telemetry_ready", False)
         if not identity or len(archive_ids) != 1 or not live or telemetry_identity(state) != identity:
             continue
-        await hold_printer(db, printer_id)
-        job, _ = await observe_print(db, printer_id, identity)
-        archive = await db.get(PrintArchive, archive_ids[0])
-        if job is None or job.archive_id is not None or archive is None or archive.dispatched_queue_item_id:
-            await db.rollback()
-            continue
-        archive.dispatched_queue_item_id = job.id
-        values = {"archive_id": archive.id, "started_at": archive.started_at or job.started_at}
-        await transition_queue_item(db, job, job.status, job.status, values=values)
-        await db.commit()
+        async with writer(printer_id):
+            job, _ = await observe_print(db, printer_id, identity, observed_state=state, active_snapshot=True)
+            archive = await db.get(PrintArchive, archive_ids[0])
+            if job is None or job.archive_id is not None or archive is None or archive.dispatched_queue_item_id:
+                await db.rollback()
+                continue
+            archive.dispatched_queue_item_id = job.id
+            values = {"archive_id": archive.id, "started_at": archive.started_at or job.started_at}
+            await transition_queue_item(db, job, job.status, job.status, values=values)
+            await db.commit()

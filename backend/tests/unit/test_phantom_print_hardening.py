@@ -240,9 +240,9 @@ class TestBusyPrinterSeedingFromPrintingItems:
             db.add_all(
                 [
                     PrintQueueItem(printer_id=1, status="printing", position=1, archive_id=10),
-                    PrintQueueItem(printer_id=1, status="queued", position=2, archive_id=10),
+                    PrintQueueItem(assigned_printer_id=1, status="queued", position=2, archive_id=10),
                     PrintQueueItem(printer_id=2, status="printing", position=1, archive_id=11),
-                    PrintQueueItem(printer_id=3, status="queued", position=1, archive_id=12),
+                    PrintQueueItem(assigned_printer_id=3, status="queued", position=1, archive_id=12),
                     PrintQueueItem(printer_id=None, status="queued", position=1, archive_id=13),
                 ]
             )
@@ -276,7 +276,7 @@ class TestBusyPrinterSeedingFromPrintingItems:
         async with session_maker() as db:
             db.add_all(
                 [
-                    PrintQueueItem(printer_id=1, status="queued", position=1, archive_id=10),
+                    PrintQueueItem(assigned_printer_id=1, status="queued", position=1, archive_id=10),
                     PrintQueueItem(printer_id=2, status="completed", position=1, archive_id=11),
                     PrintQueueItem(printer_id=3, status="failed", position=1, archive_id=12),
                     PrintQueueItem(printer_id=4, status="cancelled", position=1, archive_id=13),
@@ -319,7 +319,7 @@ class TestBusyPrinterSeedingFromPrintingItems:
             db.add_all(
                 [
                     PrintQueueItem(printer_id=1, status="printing", position=1, archive_id=84),
-                    PrintQueueItem(printer_id=1, status="queued", position=2, archive_id=84),
+                    PrintQueueItem(assigned_printer_id=1, status="queued", position=2, archive_id=84),
                 ]
             )
             await db.commit()

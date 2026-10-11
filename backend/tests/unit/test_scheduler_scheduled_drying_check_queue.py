@@ -82,7 +82,7 @@ async def _add_print_item(ctx, *, sliced_for_model="P2S"):
             PrintQueueItem(
                 status="queued",
                 position=1,
-                printer_id=1,
+                assigned_printer_id=1,
                 library_file_id=lib.id,
                 # Keep this feature's queue-pass assertions focused on
                 # scheduled drying rather than the separate safe-default

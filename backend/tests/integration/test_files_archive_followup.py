@@ -326,11 +326,12 @@ class TestQueueUploadSourceLifecycle:
             library_file_id=library_file_id,
             position=1,
             status="failed",
+            physical_outcome="failed",
             error_message="Previous print failed or was aborted",
             cleanup_library_after_dispatch=True,
         )
         deleted_item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=library_file_id,
             position=2,
             status="queued",
@@ -386,7 +387,7 @@ class TestQueueUploadSourceLifecycle:
         if keep_for_active_item:
             printer = await printer_factory()
             pending_item = PrintQueueItem(
-                printer_id=printer.id,
+                assigned_printer_id=printer.id,
                 library_file_id=library_file_id,
                 position=1,
                 status="queued",
@@ -477,7 +478,7 @@ class TestQueueUploadSourceLifecycle:
         # A later fan-out request can still link the same source after the
         # first item has already dispatched.
         later_item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=library_file_id,
             position=2,
             status="queued",
@@ -517,7 +518,7 @@ class TestDispatchArchiveLifecycle:
         from backend.app.models.archive import PrintArchive
 
         printer = await printer_factory()
-        item = PrintQueueItem(printer_id=printer.id, position=1, status="failed")
+        item = PrintQueueItem(printer_id=printer.id, position=1, status="failed", physical_outcome="failed")
         db_session.add(item)
         await db_session.commit()
         await db_session.refresh(item)
@@ -560,7 +561,7 @@ class TestDispatchArchiveLifecycle:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_stopping_dispatch_marks_its_attempt_archive_aborted(
+    async def test_stopping_unsent_dispatch_marks_its_attempt_archive_cancelled(
         self,
         async_client: AsyncClient,
         db_session: AsyncSession,
@@ -590,5 +591,5 @@ class TestDispatchArchiveLifecycle:
 
         assert response.status_code == 200, response.text
         await db_session.refresh(archive)
-        assert archive.status == "aborted"
+        assert archive.status == "cancelled"
         assert archive.completed_at is not None

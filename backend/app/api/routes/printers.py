@@ -24,9 +24,9 @@ from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import (
     ACTIVE_STATUSES,
-    AWAITING_PLATE_CLEAR_STATUSES,
     HOLDING_STATUSES,
     PrintQueueItem,
+    awaiting_plate_clear_clause,
 )
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
@@ -62,7 +62,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, hold_printer, lock_queue_item, release_printer
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, release_printer, transition_queue_item
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -377,21 +377,6 @@ async def update_printer(
 
     update_data = printer_data.model_dump(exclude_unset=True)
 
-    # Handle nested ROI object - flatten to individual columns
-    if "plate_detection_roi" in update_data:
-        roi = update_data.pop("plate_detection_roi")
-        if roi:
-            update_data["plate_detection_roi_x"] = roi.get("x")
-            update_data["plate_detection_roi_y"] = roi.get("y")
-            update_data["plate_detection_roi_w"] = roi.get("w")
-            update_data["plate_detection_roi_h"] = roi.get("h")
-        else:
-            # Clear ROI if set to null
-            update_data["plate_detection_roi_x"] = None
-            update_data["plate_detection_roi_y"] = None
-            update_data["plate_detection_roi_w"] = None
-            update_data["plate_detection_roi_h"] = None
-
     for field, value in update_data.items():
         setattr(printer, field, value)
 
@@ -429,6 +414,8 @@ async def delete_printer(
     from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, PrinterMaintenance
     from backend.app.models.scheduled_drying import ScheduledDrying
     from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+    from backend.app.services.lifecycle import engine as lifecycle_engine
+    from backend.app.services.lifecycle.queued import PRINTER_DELETED_WAITING_REASON
 
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
@@ -436,49 +423,89 @@ async def delete_printer(
         raise HTTPException(404, "Printer not found")
 
     try:
-        await release_printer(db, printer)
+        # Hold the printer lifecycle lock through commit so queue selection
+        # cannot bind a waiting job after the deletion checks it.
+        async with lifecycle_engine.writer(printer_id):
+            await release_printer(db, printer)
+            waiting_jobs = list(
+                (
+                    await db.scalars(
+                        select(PrintQueueItem)
+                        .where(
+                            PrintQueueItem.assigned_printer_id == printer_id,
+                            PrintQueueItem.status == "queued",
+                        )
+                        .order_by(PrintQueueItem.id)
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            for item in waiting_jobs:
+                await transition_queue_item(
+                    db,
+                    item,
+                    "queued",
+                    "queued",
+                    values={
+                        "assigned_printer_id": None,
+                        "waiting_reason": PRINTER_DELETED_WAITING_REASON,
+                    },
+                )
+
+            await db.execute(
+                update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None)
+            )
+            await db.execute(
+                update(PrintQueueItem)
+                .where(PrintQueueItem.assigned_printer_id == printer_id)
+                .values(assigned_printer_id=None)
+            )
+            if delete_archives:
+                # Preserve jobs when the Archive FK would otherwise cascade-delete them.
+                await db.execute(
+                    update(PrintQueueItem)
+                    .where(
+                        PrintQueueItem.archive_id.in_(
+                            select(PrintArchive.id).where(PrintArchive.printer_id == printer_id)
+                        )
+                    )
+                    .values(archive_id=None)
+                )
+
+            if delete_archives:
+                # Delete all archives for this printer
+                await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
+            else:
+                # Orphan the archives instead of deleting them
+                await db.execute(
+                    update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None)
+                )
+
+            # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
+            await db.execute(sql_delete(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == printer_id))
+
+            # Delete scheduled drying rows explicitly because SQLite does not enforce
+            # the ScheduledDrying printer foreign-key cascade.
+            await db.execute(sql_delete(ScheduledDrying).where(ScheduledDrying.printer_id == printer_id))
+
+            # Delete durable maintenance logs plus legacy task history/items for this
+            # printer. SQLite does not enforce these foreign-key cascades.
+            await db.execute(sql_delete(MaintenanceLogEntry).where(MaintenanceLogEntry.printer_id == printer_id))
+            maintenance_ids = (
+                (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
+                .scalars()
+                .all()
+            )
+            if maintenance_ids:
+                await db.execute(
+                    sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
+                )
+                await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
+
+            await db.delete(printer)
+            await db.commit()
     except InvalidQueueTransition as exc:
         raise HTTPException(409, str(exc)) from exc
-    await db.execute(update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None))
-    if delete_archives:
-        # Preserve jobs when the Archive FK would otherwise cascade-delete them.
-        await db.execute(
-            update(PrintQueueItem)
-            .where(PrintQueueItem.archive_id.in_(select(PrintArchive.id).where(PrintArchive.printer_id == printer_id)))
-            .values(archive_id=None)
-        )
-
-    if delete_archives:
-        # Delete all archives for this printer
-        await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
-    else:
-        # Orphan the archives instead of deleting them
-        await db.execute(update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None))
-
-    # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
-    await db.execute(sql_delete(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == printer_id))
-
-    # Delete scheduled drying rows explicitly because SQLite does not enforce
-    # the ScheduledDrying printer foreign-key cascade.
-    await db.execute(sql_delete(ScheduledDrying).where(ScheduledDrying.printer_id == printer_id))
-
-    # Delete durable maintenance logs plus legacy task history/items for this
-    # printer. SQLite does not enforce these foreign-key cascades.
-    # (SQLite doesn't enforce FK cascades, so do it explicitly)
-    await db.execute(sql_delete(MaintenanceLogEntry).where(MaintenanceLogEntry.printer_id == printer_id))
-    maintenance_ids = (
-        (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
-        .scalars()
-        .all()
-    )
-    if maintenance_ids:
-        await db.execute(
-            sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
-        )
-        await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
-
-    await db.delete(printer)
-    await db.commit()
     await ws_manager.send_queue_work_changed()
 
     printer_manager.disconnect_printer(printer_id)
@@ -500,7 +527,8 @@ async def get_printer_status(
     state = printer_manager.get_status(printer_id)
     awaiting_job = await db.scalar(
         select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES)
+            PrintQueueItem.printer_id == printer_id,
+            awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
         )
     )
     awaiting = awaiting_job is not None
@@ -1266,7 +1294,7 @@ async def get_printer_cover(
             raise HTTPException(500, "Failed to open 3MF file. Check server logs for details.")
 
         try:
-            # 3MF-scan fallback for plate detection (#1166). Per-plate archives
+            # 3MF-scan fallback for usage tracking (#1166). Per-plate archives
             # sliced separately in Bambu Studio contain a single
             # Metadata/plate_N.gcode for the active plate, even though
             # thumbnails for all plates are bundled. Using that gcode's plate
@@ -3000,43 +3028,23 @@ async def stop_print(
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
+    # Do not carry this lookup transaction while waiting for the lifecycle
+    # writer; the writer must precede the transaction that owns the Stop.
+    await db.rollback()
 
-    await hold_printer(db, printer_id)
-    item = await db.scalar(
-        select(PrintQueueItem)
-        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES))
-        .order_by(PrintQueueItem.id)
-        .with_for_update()
-    )
-    if item is not None:
-        from backend.app.services.queue_actions import cancel_job
+    from backend.app.services.queue_actions import stop_current_job
 
-        item = await lock_queue_item(db, item.id)
-        if item is None or item.status not in ACTIVE_STATUSES:
-            raise HTTPException(409, "The job changed; refresh before stopping it")
-        await cancel_job(db, item)
-        return {"success": True, "message": "Job stopped; clear the plate before the next print"}
-
-    client = printer_manager.get_client(printer_id)
-    if not client:
-        raise HTTPException(400, "Printer not connected")
-
-    success = client.stop_print()
-    if not success:
-        raise HTTPException(500, "Failed to stop print")
-
-    # Mark this printer as user-stopped so on_print_complete reclassifies
-    # the resulting "failed"/"aborted" MQTT status as "cancelled" — otherwise
-    # the HMS heuristic in _dispatch_archive_update mislabels user-cancels
-    # (e.g. the H2D's cancel-sequence module-0x0C HMS) as "Layer shift".
     try:
-        from backend.app.services.lifecycle.intake import mark_printer_stopped_by_user
-
-        mark_printer_stopped_by_user(printer_id)
-    except Exception as _mark_err:
-        logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
-
-    return {"success": True, "message": "Print stop command sent"}
+        _item, physical_attempt, command_sent = await stop_current_job(db, printer_id)
+    except InvalidQueueTransition as error:
+        raise HTTPException(409, str(error)) from error
+    if not physical_attempt:
+        message = "Unsent job cancelled"
+    elif command_sent:
+        message = "Stop command sent; clear the plate before the next print"
+    else:
+        message = "Stop intent recorded; inspect the printer before clearing the plate"
+    return {"success": True, "message": message}
 
 
 @router.post("/{printer_id}/clear-plate")
@@ -3058,14 +3066,14 @@ async def clear_plate(
 
     item = await db.scalar(
         select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES)
+            PrintQueueItem.printer_id == printer_id,
+            awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
         )
     )
     if item is None:
         raise HTTPException(409, "No job is awaiting plate clear")
-    item = await lock_queue_item(db, item.id)
     try:
-        await clear_job_plate(db, item)
+        await clear_job_plate(db, item.id)
     except InvalidQueueTransition as exc:
         raise HTTPException(409, str(exc)) from exc
     await db.commit()

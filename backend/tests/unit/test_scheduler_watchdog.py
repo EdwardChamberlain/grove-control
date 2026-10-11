@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.lifecycle import effects as lifecycle_effects
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 
@@ -36,11 +36,18 @@ async def db_session(tmp_path, monkeypatch):
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_queue_lifecycle(conn)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    from backend.app.services.lifecycle import dispatching, intake, queued
+    from backend.app.services.print_scheduler import scheduler as process_scheduler
+
+    monkeypatch.setattr(dispatching, "async_session", session_maker)
+    monkeypatch.setattr(intake, "async_session", session_maker)
+    monkeypatch.setattr(queued, "async_session", session_maker)
+    monkeypatch.setattr(process_scheduler.dispatcher, "schedule_stage", lambda *_args, **_kwargs: None)
 
     async with session_maker() as db:
         db.add(Printer(id=42, name="Test", serial_number="TEST", ip_address="127.0.0.1", access_code="code"))
         db.add(PrintArchive(id=99, filename="source.3mf", file_path=str(source), file_size=15, status="completed"))
-        db.add(PrintQueueItem(id=1, printer_id=42, archive_id=99, status="queued"))
+        db.add(PrintQueueItem(id=1, assigned_printer_id=42, archive_id=99, status="queued"))
         await db.commit()
 
     try:
@@ -50,19 +57,27 @@ async def db_session(tmp_path, monkeypatch):
 
 
 async def hold_and_link(db, item):
-    await transition_queue_item(db, item, item.status, "dispatching")
+    async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+        await transition_queue_item(db, item, item.status, "dispatching")
     await db.commit()
     prepared = await prepare_dispatch_archive(db, item)
-    await link_dispatch_archive(db, item, prepared)
+    async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+        await link_dispatch_archive(db, item, prepared)
 
 
 def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = None):
-    return SimpleNamespace(connected=True, state=state, subtask_id=subtask_id, gcode_file=gcode_file)
+    return SimpleNamespace(
+        connected=True,
+        job_telemetry_ready=True,
+        state=state,
+        subtask_id=subtask_id,
+        gcode_file=gcode_file,
+    )
 
 
-class TestDurableDispatchingState:
+class TestSentJobReportReconciliation:
     @pytest.mark.asyncio
-    async def test_restart_recovery_publishes_the_normal_start_event(self, db_session):
+    async def test_active_report_reconciliation_publishes_the_normal_start_event(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
             await hold_and_link(db, item)
@@ -84,10 +99,10 @@ class TestDurableDispatchingState:
                     "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                     return_value=_status("RUNNING", "12345"),
                 ),
-                patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
+                patch("backend.app.core.tasks.spawn_background_task", side_effect=spawn),
                 patch.object(lifecycle_effects, "publish_queue_job_started", new=publish),
             ):
-                await scheduler.dispatcher.recover(db)
+                await scheduler.dispatcher.reconcile_printer_reports(db)
                 await asyncio.gather(*tasks)
 
             item = await db.get(PrintQueueItem, 1)
@@ -96,7 +111,7 @@ class TestDurableDispatchingState:
         publish.assert_awaited_once_with(1)
 
     @pytest.mark.asyncio
-    async def test_restart_recovery_does_not_promote_an_active_print_with_another_submission_id(self, db_session):
+    async def test_report_reconciliation_does_not_promote_another_submission_id(self, db_session):
         """An unrelated manual print must not acknowledge a durable dispatch."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
@@ -109,14 +124,14 @@ class TestDurableDispatchingState:
                 "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=_status("RUNNING", "other-job"),
             ):
-                await PrintScheduler().dispatcher.recover(db)
+                await PrintScheduler().dispatcher.reconcile_printer_reports(db)
 
             item = await db.get(PrintQueueItem, 1)
             assert item.status == "dispatching"
             assert item.started_at is None
 
     @pytest.mark.asyncio
-    async def test_restart_recovery_does_not_treat_missing_ids_as_a_match(self, db_session):
+    async def test_report_reconciliation_does_not_treat_missing_ids_as_a_match(self, db_session):
         """Legacy rows without an id must not accept an uncorrelated active print."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
@@ -129,7 +144,7 @@ class TestDurableDispatchingState:
                 "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=_status("RUNNING"),
             ):
-                await PrintScheduler().dispatcher.recover(db)
+                await PrintScheduler().dispatcher.reconcile_printer_reports(db)
 
             item = await db.get(PrintQueueItem, 1)
             assert item.status == "dispatching"

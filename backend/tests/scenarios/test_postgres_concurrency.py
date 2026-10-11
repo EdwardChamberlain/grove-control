@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 
 import pytest
 from sqlalchemy import select, text, update
@@ -35,7 +36,7 @@ async def _wait_for_queue_lock_wait(app) -> list[str]:
 
 
 async def _stop_intake_race(app, monkeypatch, printer, job_id, blocker):
-    from backend.app.api.routes import printers as printer_routes
+    from backend.app.services import queue_actions
     from backend.app.services.lifecycle import intake
 
     job = await app.job(job_id)
@@ -47,29 +48,33 @@ async def _stop_intake_race(app, monkeypatch, printer, job_id, blocker):
 
     intake_entered = asyncio.Event()
     finish_intake = asyncio.Event()
-    original_intake_hold = intake.hold_printer
+    original_intake_writer = intake.writer
     intake_task = None
 
-    async def gated_intake_hold(db, printer_id):
-        await original_intake_hold(db, printer_id)
-        if asyncio.current_task() is intake_task:
-            intake_entered.set()
-            await finish_intake.wait()
+    @asynccontextmanager
+    async def gated_intake_writer(printer_id):
+        async with original_intake_writer(printer_id):
+            if asyncio.current_task() is intake_task:
+                intake_entered.set()
+                await finish_intake.wait()
+            yield
 
-    monkeypatch.setattr(intake, "hold_printer", gated_intake_hold)
+    monkeypatch.setattr(intake, "writer", gated_intake_writer)
     intake_task = app.spawn(
         intake.print_state_changed(printer.printer_id, {"submission_id": job.dispatch_subtask_id, "state": "PAUSE"})
     )
     stop_lock_attempted = asyncio.Event()
     stop_task = None
-    original_route_hold = printer_routes.hold_printer
+    original_stop_writer = queue_actions.writer
 
-    async def observe_stop_lock(db, printer_id):
+    @asynccontextmanager
+    async def observe_stop_writer(printer_id):
         # Starlette may run the endpoint in a child task of the HTTP client.
         stop_lock_attempted.set()
-        await original_route_hold(db, printer_id)
+        async with original_stop_writer(printer_id):
+            yield
 
-    monkeypatch.setattr(printer_routes, "hold_printer", observe_stop_lock)
+    monkeypatch.setattr(queue_actions, "writer", observe_stop_writer)
     await asyncio.wait_for(intake_entered.wait(), timeout=5)
     stop_task = app.spawn(app.http.post(f"/printers/{printer.printer_id}/print/stop"))
     try:
@@ -125,28 +130,32 @@ async def test_printer_deletion_waits_for_intake_before_taking_held_job_rows(pos
 
     intake_entered = asyncio.Event()
     finish_intake = asyncio.Event()
-    original_intake_hold = intake.hold_printer
+    original_intake_writer = intake.writer
     intake_task = None
 
-    async def gated_intake_hold(db, printer_id):
-        await original_intake_hold(db, printer_id)
-        if asyncio.current_task() is intake_task:
-            intake_entered.set()
-            await finish_intake.wait()
+    @asynccontextmanager
+    async def gated_intake_writer(printer_id):
+        async with original_intake_writer(printer_id):
+            if asyncio.current_task() is intake_task:
+                intake_entered.set()
+                await finish_intake.wait()
+            yield
 
-    monkeypatch.setattr(intake, "hold_printer", gated_intake_hold)
+    monkeypatch.setattr(intake, "writer", gated_intake_writer)
     intake_task = postgres_app.spawn(intake.print_started(printer.printer_id, {"submission_id": "778"}))
 
     deletion_lock_attempted = asyncio.Event()
     delete_task = None
-    original_engine_hold = lifecycle_engine.hold_printer
+    original_engine_writer = lifecycle_engine.writer
 
-    async def observe_delete_lock(db, printer_id):
+    @asynccontextmanager
+    async def observe_delete_writer(printer_id):
         # The deletion endpoint can also run inside an ASGI child task.
         deletion_lock_attempted.set()
-        await original_engine_hold(db, printer_id)
+        async with original_engine_writer(printer_id):
+            yield
 
-    monkeypatch.setattr(lifecycle_engine, "hold_printer", observe_delete_lock)
+    monkeypatch.setattr(lifecycle_engine, "writer", observe_delete_writer)
     await asyncio.wait_for(intake_entered.wait(), timeout=5)
     delete_task = postgres_app.spawn(postgres_app.http.delete(f"/printers/{printer.printer_id}"))
     try:
@@ -204,10 +213,10 @@ async def test_bulk_retarget_conflict_rolls_back_the_whole_request(postgres_app,
     file_id = await postgres_app.add_file()
     first = await postgres_app.queue(source, file_id, bed_levelling="on")
     moved = await postgres_app.queue(source, file_id, bed_levelling="on")
-    original_hold = queue_routes.hold_printers
+    original_lock_items = queue_routes.lock_queue_items
     changed = False
 
-    async def reassign_after_discovery(db, printer_ids):
+    async def reassign_after_discovery(db, expected_printers):
         nonlocal changed
         if not changed:
             changed = True
@@ -215,12 +224,12 @@ async def test_bulk_retarget_conflict_rolls_back_the_whole_request(postgres_app,
                 await concurrent.execute(
                     update(PrintQueueItem)
                     .where(PrintQueueItem.id == moved)
-                    .values(printer_id=concurrent_target.printer_id)
+                    .values(assigned_printer_id=concurrent_target.printer_id)
                 )
                 await concurrent.commit()
-        await original_hold(db, printer_ids)
+        return await original_lock_items(db, expected_printers)
 
-    monkeypatch.setattr(queue_routes, "hold_printers", reassign_after_discovery)
+    monkeypatch.setattr(queue_routes, "lock_queue_items", reassign_after_discovery)
     response = await postgres_app.http.patch(
         "/queue/bulk",
         json={"item_ids": [first, moved], "printer_id": destination.printer_id, "bed_levelling": "off"},
@@ -228,7 +237,7 @@ async def test_bulk_retarget_conflict_rolls_back_the_whole_request(postgres_app,
     assert response.status_code == 409, response.text
     assert (await postgres_app.job(first)).bed_levelling == "on"
     moved_item = await postgres_app.job(moved)
-    assert moved_item.printer_id == concurrent_target.printer_id
+    assert moved_item.assigned_printer_id == concurrent_target.printer_id
     assert moved_item.bed_levelling == "on"
 
 

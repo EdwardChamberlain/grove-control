@@ -112,13 +112,20 @@ def _discard_uncommitted(session: Session, transaction) -> None:
         _run(session.info.pop(_UNDO, []), "undo step")
 
 
-def publish_printer_view(db: AsyncSession, printer_id: int, status: str, archive_id: int | None) -> None:
+def publish_printer_view(
+    db: AsyncSession,
+    printer_id: int,
+    status: str,
+    archive_id: int | None,
+    *,
+    physical_outcome: str | None = None,
+) -> None:
     """Show the committed holding state in the printer's plate-clear view."""
 
     def publish() -> None:
         from backend.app.services.printer_manager import printer_manager
 
-        awaiting = status in AWAITING_PLATE_CLEAR_STATUSES
+        awaiting = status in AWAITING_PLATE_CLEAR_STATUSES and not (status == "failed" and physical_outcome is None)
         printer_manager.set_awaiting_plate_clear(printer_id, awaiting)
         printer_manager.set_awaiting_plate_clear_archive_id(printer_id, archive_id if awaiting else None)
 
@@ -138,35 +145,11 @@ def publish_queue_work_changed(db: AsyncSession) -> None:
     after_commit(db, spawn, key="queue_work_changed")
 
 
-def shut_down_heaters(db: AsyncSession, printer_id: int) -> None:
-    """Retry the printer's recorded heater shutdown once this transaction commits."""
-    engine = db.bind
-
-    def spawn() -> None:
-        from backend.app.core.tasks import spawn_background_task
-
-        spawn_background_task(_shut_down_heaters(engine, printer_id), name=f"queue-heater-effects-{printer_id}")
-
-    after_commit(db, spawn, key=("heaters", printer_id))
-
-
-async def _shut_down_heaters(engine: AsyncEngine, printer_id: int) -> None:
-    from backend.app.services.lifecycle.preheating import _show_preheating, cleanup_heat_soak_shutdown
-
-    try:
-        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-            if await cleanup_heat_soak_shutdown(db, printer_id):
-                _show_preheating(printer_id, False)
-    except Exception:
-        logger.exception("Printer %s: heater shutdown failed", printer_id)
-
-
 @dataclass(frozen=True)
 class QueueOutcomeEffect:
     job_id: int
     new_state: str
     printer_id: int | None
-    shut_down_heaters: bool = False
     notify_failure: bool = False
     clean_sd_copy: bool = False
 
@@ -180,7 +163,24 @@ def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
     after_commit(db, partial(_spawn_outcome, db.bind, effect), key=key)
 
 
-_FLAGS = ("shut_down_heaters", "notify_failure", "clean_sd_copy")
+def queue_auto_off(db: AsyncSession, job_id: int, printer_id: int | None) -> None:
+    """Turn off after a committed successful print, if its queue is empty."""
+    if printer_id is None:
+        return
+    after_commit_task(db, partial(run_queue_auto_off, db.bind, job_id, printer_id), key=("queue_auto_off", job_id))
+
+
+async def run_queue_auto_off(engine: AsyncEngine, job_id: int, printer_id: int) -> None:
+    """Recheck the committed job before issuing its immediate power command."""
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as db:
+            await smart_plug_manager.turn_off_after_queue_job(printer_id, job_id, db)
+    except Exception:
+        logger.exception("Queue job %s: immediate auto power-off failed", job_id)
+
+
+_FLAGS = ("notify_failure", "clean_sd_copy")
 
 
 def _spawn_outcome(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
@@ -202,7 +202,6 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         attempt = archive if archive and archive.dispatched_queue_item_id == job.id else None
         remote_filename = (attempt.extra_data or {}).get("remote_filename") if attempt else None
         connection = (printer.ip_address, printer.access_code, printer.model) if printer else None
-        auto_off = bool(job.auto_off_after)
         filename = archive.filename if archive else None
         library_file_id = job.library_file_id
         printer_name = printer.name if printer else None
@@ -226,16 +225,6 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
                 )
         except Exception:
             logger.exception("Queue job %s: failure notification failed", effect.job_id)
-
-    if auto_off and effect.new_state in ("failed", "cancelled") and effect.printer_id is not None:
-        try:
-            async with sessions() as db:
-                await smart_plug_manager.schedule_off_after_queue_job(effect.printer_id, db)
-        except Exception:
-            logger.exception("Queue job %s: auto power-off scheduling failed", effect.job_id)
-
-    if effect.shut_down_heaters and effect.printer_id is not None:
-        await _shut_down_heaters(engine, effect.printer_id)
 
     if effect.clean_sd_copy and remote_filename and connection is not None:
         if effect.new_state == "unsuccessful" and job_identity.printer_active(effect.printer_id):

@@ -38,12 +38,11 @@ from backend.app.services.printer_selection import (
 # ---------------------------------------------------------------------------
 
 
-def _fake_variant(*, vid, position, model, attempts=0, trashed=False, file_missing=False):
+def _fake_variant(*, vid, position, model, trashed=False, file_missing=False):
     return SimpleNamespace(
         id=vid,
         position=position,
         target_model=model,
-        attempt_count=attempts,
         library_file=None
         if file_missing
         else SimpleNamespace(
@@ -99,16 +98,15 @@ def test_variants_come_back_in_user_priority_order():
     assert [c.target_model for c in _candidates_for(item)] == ["H2S", "H2C"]
 
 
-def test_least_attempted_candidate_is_tried_first():
-    """A printer that accepts the file and never starts must not eat the item's
-    whole retry budget — the alternative gets the next lap."""
+def test_failed_candidate_does_not_change_user_priority():
+    """Retrying creates a fresh job; this job keeps the original candidate order."""
     item = _fake_item(
         [
-            _fake_variant(vid=1, position=0, model="H2S", attempts=1),
-            _fake_variant(vid=2, position=1, model="H2C", attempts=0),
+            _fake_variant(vid=1, position=0, model="H2S"),
+            _fake_variant(vid=2, position=1, model="H2C"),
         ]
     )
-    assert [c.target_model for c in _candidates_for(item)] == ["H2C", "H2S"]
+    assert [c.target_model for c in _candidates_for(item)] == ["H2S", "H2C"]
 
 
 def test_trashed_candidate_is_skipped():
@@ -139,18 +137,6 @@ def test_orphaned_candidate_is_skipped():
 def test_item_with_no_usable_candidates_yields_none():
     item = _fake_item([_fake_variant(vid=1, position=0, model="H2S", trashed=True)])
     assert _candidates_for(item) == []
-
-
-def test_equal_attempts_fall_back_to_priority():
-    """Once every candidate has failed equally often they cycle in the user's
-    order, so the item still reaches its DISPATCH_MAX_ATTEMPTS ceiling."""
-    item = _fake_item(
-        [
-            _fake_variant(vid=1, position=0, model="H2S", attempts=2),
-            _fake_variant(vid=2, position=1, model="H2C", attempts=2),
-        ]
-    )
-    assert [c.target_model for c in _candidates_for(item)] == ["H2S", "H2C"]
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +264,6 @@ async def _add_variant_item(ctx, specs):
                     ams_mapping=spec.get("ams_mapping"),
                     nozzle_mapping=spec.get("nozzle_mapping"),
                     print_time_seconds=spec.get("print_time_seconds"),
-                    attempt_count=spec.get("attempts", 0),
                 )
             )
         await db.commit()
@@ -500,14 +485,13 @@ async def test_plain_model_based_item_is_untouched(queue_db):
 
 
 @pytest.mark.asyncio
-async def test_failed_candidate_steps_aside_for_the_alternative(queue_db):
-    """The H2S burned an attempt on the last lap. Both are free now — the H2C
-    goes first, which is the entire point of queueing an alternative."""
+async def test_failed_candidate_keeps_user_priority(queue_db):
+    """Attempt history does not rotate the user's candidate order."""
     item_id = await _add_variant_item(
         queue_db,
         [
-            {"model": "H2S", "attempts": 1},
-            {"model": "H2C", "attempts": 0},
+            {"model": "H2S"},
+            {"model": "H2C"},
         ],
     )
     scheduler = PrintScheduler()
@@ -515,9 +499,9 @@ async def test_failed_candidate_steps_aside_for_the_alternative(queue_db):
     await _run_check_queue(queue_db, scheduler, _finder_for({"H2S": 1, "H2C": 2}))
 
     item = await _get_item(queue_db, item_id)
-    assert _selected_printer(scheduler, item_id) == 2
+    assert _selected_printer(scheduler, item_id) == 1
     assert item.printer_id is None
-    assert item.target_model == "H2C"
+    assert item.target_model == "H2S"
 
 
 @pytest.mark.asyncio

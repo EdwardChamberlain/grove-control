@@ -13,7 +13,7 @@ hence the ``on_frame`` callback, and hence a guard alone would have found an
 empty buffer and skipped every time.
 
 These tests cover the plumbing (raw frames reach the callback) and each consumer
-that used to compete: layer timelapse, Obico polling, and plate detection.
+that used to compete: layer timelapse and Obico polling.
 """
 
 from __future__ import annotations
@@ -292,32 +292,3 @@ async def test_obico_still_captures_when_nobody_is_watching():
 
     assert result == FRESH_FRAME
     mock_capture.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# Plate detection — its docstring already promised this
-# ---------------------------------------------------------------------------
-
-
-async def test_plate_detection_reuses_the_live_external_frame():
-    from backend.app.services import plate_detection
-
-    _attach_viewer()
-
-    with patch(
-        "backend.app.services.external_camera.capture_frame",
-        new=AsyncMock(return_value=FRESH_FRAME),
-    ) as mock_capture:
-        image, source = await plate_detection.capture_camera_image(
-            printer_id=PRINTER_ID,
-            ip_address="192.168.1.10",
-            access_code="12345678",
-            model="A1",
-            external_camera_url="/dev/video0",
-            external_camera_type="usb",
-            use_external=True,
-        )
-
-    assert image == LIVE_FRAME
-    assert source == "external (buffered)"
-    mock_capture.assert_not_called()

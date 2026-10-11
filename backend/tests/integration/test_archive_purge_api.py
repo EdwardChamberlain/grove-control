@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import AsyncClient
 
-from backend.app.services.lifecycle.engine import HOLDING_STATUSES
+from backend.app.models.print_queue import HOLDING_STATUSES
 
 
 @pytest.mark.parametrize("status", HOLDING_STATUSES)
@@ -29,7 +29,12 @@ async def test_purge_retains_held_archives_and_excludes_them_from_preview(
     printer = await printer_factory()
     archive = await archive_factory(printer.id)
     archive.created_at = datetime.now(timezone.utc) - timedelta(days=400)
-    item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id if linked else None, status=status)
+    item = PrintQueueItem(
+        printer_id=printer.id,
+        archive_id=archive.id if linked else None,
+        status=status,
+        physical_outcome="failed" if status == "failed" else None,
+    )
     db_session.add(item)
     await db_session.flush()
     archive.dispatched_queue_item_id = item.id

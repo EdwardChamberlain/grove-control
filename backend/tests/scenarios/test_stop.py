@@ -83,13 +83,13 @@ async def test_stop_during_upload_removes_the_upload_and_sends_nothing(app):
     await app.until(lambda: printer.uploading)
 
     stop = app.spawn(app.action(job_id, "stop"))
-    await app.until(lambda: _status(app, job_id, "cancelled"))
+    await app.until(lambda: _status(app, job_id, "unsuccessful"))
     printer.upload_gate.set()
     assert (await stop).status_code == 200
     await running
     await app.run()
 
-    assert (await app.job(job_id)).status == "cancelled"
+    assert (await app.job(job_id)).status == "unsuccessful"
     assert printer.sent("project_file") == []
     assert printer.sent("stop") == []  # Nothing was sent, so nothing is stopped.
     assert not [name for name in printer.sd if name.endswith(".3mf")]

@@ -1346,36 +1346,6 @@ class NotificationService:
             variables=variables,
         )
 
-    async def on_plate_not_empty(
-        self,
-        printer_id: int,
-        printer_name: str,
-        db: AsyncSession,
-        difference_percent: float | None = None,
-    ):
-        """Handle plate not empty event - objects detected on build plate before print."""
-        providers = await self._get_providers_for_event(db, "on_plate_not_empty", printer_id)
-        if not providers:
-            return
-
-        variables = {
-            "printer": printer_name,
-            "difference_percent": f"{difference_percent:.1f}" if difference_percent else "N/A",
-        }
-
-        title, message = await self._build_message_from_template(db, "plate_not_empty", variables)
-        await self._send_to_providers(
-            providers,
-            title,
-            message,
-            db,
-            "plate_not_empty",
-            printer_id,
-            printer_name,
-            force_immediate=True,
-            variables=variables,
-        )
-
     async def on_filament_low(
         self,
         printer_id: int,

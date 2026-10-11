@@ -8,6 +8,14 @@ import pytest
 from httpx import AsyncClient
 
 
+def _persist_queue_preference(values):
+    """Test setup uses the public queue printer field for waiting jobs."""
+    if values.get("status") == "queued":
+        printer_id = values.pop("printer_id", None)
+        values.setdefault("assigned_printer_id", printer_id)
+        values["printer_id"] = None
+
+
 def _write_queue_3mf(path, *, color: str = "#FF0000") -> None:
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
@@ -117,6 +125,7 @@ class TestPrintQueueAPI:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -834,7 +843,7 @@ class TestPrintQueueAPI:
 
         from backend.app.services.printer_manager import printer_manager
 
-        stale = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+        stale = "Heat soak interrupted by a restart; inspect the printer before retrying"
         item = await queue_item_factory(status="preheating", chamber_heat_soak=True, error_message=stale)
         live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=False)
         monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
@@ -849,13 +858,10 @@ class TestPrintQueueAPI:
         assert item.status == "preheating" and item.error_message == stale
 
     @pytest.mark.parametrize("action", ["cancel", "stop", "edit", "delete"])
-    async def test_preheating_actions_preserve_the_printer_hold(
+    async def test_preheating_actions_preserve_dispatch_safety(
         self, async_client, queue_item_factory, db_session, action
     ):
-        from backend.app.models.printer import Printer
-
         item = await queue_item_factory(status="preheating", chamber_heat_soak=True)
-        printer_id = item.printer_id
         url = f"/api/v1/queue/{item.id}"
         if action == "edit":
             response = await async_client.patch(url, json={"heat_soak_minutes": 45})
@@ -864,15 +870,13 @@ class TestPrintQueueAPI:
         else:
             response = await async_client.post(f"{url}/{action}")
         await db_session.refresh(item)
-        printer = await db_session.get(Printer, printer_id, populate_existing=True)
         if action in ("edit", "delete"):
             assert response.status_code == (400 if action == "edit" else 409), response.text
             assert item.status == "preheating"
         else:
             assert response.status_code == 200, response.text
-            assert item.status == "cancelled"
-            assert printer.heat_soak_shutdown_pending
-            assert printer.heat_soak_shutdown_at
+            assert item.status == "unsuccessful"
+            assert item.physical_outcome is None
 
 
 class TestQueueStartEndpoint:
@@ -960,6 +964,7 @@ class TestQueueStartEndpoint:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1227,6 +1232,7 @@ class TestQueueCancelEndpoint:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1402,7 +1408,7 @@ class TestQueueLibraryFileSupport:
 
         # Create queue item directly
         item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=lib_file.id,
             status="queued",
             position=1,
@@ -1436,7 +1442,7 @@ class TestQueueLibraryFileSupport:
         )
 
         item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=lib_file.id,
             status="queued",
             position=1,
@@ -1540,6 +1546,7 @@ class TestBulkUpdateEndpoint:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1633,7 +1640,7 @@ class TestBulkUpdateEndpoint:
         item1 = await queue_item_factory()
         item2 = await queue_item_factory()
 
-        original_printer_id = item1.printer_id
+        original_printer_id = item1.assigned_printer_id
 
         response = await async_client.patch(
             "/api/v1/queue/bulk",
@@ -1643,9 +1650,10 @@ class TestBulkUpdateEndpoint:
 
         await db_session.refresh(item1)
         await db_session.refresh(item2)
-        assert item1.printer_id == new_printer.id
-        assert item2.printer_id == new_printer.id
-        assert item1.printer_id != original_printer_id
+        assert item1.printer_id is None and item2.printer_id is None
+        assert item1.assigned_printer_id == new_printer.id
+        assert item2.assigned_printer_id == new_printer.id
+        assert item1.assigned_printer_id != original_printer_id
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1770,6 +1778,7 @@ class TestTargetLocationFeature:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1987,6 +1996,7 @@ class TestAbortedStatusNormalisation:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -2005,10 +2015,6 @@ class TestAbortedStatusNormalisation:
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from backend.app.main import on_print_complete
-        from backend.app.services.lifecycle.intake import _completed_job_events, _user_stopped_printers
-
-        _completed_job_events.clear()
-        _user_stopped_printers.clear()
         from backend.app.services.bambu_ftp import DeleteResult
 
         session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -2754,8 +2760,8 @@ class TestReorderEndpoint:
         printer = await printer_factory()
         a1 = await archive_factory()
         a2 = await archive_factory()
-        item1 = PrintQueueItem(printer_id=printer.id, archive_id=a1.id, status="queued", position=1)
-        item2 = PrintQueueItem(printer_id=printer.id, archive_id=a2.id, status="queued", position=2)
+        item1 = PrintQueueItem(assigned_printer_id=printer.id, archive_id=a1.id, status="queued", position=1)
+        item2 = PrintQueueItem(assigned_printer_id=printer.id, archive_id=a2.id, status="queued", position=2)
         db_session.add_all([item1, item2])
         await db_session.commit()
         await db_session.refresh(item1)
@@ -2787,8 +2793,8 @@ class TestReorderEndpoint:
         printer = await printer_factory()
         a1 = await archive_factory()
         a2 = await archive_factory()
-        item1 = PrintQueueItem(printer_id=printer.id, archive_id=a1.id, status="queued", position=1)
-        item2 = PrintQueueItem(printer_id=printer.id, archive_id=a2.id, status="queued", position=2)
+        item1 = PrintQueueItem(assigned_printer_id=printer.id, archive_id=a1.id, status="queued", position=1)
+        item2 = PrintQueueItem(assigned_printer_id=printer.id, archive_id=a2.id, status="queued", position=2)
         db_session.add_all([item1, item2])
         await db_session.commit()
         await db_session.refresh(item1)

@@ -123,6 +123,16 @@ def supports_chamber_heater(model: str | None) -> bool:
     return model.strip().upper() in CHAMBER_HEATER_MODELS
 
 
+AIRDUCT_MODELS = CHAMBER_HEATER_MODELS | frozenset({"P2S", "N7"})
+
+
+def supports_airduct(model: str | None) -> bool:
+    """Check if a printer model has an airduct mode control for heat soak."""
+    if not model:
+        return False
+    return model.strip().upper() in AIRDUCT_MODELS
+
+
 def has_stg_cur_idle_bug(model: str | None) -> bool:
     """Check if a printer model may incorrectly report stg_cur=0 when idle.
 
@@ -406,11 +416,11 @@ class PrinterManager:
 
         try:
             async with async_session() as db:
-                from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
+                from backend.app.models.print_queue import PrintQueueItem, awaiting_plate_clear_clause
 
                 result = await db.execute(
                     select(PrintQueueItem.printer_id, PrintQueueItem.archive_id).where(
-                        PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES),
+                        awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
                         PrintQueueItem.printer_id.is_not(None),
                     )
                 )

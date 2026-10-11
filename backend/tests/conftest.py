@@ -1,6 +1,5 @@
 """Shared test fixtures for Grove Control backend tests."""
 
-import asyncio
 import atexit
 import json
 import logging
@@ -120,24 +119,20 @@ def reset_printer_locks():
     from backend.app.services.lifecycle import engine
 
     engine._printer_locks.clear()
-    engine._holders.clear()
     yield
     engine._printer_locks.clear()
-    engine._holders.clear()
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for each test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    # Dispose the module-level engine so aiosqlite worker threads finish
-    # before the event loop closes, preventing "Event loop is closed" errors.
+@pytest.fixture(scope="session", autouse=True)
+async def cleanup_shared_async_resources():
+    """Release session resources before pytest-asyncio closes its runner."""
+    yield
+    # Stop DB-using background work and dispose the shared engine on the same
+    # loop it used throughout this worker's test session.
+    await cancel_background_tasks()
     from backend.app.core.database import engine
 
-    loop.run_until_complete(engine.dispose())
-    loop.run_until_complete(asyncio.sleep(0.05))
-    loop.close()
+    await engine.dispose()
 
 
 @pytest.fixture
@@ -201,10 +196,6 @@ async def test_engine(test_database_url):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
-    # Allow aiosqlite's background thread to finish processing the close
-    # response before the per-function event loop shuts down, preventing
-    # "RuntimeError: Event loop is closed" in call_soon_threadsafe.
-    await asyncio.sleep(0.1)
 
 
 @pytest.fixture
@@ -251,16 +242,8 @@ async def async_client(test_engine, db_session) -> AsyncGenerator[AsyncClient, N
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             yield client
 
-        # Background tasks may own aiosqlite worker threads. Finish their
-        # cancellation before disposing the engine or closing this test loop.
+        # Cancel request-owned tasks before the function-scoped test engine is disposed.
         await cancel_background_tasks()
-
-        # The app lifespan called init_db() which used the module-level engine
-        # (not the test engine), creating aiosqlite connections. Dispose those
-        # connections so their background threads finish before the event loop closes.
-        from backend.app.core.database import engine as real_engine
-
-        await real_engine.dispose()
 
     app.dependency_overrides.clear()
 
@@ -440,9 +423,6 @@ def smart_plug_factory(db_session):
             "enabled": True,
             "auto_on": True,
             "auto_off": True,
-            "off_delay_mode": "time",
-            "off_delay_minutes": 5,
-            "off_temp_threshold": 70,
             "schedule_enabled": False,
             "power_alert_enabled": False,
         }

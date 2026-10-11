@@ -195,7 +195,9 @@ class QueueVariantSummary(BaseModel):
 
 class PrintQueueItemResponse(BaseModel):
     id: int
-    printer_id: int | None  # None = unassigned
+    printer_id: int | None  # Backwards-compatible effective printer field
+    assigned_printer_id: int | None = None  # Queue preference, present before binding
+    bound_printer_id: int | None = None  # Immutable printer binding after dispatch starts
     target_model: str | None = None  # Target printer model for model-based assignment
     target_location: str | None = None  # Target location filter for model-based assignment
     required_filament_types: list[str] | None = None  # Required filament types for model-based assignment
@@ -245,6 +247,9 @@ class PrintQueueItemResponse(BaseModel):
     preheat_started_at: UTCDatetime = None
     dispatch_needs_resolution: bool = False
     dispatch_unsent: bool = False
+    retry_on_failure: bool = True
+    physical_outcome: str | None = None
+    awaiting_plate_clear: bool = False
     dispatched_at: UTCDatetime
     started_at: UTCDatetime
     completed_at: UTCDatetime

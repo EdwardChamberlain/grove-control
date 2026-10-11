@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.services.lifecycle.dispatching import Dispatcher
 from backend.app.services.print_scheduler import PrintScheduler
 
 
 def _queue_item(*, force_color_match: bool = True):
     return SimpleNamespace(
         id=17,
-        printer_id=3,
+        printer_id=None,
+        assigned_printer_id=3,
         target_model=None,
         target_location=None,
         required_filament_types='["PLA"]',
@@ -47,16 +47,6 @@ def _queue_results(item):
 @pytest.fixture
 def scheduler():
     return PrintScheduler()
-
-
-@pytest.fixture(autouse=True)
-def skip_dispatch_recovery():
-    """These queue-selection tests provide only pending-item query fixtures."""
-    with (
-        patch.object(Dispatcher, "recover", new=AsyncMock()),
-        patch.object(PrintScheduler, "_shutdown_printers", new=AsyncMock(return_value=set())),
-    ):
-        yield
 
 
 def test_strict_colour_mapping_never_falls_back_across_nozzles(scheduler):
@@ -156,6 +146,7 @@ async def test_model_unforced_job_accepts_same_material_without_exact_colour(moc
 async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, scheduler):
     item = _queue_item(force_color_match=False)
     item.printer_id = None
+    item.assigned_printer_id = None
     item.target_model = "P1S"
     item.ams_mapping = "[2]"  # Client supplied a tray that contains ABS on the selected printer.
     items_result, busy_result = _queue_results(item)

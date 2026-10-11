@@ -79,7 +79,7 @@ async def _add_item(ctx, *, printer_id=None, target_model=None):
         item = PrintQueueItem(
             status="queued",
             position=1,
-            printer_id=printer_id,
+            assigned_printer_id=printer_id,
             target_model=target_model,
             library_file_id=lib.id,
             # This suite isolates Home Assistant availability. Grove's

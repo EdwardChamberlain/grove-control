@@ -9,8 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
-from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
-from backend.app.models.printer import Printer
+from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant, physical_holding_clause
 from backend.app.models.settings import Settings, bool_setting
 from backend.app.services.ams_drying import AmsDrying
 from backend.app.services.ams_mapping import AmsMapping
@@ -70,22 +69,16 @@ class PrintScheduler:
             self.workers.cancel(item_id)
         logger.info("Print scheduler stopped")
 
-    async def _shutdown_printers(self, db: AsyncSession) -> set[int]:
-        """Printers unavailable for selection while their heaters are shutting down."""
-        return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
-
     async def check_queue(self) -> bool:
         """Check for prints ready to start and report whether to tick quickly."""
         async with async_session() as db:
-            shutdown_printers = await self._shutdown_printers(db)
-
             # Check if shortest-job-first scheduling is enabled
             sjf_enabled = await self._get_bool_setting(db, "queue_shortest_first")
 
-            order = (PrintQueueItem.printer_id, PrintQueueItem.position)
+            order = (PrintQueueItem.assigned_printer_id, PrintQueueItem.position)
             if sjf_enabled:
                 order = (
-                    PrintQueueItem.printer_id,
+                    PrintQueueItem.assigned_printer_id,
                     PrintQueueItem.target_model,
                     PrintQueueItem.been_jumped.desc(),
                     PrintQueueItem.print_time_seconds.asc().nullslast(),
@@ -97,7 +90,7 @@ class PrintScheduler:
                 .options(
                     selectinload(PrintQueueItem.archive),
                     selectinload(PrintQueueItem.library_file),
-                    selectinload(PrintQueueItem.printer),
+                    selectinload(PrintQueueItem.assigned_printer),
                     selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
                 )
                 .order_by(*order)
@@ -115,12 +108,10 @@ class PrintScheduler:
 
             busy_result = await db.execute(
                 select(PrintQueueItem.printer_id)
-                .where(PrintQueueItem.status.in_(HOLDING_STATUSES))
+                .where(physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome))
                 .where(PrintQueueItem.printer_id.is_not(None))
             )
             busy_printers: set[int] = {pid for (pid,) in busy_result.all() if pid is not None}
-
-            busy_printers.update(shutdown_printers)
 
             # The durable status does not change until the upload completes;
             # reserve each worker's printer in memory for the same interval.
@@ -140,7 +131,7 @@ class PrintScheduler:
             logger.info(
                 "Queue check: found %d pending items: %s",
                 len(items),
-                [(i.id, i.printer_id, i.archive_id, i.library_file_id) for i in items],
+                [(i.id, i.assigned_printer_id, i.archive_id, i.library_file_id) for i in items],
             )
 
             upload_limit = max(
@@ -203,7 +194,7 @@ class PrintScheduler:
                         items_by_id[item_id],
                         printer_id,
                         selection.mappings.get(item_id),
-                        unassigned=items_by_id[item_id].printer_id is None,
+                        unassigned=items_by_id[item_id].assigned_printer_id is None,
                     )
                     for item_id, printer_id in selection.printers.items()
                 }

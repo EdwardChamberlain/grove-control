@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Plug, Power, PowerOff, Loader2, Trash2, Settings2, Thermometer, Clock, Wifi, WifiOff, Edit2, Bell, Calendar, LayoutGrid, ExternalLink, Home, Radio, Eye, Globe } from 'lucide-react';
+import { Plug, Power, PowerOff, Loader2, Trash2, Settings2, Wifi, WifiOff, Edit2, Bell, Calendar, LayoutGrid, ExternalLink, Home, Radio, Eye, Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { SmartPlug, SmartPlugUpdate } from '../api/client';
@@ -37,6 +37,7 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
   });
 
   const linkedPrinter = printers?.find(p => p.id === plug.printer_id);
+  const isScriptPlug = plug.plug_type === 'homeassistant' && !!plug.ha_entity_id?.startsWith('script.');
 
   // Control mutation with optimistic updates
   const controlMutation = useMutation({
@@ -377,109 +378,30 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
                     </label>
                   </div>
 
-                  {/* Auto Off */}
-                  <div className="flex items-center justify-between">
-                    <div>
+                  {/* A script's auto_off option means "run it when this printer
+                      plug is switched off". Print shutdown is selected per job. */}
+                  {isScriptPlug && (
+                    <div className="flex items-center justify-between">
                       <p className="text-sm text-white">{t('smartPlugs.autoOff')}</p>
-                      <p className="text-xs text-bambu-gray">{t('smartPlugs.autoOffDescription')}</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={plug.auto_off}
-                    onChange={(e) => updateMutation.mutate({ auto_off: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bambu-green"></div>
-                </label>
-              </div>
-
-              {/* Auto Off Persistent */}
-              {plug.auto_off && (
-                <div className="flex items-center justify-between pl-4 border-l-2 border-bambu-dark-tertiary">
-                  <div>
-                    <p className="text-sm text-white">{t('smartPlugs.autoOffPersistent')}</p>
-                    <p className="text-xs text-bambu-gray">{t('smartPlugs.autoOffPersistentDescription')}</p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={plug.auto_off_persistent}
-                      onChange={(e) => updateMutation.mutate({ auto_off_persistent: e.target.checked })}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bambu-green"></div>
-                  </label>
-                </div>
-              )}
-
-              {/* Delay Mode */}
-              {plug.auto_off && (
-                <div className="space-y-3 pl-4 border-l-2 border-bambu-dark-tertiary">
-                  <div>
-                    <p className="text-sm text-white mb-2">{t('smartPlugs.turnOffDelayMode')}</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => updateMutation.mutate({ off_delay_mode: 'time' })}
-                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-                          plug.off_delay_mode === 'time'
-                            ? 'bg-bambu-green text-white'
-                            : 'bg-bambu-dark text-bambu-gray hover:text-white'
-                        }`}
-                      >
-                        <Clock className="w-4 h-4" />
-                        {t('smartPlugs.time')}
-                      </button>
-                      <button
-                        onClick={() => updateMutation.mutate({ off_delay_mode: 'temperature' })}
-                        className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-                          plug.off_delay_mode === 'temperature'
-                            ? 'bg-bambu-green text-white'
-                            : 'bg-bambu-dark text-bambu-gray hover:text-white'
-                        }`}
-                      >
-                        <Thermometer className="w-4 h-4" />
-                        {t('smartPlugs.temp')}
-                      </button>
-                    </div>
-                  </div>
-
-                  {plug.off_delay_mode === 'time' ? (
-                    <div>
-                      <label className="block text-xs text-bambu-gray mb-1">{t('smartPlugs.delayMinutes')}</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="60"
-                        value={plug.off_delay_minutes}
-                        onChange={(e) => updateMutation.mutate({ off_delay_minutes: parseInt(e.target.value) || 5 })}
-                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
-                      />
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block text-xs text-bambu-gray mb-1">{t('smartPlugs.tempThreshold')}</label>
-                      <input
-                        type="number"
-                        min="30"
-                        max="100"
-                        value={plug.off_temp_threshold}
-                        onChange={(e) => updateMutation.mutate({ off_temp_threshold: parseInt(e.target.value) || 70 })}
-                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
-                      />
-                      <p className="text-xs text-bambu-gray mt-1">{t('smartPlugs.tempThresholdDescription')}</p>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={plug.auto_off}
+                          onChange={(e) => updateMutation.mutate({ auto_off: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bambu-green"></div>
+                      </label>
                     </div>
                   )}
-                </div>
-              )}
 
               {/* Auto Off After Drying (#1349) — independent of the
-                  print-finish auto-off above. Uses its own delay because
-                  the AMS chamber is hot post-cycle and users often want
+                  per-job print auto-off. Uses its own delay because the
+                  AMS chamber stays hot post-cycle and users often want
                   more cooldown than the print-finish default. Fires when
                   any AMS attached to the linked printer finishes a dry
                   cycle. */}
-              <div className="flex items-center justify-between">
+              {!isScriptPlug && <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-white">{t('smartPlugs.autoOffAfterDrying')}</p>
                   <p className="text-xs text-bambu-gray">{t('smartPlugs.autoOffAfterDryingDescription')}</p>
@@ -493,9 +415,9 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
                   />
                   <div className="w-9 h-5 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bambu-green"></div>
                 </label>
-              </div>
+              </div>}
 
-              {plug.auto_off_after_drying && (
+              {!isScriptPlug && plug.auto_off_after_drying && (
                 <div className="pl-4 border-l-2 border-bambu-dark-tertiary">
                   <label className="block text-xs text-bambu-gray mb-1">{t('smartPlugs.delayAfterDryingMinutes')}</label>
                   <input

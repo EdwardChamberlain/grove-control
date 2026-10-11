@@ -1941,7 +1941,7 @@ class TestRequestTopicAmsMapping:
         constructed BambuMQTTClient has `_previous_gcode_state = None`. The first
         push_status the printer sends reports `gcode_state: RUNNING`. Before the
         fix, the (None → RUNNING) transition satisfied is_new_print's guard and
-        fired on_print_start, which then ran plate detection (objects on plate →
+        fired on_print_start, which previously ran plate detection (objects on plate →
         paused the live print) AND re-archived the file (duplicate archive).
 
         With the fix in place the on_print_start callback must NOT be called for

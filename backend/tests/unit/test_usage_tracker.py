@@ -54,6 +54,7 @@ def _make_archive(archive_id=1, file_path="archives/1/test.3mf", extra_data=None
     archive.id = archive_id
     archive.file_path = file_path
     archive.extra_data = extra_data
+    archive.dispatched_queue_item_id = None
     return archive
 
 
@@ -817,8 +818,8 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=10, ams_id=2, tray_id=1)
         archive = _make_archive(archive_id=50)
 
-        # db: archive, assignment, spool (no queue lookup when ams_mapping provided)
-        db = _mock_db_sequential([archive, assignment, spool])
+        # db: archive, no owning job, assignment, spool
+        db = _mock_db_sequential([archive, None, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -1127,9 +1128,8 @@ class TestTrayChangeSplit:
         assign_b = _make_assignment(spool_id=20, ams_id=0, tray_id=1)
         archive = _make_archive(archive_id=200)
 
-        # No queue_item placeholder: passing ams_mapping bypasses the queue lookup
-        # at usage_tracker.py:816 (`if not slot_to_tray and archive_id`).
-        db = _mock_db_sequential([archive, assign_a, spool_a, assign_b, spool_b])
+        # The legacy Archive has no owning job; mapping still comes from the print command.
+        db = _mock_db_sequential([archive, None, assign_a, spool_a, assign_b, spool_b])
 
         # Slicer mapping says slot 1 -> tray 0; printer actually swapped to tray 1 at layer 30
         printer_manager = MagicMock()
@@ -1852,8 +1852,8 @@ class TestMqttMappingIntegration:
         assignment = _make_assignment(spool_id=1, ams_id=0, tray_id=2)
         archive = _make_archive(archive_id=10)
 
-        # db: archive, assignment, spool (no queue lookup when ams_mapping provided)
-        db = _mock_db_sequential([archive, assignment, spool])
+        # db: archive, no owning job, assignment, spool
+        db = _mock_db_sequential([archive, None, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(

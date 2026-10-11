@@ -75,6 +75,7 @@ def _make_archive(archive_id=1, file_path=None):
     archive = MagicMock()
     archive.id = archive_id
     archive.file_path = file_path
+    archive.dispatched_queue_item_id = None
     # Explicit numeric default so the #1344 top-up logic (archive_grams -
     # tracked_grams) doesn't compare a MagicMock to a float. Tests that
     # exercise the top-up path overwrite this with a real number.
@@ -140,8 +141,10 @@ def _mock_db_sequential(responses):
         result = MagicMock()
         if idx < len(responses):
             result.scalar_one_or_none.return_value = responses[idx]
+            result.scalars.return_value.first.return_value = responses[idx]
         else:
             result.scalar_one_or_none.return_value = None
+            result.scalars.return_value.first.return_value = None
         return result
 
     db.execute = mock_execute
@@ -455,7 +458,7 @@ class TestCostCalculation:
 
         # db returns: archive, assignment1, spool1, assignment2, spool2
         # ams_mapping is provided, so no queue item lookup is performed
-        db = _mock_db_sequential([archive, assignment1, spool1, assignment2, spool2])
+        db = _mock_db_sequential([archive, None, assignment1, spool1, assignment2, spool2])
 
         # Two filaments used
         filament_usage = [

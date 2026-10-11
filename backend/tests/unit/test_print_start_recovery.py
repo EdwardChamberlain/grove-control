@@ -12,8 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.tests.unit.test_job_identity import add_linked_job, sessions  # noqa: F401
+
+
+async def _wait_for_archive_repairs(intake):
+    """Wait for repairs scheduled by the current lifecycle tick to finish."""
+    while tasks := tuple(intake.print_memory.archive_repairs_in_flight.values()):
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @pytest.mark.parametrize("recovering", [False, True])
@@ -46,7 +52,6 @@ async def test_paced_reconciliation_repairs_archive_without_repeating_start_effe
     monkeypatch.setattr(main.printer_manager, "get_all_statuses", lambda: {1: client.state})
     monkeypatch.setattr(main.printer_manager, "get_client", lambda _id: client)
     monkeypatch.setattr(main.printer_manager, "get_printer", lambda _id: None)
-    monkeypatch.setattr(intake, "_job_event_locks", {})
     monkeypatch.setattr(main, "_printer_last_connected", {1: True})
     monkeypatch.setattr(main, "_last_status_broadcast", {})
     monkeypatch.setattr(print_effects, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
@@ -112,20 +117,22 @@ async def test_paced_reconciliation_repairs_archive_without_repeating_start_effe
     assert await push("RUNNING") == []
     assert attempts == [1]
     await intake.reconcile_print_archives()
+    await _wait_for_archive_repairs(intake)
     await intake.reconcile_print_archives()
+    await _wait_for_archive_repairs(intake)
     assert attempts == ([1, 1] if failure == "write" else [1])
     async with sessions() as db:
         job = await db.scalar(select(PrintQueueItem))
         archive = await db.get(PrintArchive, job.archive_id)
         assert archive is not None and archive.dispatched_queue_item_id == job.id
         assert archive.subtask_id == "external-run"
-        assert intake._started_job_effects[1] == job.id
+        assert intake.print_memory.started_job_effects[1] == job.id
         assert len(list(await db.scalars(select(PrintArchive)))) == 1
     for effect in (started, notified, powered_on, usage):
         assert effect.await_count == int(not recovering)
 
 
-@pytest.mark.parametrize("guard", ["disconnected", "uninitialized", "foreign", "not_started", "busy", "superseded"])
+@pytest.mark.parametrize("guard", ["disconnected", "uninitialized", "foreign", "not_started", "superseded"])
 async def test_archive_reconciliation_requires_fresh_matching_started_job(sessions, monkeypatch, guard):
     from datetime import datetime, timezone
 
@@ -140,8 +147,6 @@ async def test_archive_reconciliation_requires_fresh_matching_started_job(sessio
         job = await db.get(PrintQueueItem, job_id)
         job.started_at = None if guard == "not_started" else datetime.now(timezone.utc)
         await db.commit()
-    lock = asyncio.Lock()
-    monkeypatch.setattr(intake, "_job_event_locks", {1: lock})
     monkeypatch.setattr(intake, "async_session", sessions)
     monkeypatch.setattr(print_effects, "async_session", sessions)
     monkeypatch.setattr(main.printer_manager, "get_all_statuses", lambda: {1: live})
@@ -156,14 +161,8 @@ async def test_archive_reconciliation_requires_fresh_matching_started_job(sessio
         live.submission_id = "another-run"
     elif guard == "superseded":
         monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: None)
-    elif guard == "busy":
-        await lock.acquire()
-    try:
-        await intake.reconcile_print_archives()
-        repair.assert_not_awaited()
-    finally:
-        if lock.locked():
-            lock.release()
+    await intake.reconcile_print_archives()
+    repair.assert_not_awaited()
 
 
 @pytest.mark.parametrize("archive_kind", ["linked", "unlinked", "downloaded"])
@@ -226,8 +225,10 @@ async def test_late_archive_repair_preserves_terminal_facts_without_runtime_star
     job_id, archive_id = await add_linked_job(sessions, "run")
     async with sessions() as db:
         job = await db.get(PrintQueueItem, job_id)
-        await transition_queue_item(db, job, "printing", "cancelled")
-        await transition_queue_item(db, job, "cancelled", "unsuccessful", action="clear_plate")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "printing", "cancelled")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "cancelled", "unsuccessful", action="clear_plate")
         job.archive_id = None
         job.started_at = datetime.now(timezone.utc)
         job.physical_outcome = "aborted"
@@ -252,6 +253,7 @@ async def test_late_archive_repair_preserves_terminal_facts_without_runtime_star
     monkeypatch.setattr(print_effects, "_load_objects_from_archive", objects)
     monkeypatch.setattr(main.ws_manager, "send_archive_updated", AsyncMock())
     await intake.reconcile_print_archives()
+    await _wait_for_archive_repairs(intake)
     new_start.assert_not_awaited()
     layer_video.assert_not_called()
     objects.assert_not_called()
@@ -313,10 +315,13 @@ async def test_failed_archive_write_reuses_download_in_paced_repair(sessions, mo
     copied = AsyncMock(side_effect=download)
     monkeypatch.setattr(print_effects, "download_file_async", copied)
     await intake.reconcile_print_archives()
+    await _wait_for_archive_repairs(intake)
     async with sessions() as db:
         assert (await db.get(PrintQueueItem, job_id)).archive_id is None
     await intake.reconcile_print_archives()
+    await _wait_for_archive_repairs(intake)
     await intake.reconcile_print_archives()
+    await _wait_for_archive_repairs(intake)
     copied.assert_awaited_once()
     assert commits == [1, 1]
     async with sessions() as db:

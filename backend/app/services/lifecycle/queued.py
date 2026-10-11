@@ -12,13 +12,14 @@ durable; nothing about a waiting job lives in memory.
 import asyncio
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
 from backend.app.core.config import settings
@@ -26,11 +27,16 @@ from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
+from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant, physical_holding_clause
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import PrintQueueItemUpdate
 from backend.app.services.filament_requirements import build_queue_filament_overrides, extract_filament_requirements
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.engine import (
+    QueueTransitionConflict,
+    lock_queue_item,
+    transition_queue_item,
+    writer,
+)
 from backend.app.services.lifecycle.preheating import abort_heat_soak
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import printer_manager
@@ -42,6 +48,53 @@ from backend.app.services.printer_selection import (
 
 logger = logging.getLogger(__name__)
 _EDITABLE_FIELDS = tuple(name for name in PrintQueueItemUpdate.model_fields if name in PrintQueueItem.__table__.columns)
+
+# A retry is a new queue job. Preserve deliberate settings and stable metadata;
+# source rows and execution state are rebuilt below.
+_RETRY_JOB_FIELDS = (
+    "assigned_printer_id",
+    "target_model",
+    "target_location",
+    "required_filament_types",
+    "source_filename",
+    "project_id",
+    "scheduled_time",
+    "wait_for_drying_complete",
+    "chamber_heat_soak",
+    "heat_soak_temperature",
+    "heat_soak_minutes",
+    "auto_off_after",
+    "ams_mapping",
+    "filament_overrides",
+    "force_color_match",
+    "plate_id",
+    "print_time_seconds",
+    "gcode_injection",
+    "nozzle_mapping",
+    "cleanup_library_after_dispatch",
+    "bed_levelling",
+    "flow_cali",
+    "vibration_cali",
+    "layer_inspect",
+    "timelapse",
+    "use_ams",
+    "nozzle_offset_cali",
+    "skip_filament_check",
+    "created_by_id",
+)
+_RETRY_VARIANT_FIELDS = (
+    "position",
+    "library_file_id",
+    "target_model",
+    "plate_id",
+    "ams_mapping",
+    "nozzle_mapping",
+    "filament_overrides",
+    "required_filament_types",
+    "print_time_seconds",
+)
+
+PRINTER_DELETED_WAITING_REASON = "Assigned printer was deleted; choose another printer to resume this job"
 
 
 def filament_contract(
@@ -77,20 +130,110 @@ async def create_job(
     """
     if not jobs:
         return []
+    prepared = []
+    for job in jobs:
+        item_values = dict(job)
+        # Queue endpoints historically called this preference ``printer_id``.
+        # The row column now records only the immutable dispatch binding.
+        assigned_printer_id = item_values.pop("assigned_printer_id", None)
+        if "printer_id" in item_values:
+            legacy_printer_id = item_values.pop("printer_id")
+            if assigned_printer_id is None:
+                assigned_printer_id = legacy_printer_id
+        item_values["printer_id"] = None
+        item_values["assigned_printer_id"] = assigned_printer_id
+        item_values.setdefault("retry_on_failure", True)
+        prepared.append(item_values)
     values = {}
     if variants:
         # The scheduler orders a job before its printer is known, by its shortest candidate.
         estimates = [variant["print_time_seconds"] for variant in variants if variant.get("print_time_seconds")]
         values["print_time_seconds"] = min(estimates) if estimates else None
-    models = {model for model in (jobs[0].get("target_model"), *(v["target_model"] for v in variants)) if model}
-    first = await _place(db, jobs[0].get("printer_id"), models, len(jobs), at)
+    models = {model for model in (prepared[0].get("target_model"), *(v["target_model"] for v in variants)) if model}
+    first = await _place(db, prepared[0].get("assigned_printer_id"), models, len(jobs), at)
     created = []
-    for offset, job in enumerate(jobs):
+    for offset, job in enumerate(prepared):
         created.append(PrintQueueItem(**{**job, **values}, status="queued", position=first + offset))
         created[-1].variants.extend(PrintQueueVariant(**variant) for variant in variants)
         db.add(created[-1])
     await db.flush()
     return created
+
+
+async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueueItem:
+    """Create one history-free replacement at the front of its queue.
+
+    Automatic and manual retries share the same reset/copy rules. ``None``
+    means none of the snapshotted sources is still available; automatic retry
+    then leaves the failed job for review instead of creating an unusable row.
+    """
+    from backend.app.utils.safe_path import safe_join_under
+
+    def source_available(source) -> bool:
+        if source is None or source.deleted_at is not None:
+            return False
+        path = Path(source.file_path)
+        path = path if path.is_absolute() else safe_join_under(settings.base_dir, source.file_path, http=False)
+        return path.is_file()
+
+    variants = list(
+        (
+            await db.scalars(
+                select(PrintQueueVariant)
+                .where(PrintQueueVariant.queue_item_id == item.id)
+                .options(selectinload(PrintQueueVariant.library_file))
+                .order_by(PrintQueueVariant.position, PrintQueueVariant.id)
+            )
+        ).all()
+    )
+    variants = [variant for variant in variants if source_available(variant.library_file)]
+    source = await db.get(LibraryFile, item.library_file_id) if item.library_file_id is not None else None
+    archive = await db.get(PrintArchive, item.archive_id) if item.archive_id is not None else None
+    if not variants and not source_available(source) and not source_available(archive):
+        return None
+
+    values = {field: getattr(item, field) for field in _RETRY_JOB_FIELDS}
+    # Execution state is deliberately absent from the copy list, so the new
+    # row receives model defaults instead of a growing collection of resets.
+    values.update(retry_on_failure=False, manual_start=False)
+    variant_values = [{field: getattr(variant, field) for field in _RETRY_VARIANT_FIELDS} for variant in variants]
+    if values["assigned_printer_id"] is None and item.printer_id is not None and not item.target_model and not variants:
+        # Directly adopted prints have no queue preference. Give their fresh
+        # retry the printer that ran the source, while leaving its execution
+        # binding unset so the scheduler still starts it as a new job.
+        values["assigned_printer_id"] = item.printer_id
+    if variant_values:
+        # Variants are the retry's complete source set; the old selected file
+        # or attempt Archive must not leak into the replacement job.
+        values.update(
+            library_file_id=None,
+            archive_id=None,
+            target_model=variant_values[0]["target_model"],
+            cleanup_library_after_dispatch=False,
+        )
+        for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
+            values[field] = variant_values[0].get(field)
+    elif source_available(source):
+        # A live library row is the preferred single source when no variants
+        # remain. Keep its cleanup behavior for queue-owned temporary uploads.
+        values["library_file_id"] = source.id
+        values["archive_id"] = None
+    else:
+        # The Archive copy is the final fallback if the original library file
+        # disappeared. It is a stable source, not a disposable queue upload.
+        values["library_file_id"] = None
+        values["archive_id"] = archive.id
+        values["cleanup_library_after_dispatch"] = False
+
+    if values["assigned_printer_id"] is None:
+        # This job will be matched to a printer again. Tray indices belong to
+        # that printer, so don't carry the previous dispatch's mapping into
+        # the fresh job (or let a candidate variant restore it).
+        values["ams_mapping"] = None
+        for variant in variant_values:
+            variant["ams_mapping"] = None
+    created = await create_job(db, [values], at="top", variants=variant_values)
+    return created[0]
 
 
 async def _place(
@@ -100,7 +243,11 @@ async def _place(
     if db.get_bind().dialect.name == "postgresql":
         # SQLite serializes writes; an empty queue has no rows for PostgreSQL to lock.
         await db.execute(text("SELECT pg_advisory_xact_lock(1625, :k)"), {"k": printer_id or 0})
-    printer = PrintQueueItem.printer_id.is_(None) if printer_id is None else PrintQueueItem.printer_id == printer_id
+    printer = (
+        PrintQueueItem.assigned_printer_id.is_(None)
+        if printer_id is None
+        else PrintQueueItem.assigned_printer_id == printer_id
+    )
     queue = (PrintQueueItem.status == "queued", printer)
     if at == "top":
         if models:
@@ -130,7 +277,8 @@ class _DispatchBinding:
 
     @classmethod
     def for_item(cls, item: PrintQueueItem, printer_id: int, ams_mapping: str | None, *, unassigned: bool):
-        selected = tuple((name, getattr(item, name)) for name in _EDITABLE_FIELDS if hasattr(item, name))
+        fields = (*_EDITABLE_FIELDS, "assigned_printer_id")
+        selected = tuple((name, getattr(item, name)) for name in fields if hasattr(item, name))
         return cls(printer_id, ams_mapping, unassigned, selected)
 
     def values(self) -> dict[str, int | str | None]:
@@ -244,18 +392,36 @@ class Workers:
             reserved.add(binding.printer_id)
             task = spawn_background_task(self._work(item_id, binding), name=f"queue-upload-{item_id}")
             self.inflight[item_id] = (task, binding.printer_id)
-            task.add_done_callback(lambda _task, item_id=item_id: self.inflight.pop(item_id, None))
+            task.add_done_callback(lambda done, item_id=item_id: self._forget(item_id, done))
 
-    def adopt(self, item_id: int, printer_id: int, work) -> None:
-        """Track a worker started outside the queue (a soak's dispatch), so Stop cancels it like any other."""
-        task = spawn_background_task(work, name=f"heat-soak-dispatch-{item_id}")
+    def track_io(self, item_id: int, printer_id: int, work: Callable[[], Awaitable], *, name: str) -> bool:
+        """Track one persisted stage's currently running I/O for Stop and recovery."""
+        current = self.inflight.get(item_id)
+        task = asyncio.current_task()
+        if current and not current[0].done() and current[0] is not task:
+            return False
+        task = spawn_background_task(work(), name=name)
         self.inflight[item_id] = (task, printer_id)
-        task.add_done_callback(lambda _task: self.inflight.pop(item_id, None))
+        task.add_done_callback(lambda done: self._forget(item_id, done))
+        return True
+
+    def _forget(self, item_id: int, done: asyncio.Task) -> None:
+        current = self.inflight.get(item_id)
+        if current and current[0] is done:
+            self.inflight.pop(item_id, None)
 
     def cancel(self, item_id: int) -> bool:
         """Cancel a worker after its job has been cancelled or deleted."""
         task = self.inflight.get(item_id, (None,))[0]
         return bool(task and not task.done() and task.cancel())
+
+    async def cancel_and_wait(self, item_id: int) -> None:
+        """Drain an active upload before its cleanup effect can remove the remote file."""
+        task = self.inflight.get(item_id, (None,))[0]
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     async def _work(self, item_id: int, binding: _DispatchBinding) -> None:
         """Leave the queue in its own session; the hold itself checks the job is unchanged since selection."""
@@ -284,6 +450,13 @@ class Workers:
         state's hold writes them. A disconnected or held printer is simply not
         available yet.
         """
+        if binding is None and item.printer_id is None and item.assigned_printer_id is not None:
+            # A fixed printer preference is itself the selection for callers
+            # that enter this worker directly (for example, preheating handoff
+            # and focused lifecycle tests). It remains unbound until the next
+            # state's conditional hold commits.
+            binding = _DispatchBinding.for_item(item, item.assigned_printer_id, item.ams_mapping, unassigned=False)
+        original_mapping = item.ams_mapping
         if binding is not None:
             _bind_in_memory(item, binding.printer_id, binding.ams_mapping)
         printer = await db.get(Printer, item.printer_id)
@@ -291,7 +464,10 @@ class Workers:
             problem = "Printer not connected", False
         elif printer and await db.scalar(
             select(PrintQueueItem.id)
-            .where(PrintQueueItem.printer_id == item.printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+            .where(
+                PrintQueueItem.printer_id == item.printer_id,
+                physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
+            )
             .where(PrintQueueItem.id != item.id)
             .limit(1)
         ):
@@ -299,6 +475,8 @@ class Workers:
         else:
             problem = await blocker(db, item, printer)
         if problem:
+            if binding is not None:
+                _bind_in_memory(item, None, original_mapping)
             await stay(db, item, problem[0], park=problem[1])
         elif getattr(item, "chamber_heat_soak", False) is not True:
             await self._dispatcher.enter(db, item, "queued", binding)
@@ -310,13 +488,25 @@ class Workers:
 async def _settle(db: AsyncSession, item_id: int) -> None:
     """After an unexpected worker error, park a job still queued, or end a soak whose start failed."""
     try:
-        item = await lock_queue_item(db, item_id)
-        if item and item.status == "queued":
-            await stay(db, item, "Dispatch preparation failed; check the logs, then start it again", park=True)
-        elif item and item.status == "preheating":
-            await abort_heat_soak(db, item, "Heat soak failed to start; inspect the printer before retrying")
-        else:
-            await db.rollback()
+        snapshot = await db.get(PrintQueueItem, item_id)
+        printer_id = snapshot.printer_id if snapshot is not None else None
+        await db.rollback()
+        if printer_id is None:
+            async with writer(None):
+                item = await lock_queue_item(db, item_id)
+                if item and item.status == "queued":
+                    await stay(db, item, "Dispatch preparation failed; check the logs, then start it again", park=True)
+                else:
+                    await db.rollback()
+            return
+        async with writer(printer_id):
+            item = await lock_queue_item(db, item_id)
+            if item and item.status == "queued":
+                await stay(db, item, "Dispatch preparation failed; check the logs, then start it again", park=True)
+            elif item and item.status == "preheating":
+                await abort_heat_soak(db, item, "Heat soak failed to start; inspect the printer before retrying")
+            else:
+                await db.rollback()
     except Exception:
         await db.rollback()
         logger.exception("Could not settle queue item %s after an exit worker failure", item_id)

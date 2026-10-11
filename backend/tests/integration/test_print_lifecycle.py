@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from backend.app.services.lifecycle.engine import writer
+
 
 class TestPrintStartLogic:
     """Test print start callback logic without database integration."""
@@ -81,8 +83,6 @@ class TestPlateClearGate:
         db_session.add(item)
         await db_session.commit()
         sessions = async_sessionmaker(test_engine, expire_on_commit=False)
-        intake._completed_job_events.clear()
-        intake._user_stopped_printers.clear()
         manager = MagicMock()
         manager.get_status.return_value = None
         manager.get_printer.return_value = None
@@ -215,7 +215,6 @@ class TestPlateClearGate:
             # cancel_job commits `cancelled` before the printer reports the stop,
             # so this also holds after a restart loses the in-memory stop flag.
             await cancel_job(db_session, completion.item)
-            intake._user_stopped_printers.clear()
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": printer_outcome})
         await db_session.refresh(completion.item)
         assert completion.item.status == job_status
@@ -266,7 +265,10 @@ class TestPlateClearGate:
     async def test_paused_job_completes_through_the_same_plate_clear_path(self, outcome, completion, db_session):
         from backend.app.services.lifecycle.engine import transition_queue_item
 
-        await transition_queue_item(db_session, completion.item, "printing", "paused")
+        async with writer(
+            getattr(completion.item, "printer_id", None) or getattr(completion.item, "assigned_printer_id", None)
+        ):
+            await transition_queue_item(db_session, completion.item, "printing", "paused")
         await db_session.commit()
         await completion.complete(completion.printer.id, {"submission_id": "123", "status": outcome})
         await db_session.refresh(completion.item)
@@ -287,7 +289,10 @@ class TestPlateClearGate:
         from backend.app.services.lifecycle import intake
         from backend.app.services.lifecycle.engine import transition_queue_item
 
-        await transition_queue_item(db_session, completion.item, "printing", "failed")
+        async with writer(
+            getattr(completion.item, "printer_id", None) or getattr(completion.item, "assigned_printer_id", None)
+        ):
+            await transition_queue_item(db_session, completion.item, "printing", "failed")
         await db_session.commit()
         client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
         client.state.connected = True

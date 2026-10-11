@@ -128,7 +128,7 @@ async def test_different_printers_do_not_coalesce(patch_capture):
 async def test_coalescing_is_not_caching(patch_capture):
     """Sequential callers each capture fresh.
 
-    Deliberate: plate detection and the finish-photo path decide things about a
+    Deliberate: the finish-photo path decides things about a
     running print from these frames, and #1397 was a finish photo a few seconds
     stale showing the bed already lowered.
     """
@@ -203,7 +203,7 @@ async def test_two_consecutive_failures_give_up(patch_capture):
 async def test_follower_timeout_does_not_sabotage_the_capture(patch_capture):
     """A follower giving up leaves the capture running for everyone else.
 
-    The call sites disagree about the timeout (10s plate detection, 20s Obico),
+    The remaining call sites disagree about the timeout (20s Obico),
     so a follower must be able to abandon a join without cancelling a capture
     other callers are still waiting on.
     """

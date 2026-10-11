@@ -76,14 +76,15 @@ def _builds_status_update_of_queue_items(call: ast.Call, targets: set[str], upda
 def _status_updates(path: Path) -> list[int]:
     tree = ast.parse(path.read_text(), filename=str(path))
     targets, updates = _queue_targets(tree), _update_functions(tree)
+
+    def updates_status(sql: str) -> bool:
+        statement = re.search(r"\bUPDATE\s+print_queue\s+SET\s+(.*?)(?:\bWHERE\b|$)", sql, re.I | re.S)
+        return bool(statement and re.search(r"(?:^|,)\s*status\s*=", statement.group(1), re.I))
+
     return [
         node.lineno
         for node in ast.walk(tree)
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and re.search(r"\bUPDATE\s+print_queue\s+SET\s+[^;]*?\bstatus\s*=", node.value, re.I | re.S)
-        )
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str) and updates_status(node.value))
         or (isinstance(node, ast.Call) and _builds_status_update_of_queue_items(node, targets, updates))
     ]
 

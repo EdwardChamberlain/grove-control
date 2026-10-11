@@ -9,7 +9,7 @@ from backend.tests.scenarios.test_print import printing_job
 
 
 def plug_offs(app, printer) -> list:
-    return [e for e in app.plug_events if e.event == "schedule_off_after_queue_job" and printer.printer_id in e.args]
+    return [e for e in app.plug_events if e.event == "turn_off_after_queue_job" and printer.printer_id in e.args]
 
 
 async def test_auto_off_is_requested_once_after_the_job(app):
@@ -21,22 +21,22 @@ async def test_auto_off_is_requested_once_after_the_job(app):
     assert len(plug_offs(app, printer)) == 1
 
 
-async def test_auto_off_is_requested_once_after_a_failed_job(app):
+async def test_auto_off_is_not_requested_after_a_failed_job(app):
     printer, job_id = await printing_job(app, auto_off_after=True)
 
     printer.fail()
     await app.run()
 
-    assert len(plug_offs(app, printer)) == 1
+    assert plug_offs(app, printer) == []
 
 
-async def test_auto_off_is_requested_once_after_stop(app):
+async def test_auto_off_is_not_requested_after_stop(app):
     printer, job_id = await printing_job(app, auto_off_after=True)
 
     await app.action(job_id, "stop")
     await app.run()
 
-    assert len(plug_offs(app, printer)) == 1
+    assert plug_offs(app, printer) == []
 
 
 async def test_no_auto_off_without_the_option(app):
@@ -68,7 +68,17 @@ async def test_failure_notice_for_a_failed_upload(app):
 
     await app.run()
 
-    assert len(app.notified("on_queue_job_failed")) == 1
+    # The original job creates one fresh retry; both failed attempts notify,
+    # while the retry's flag prevents an endless chain.
+    assert len(app.notified("on_queue_job_failed")) == 2
+    from sqlalchemy import select
+
+    from backend.app.models.print_queue import PrintQueueItem
+
+    async with app.session() as db:
+        jobs = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
+    assert len(jobs) == 2
+    assert sorted(job.retry_on_failure for job in jobs) == [False, True]
 
 
 async def test_archive_is_repaired_once_the_file_appears(app):
@@ -102,14 +112,18 @@ async def test_an_ending_during_the_start_download_still_records_the_archive(
     running = app.spawn(app.run())
     await app.until(lambda: printer.downloading)
 
-    getattr(printer, ending)()
-    if cleared_first:  # The loop records the outcome, and the person clears the plate, before the download ends.
-        await app.tick(30)
-        await app.until(lambda: _ended(app, printer, status))
-        [job] = await app.jobs(printer)
-        assert (await app.action(job.id, "clear-plate")).status_code == 200
-    printer.download_gate.set()
-    await running
+    try:
+        getattr(printer, ending)()
+        if cleared_first:  # The loop records the outcome, and the person clears the plate, before the download ends.
+            await app.tick(30)
+            await app.until(lambda: _ended(app, printer, status))
+            [job] = await app.jobs(printer)
+            assert (await app.action(job.id, "clear-plate")).status_code == 200
+    finally:
+        # Always let the background start effect finish if an assertion above
+        # fails, so harness teardown does not hang on the deliberately gated FTP.
+        printer.download_gate.set()
+    await asyncio.wait_for(running, timeout=5)
     await app.run()
 
     [job] = await app.jobs(printer)

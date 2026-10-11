@@ -1,4 +1,4 @@
-"""Retry keeps the job's candidate snapshots and respects priority permissions."""
+"""Retry keeps candidate snapshots, rebinds printer-specific mapping, and respects priority permissions."""
 
 import pytest
 from sqlalchemy import func, select
@@ -21,6 +21,10 @@ async def test_retry_clears_legacy_manual_start_after_heat_soak_abort(
         chamber_heat_soak=True,
         heat_soak_minutes=10,
         manual_start=True,
+        auto_off_after=True,
+        wait_for_drying_complete=True,
+        bed_levelling="off",
+        plate_id=2,
     )
     db_session.add(old)
     await db_session.commit()
@@ -30,6 +34,8 @@ async def test_retry_clears_legacy_manual_start_after_heat_soak_abort(
     assert retry["manual_start"] is False
     assert retry["status"] == "queued"
     assert retry["chamber_heat_soak"] is True and retry["heat_soak_minutes"] == 10
+    assert retry["auto_off_after"] is True and retry["wait_for_drying_complete"] is True
+    assert retry["bed_levelling"] == "off" and retry["plate_id"] == 2
     assert retry["id"] != old.id
     await db_session.refresh(old)
     assert old.status == "failed" and old.manual_start is True
@@ -50,7 +56,7 @@ async def _source(db, path, model):
 
 
 @pytest.mark.parametrize("missing", [None, "selected", "alternative"])
-async def test_retry_preserves_available_candidate_snapshots(
+async def test_retry_preserves_candidate_snapshots_but_resets_printer_mapping(
     async_client, db_session, printer_factory, tmp_path, monkeypatch, missing
 ):
     monkeypatch.setattr(settings, "base_dir", tmp_path)
@@ -119,15 +125,16 @@ async def test_retry_preserves_available_candidate_snapshots(
             "target_model",
             "position",
             "plate_id",
-            "ams_mapping",
             "nozzle_mapping",
             "filament_overrides",
             "required_filament_types",
             "print_time_seconds",
         ):
             assert getattr(candidate, field) == getattr(original, field)
+        assert candidate.ams_mapping is None
         assert candidate.attempt_count == 0 and candidate.id != original.id
     assert body["archive_id"] is None and body["library_file_id"] is None and body["printer_id"] is None
+    assert body["ams_mapping"] is None
     assert body["target_model"] == originals[0].target_model
     assert body["chamber_heat_soak"] is True and body["force_color_match"] is False
     assert body["position"] < (-20 if missing == "alternative" else -30)
@@ -199,7 +206,7 @@ async def test_retry_requires_insert_top_permission(
     printer = await printer_factory()
     source = await _source(db_session, tmp_path / "source.3mf", "X1C")
     old = PrintQueueItem(printer_id=printer.id, library_file_id=source.id, status="failed", created_by_id=owner_id)
-    db_session.add_all([old, PrintQueueItem(printer_id=printer.id, status="queued", position=10)])
+    db_session.add_all([old, PrintQueueItem(assigned_printer_id=printer.id, status="queued", position=10)])
     await db_session.commit()
     if not can_insert_top:
         admission = await async_client.post(

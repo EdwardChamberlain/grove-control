@@ -71,6 +71,7 @@ const mockQueueItems = [
     archive_id: 3,
     position: 3,
     status: 'finished',
+    awaiting_plate_clear: true,
     scheduled_time: null,
     auto_off_after: false,
     manual_start: false,
@@ -393,6 +394,24 @@ describe('QueuePage', () => {
       expect(screen.getByRole('heading', { name: 'Awaiting plate clear' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Clear plate' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /^History/ })).not.toBeInTheDocument();
+    });
+
+    it('keeps retry available without offering Clear Plate for an unsent failure', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        {
+          ...mockQueueItems[2],
+          id: 4,
+          status: 'failed',
+          awaiting_plate_clear: false,
+          physical_outcome: null,
+          archive_name: 'Unsent Failure',
+        },
+      ])));
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Unsent Failure')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Clear plate' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     });
 
     it('keeps every awaiting job visible and clearable', async () => {

@@ -286,16 +286,14 @@ at startup and published after commit. Rollback discards pending effects and
 prepared artifacts. Legacy Printer flag columns remain only for upgrade
 compatibility.
 
-One committed outcome step, keyed by job and new state, handles failure notices,
-configured Auto Off, heater shutdown and SD cleanup. Each effect uses independent
-scalar inputs and database sessions, so a failed notification cannot prevent
-cleanup. Heater shutdown remains pending until fresh zero-target reports confirm
-it. It requires idle telemetry and no uploading or potentially sent job. Auto
-Off rechecks both live printing and active Queue reservations immediately before
-switching the plug; a failed lookup defers it. Every committed state change, and
+One committed outcome step, keyed by job and new state, handles failure notices
+and SD cleanup. Heat-soak exit sends heater-off commands once after commit,
+except when dispatching inherits the heat. Print Auto Off is immediate: after a
+printer-reported outcome, it rechecks the job, fresh idle telemetry, and queued
+or active work before switching linked plugs. Every committed state change, and
 every same-state write that names an action, logs job, old/new state, printer,
-Archive and action. A persisted transition table
-remains separately tracked in #202.
+Archive and action. A persisted transition table remains separately tracked in
+#202.
 
 Hidden Queue sources survive every nonfinal direct or variant reference.
 Finalization removes unused sources after commit; saved Files and external
