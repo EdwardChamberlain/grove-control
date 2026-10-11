@@ -62,7 +62,12 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, release_printer
+from backend.app.services.lifecycle.engine import (
+    InvalidQueueTransition,
+    release_printer,
+    transition_queue_item,
+    writer,
+)
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -414,6 +419,7 @@ async def delete_printer(
     from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, PrinterMaintenance
     from backend.app.models.scheduled_drying import ScheduledDrying
     from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+    from backend.app.services.lifecycle.queued import PRINTER_DELETED_WAITING_REASON
 
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
@@ -421,52 +427,89 @@ async def delete_printer(
         raise HTTPException(404, "Printer not found")
 
     try:
-        await release_printer(db, printer)
+        # Hold the printer lifecycle lock through commit so queue selection
+        # cannot bind a waiting job after the deletion checks it.
+        async with writer(printer_id):
+            await release_printer(db, printer)
+            waiting_jobs = list(
+                (
+                    await db.scalars(
+                        select(PrintQueueItem)
+                        .where(
+                            PrintQueueItem.assigned_printer_id == printer_id,
+                            PrintQueueItem.status == "queued",
+                        )
+                        .order_by(PrintQueueItem.id)
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            for item in waiting_jobs:
+                await transition_queue_item(
+                    db,
+                    item,
+                    "queued",
+                    "queued",
+                    values={
+                        "assigned_printer_id": None,
+                        "waiting_reason": PRINTER_DELETED_WAITING_REASON,
+                    },
+                )
+
+            await db.execute(
+                update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None)
+            )
+            await db.execute(
+                update(PrintQueueItem)
+                .where(PrintQueueItem.assigned_printer_id == printer_id)
+                .values(assigned_printer_id=None)
+            )
+            if delete_archives:
+                # Preserve jobs when the Archive FK would otherwise cascade-delete them.
+                await db.execute(
+                    update(PrintQueueItem)
+                    .where(
+                        PrintQueueItem.archive_id.in_(
+                            select(PrintArchive.id).where(PrintArchive.printer_id == printer_id)
+                        )
+                    )
+                    .values(archive_id=None)
+                )
+
+            if delete_archives:
+                # Delete all archives for this printer
+                await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
+            else:
+                # Orphan the archives instead of deleting them
+                await db.execute(
+                    update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None)
+                )
+
+            # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
+            await db.execute(sql_delete(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == printer_id))
+
+            # Delete scheduled drying rows explicitly because SQLite does not enforce
+            # the ScheduledDrying printer foreign-key cascade.
+            await db.execute(sql_delete(ScheduledDrying).where(ScheduledDrying.printer_id == printer_id))
+
+            # Delete durable maintenance logs plus legacy task history/items for this
+            # printer. SQLite does not enforce these foreign-key cascades.
+            await db.execute(sql_delete(MaintenanceLogEntry).where(MaintenanceLogEntry.printer_id == printer_id))
+            maintenance_ids = (
+                (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
+                .scalars()
+                .all()
+            )
+            if maintenance_ids:
+                await db.execute(
+                    sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
+                )
+                await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
+
+            await db.delete(printer)
+            await db.commit()
     except InvalidQueueTransition as exc:
         raise HTTPException(409, str(exc)) from exc
-    await db.execute(update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None))
-    await db.execute(
-        update(PrintQueueItem).where(PrintQueueItem.assigned_printer_id == printer_id).values(assigned_printer_id=None)
-    )
-    if delete_archives:
-        # Preserve jobs when the Archive FK would otherwise cascade-delete them.
-        await db.execute(
-            update(PrintQueueItem)
-            .where(PrintQueueItem.archive_id.in_(select(PrintArchive.id).where(PrintArchive.printer_id == printer_id)))
-            .values(archive_id=None)
-        )
-
-    if delete_archives:
-        # Delete all archives for this printer
-        await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
-    else:
-        # Orphan the archives instead of deleting them
-        await db.execute(update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None))
-
-    # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
-    await db.execute(sql_delete(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == printer_id))
-
-    # Delete scheduled drying rows explicitly because SQLite does not enforce
-    # the ScheduledDrying printer foreign-key cascade.
-    await db.execute(sql_delete(ScheduledDrying).where(ScheduledDrying.printer_id == printer_id))
-
-    # Delete durable maintenance logs plus legacy task history/items for this
-    # printer. SQLite does not enforce these foreign-key cascades.
-    # (SQLite doesn't enforce FK cascades, so do it explicitly)
-    await db.execute(sql_delete(MaintenanceLogEntry).where(MaintenanceLogEntry.printer_id == printer_id))
-    maintenance_ids = (
-        (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
-        .scalars()
-        .all()
-    )
-    if maintenance_ids:
-        await db.execute(
-            sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
-        )
-        await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
-
-    await db.delete(printer)
-    await db.commit()
     await ws_manager.send_queue_work_changed()
 
     printer_manager.disconnect_printer(printer_id)

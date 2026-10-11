@@ -94,6 +94,8 @@ _RETRY_VARIANT_FIELDS = (
     "print_time_seconds",
 )
 
+PRINTER_DELETED_WAITING_REASON = "Assigned printer was deleted; choose another printer to resume this job"
+
 
 def filament_contract(
     source: Path | None,
@@ -195,6 +197,11 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
     # row receives model defaults instead of a growing collection of resets.
     values.update(retry_on_failure=False, manual_start=False)
     variant_values = [{field: getattr(variant, field) for field in _RETRY_VARIANT_FIELDS} for variant in variants]
+    if values["assigned_printer_id"] is None and item.printer_id is not None and not item.target_model and not variants:
+        # Directly adopted prints have no queue preference. Give their fresh
+        # retry the printer that ran the source, while leaving its execution
+        # binding unset so the scheduler still starts it as a new job.
+        values["assigned_printer_id"] = item.printer_id
     if variant_values:
         # Variants are the retry's complete source set; the old selected file
         # or attempt Archive must not leak into the replacement job.
@@ -218,7 +225,7 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         values["archive_id"] = archive.id
         values["cleanup_library_after_dispatch"] = False
 
-    if item.assigned_printer_id is None:
+    if values["assigned_printer_id"] is None:
         # This job will be matched to a printer again. Tray indices belong to
         # that printer, so don't carry the previous dispatch's mapping into
         # the fresh job (or let a candidate variant restore it).

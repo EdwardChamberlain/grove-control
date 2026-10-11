@@ -990,6 +990,8 @@ async def update_queue_item(
     ),
 ):
     """Update a queue item."""
+    from backend.app.services.lifecycle.queued import PRINTER_DELETED_WAITING_REASON
+
     user, can_modify_all = auth_result
     owner_id = user.id if user is not None else None
     update_data = data.model_dump(exclude_unset=True)
@@ -1071,6 +1073,8 @@ async def update_queue_item(
     new_target_model = update_data.get("target_model", item.target_model)
     if new_printer_id and new_target_model:
         raise HTTPException(400, "Cannot specify both printer_id and target_model")
+    if item.waiting_reason == PRINTER_DELETED_WAITING_REASON and (new_printer_id is not None or new_target_model):
+        update_data["waiting_reason"] = None
 
     # Validate target_model has active printers
     if "target_model" in update_data and update_data["target_model"]:

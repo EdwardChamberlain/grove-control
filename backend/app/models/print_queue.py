@@ -93,8 +93,7 @@ class PrintQueueItem(Base):
     # Required filament types for model-based assignment (JSON array, e.g., '["PLA", "PETG"]')
     # Used by scheduler to validate printer has compatible filaments loaded
     required_filament_types: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Waiting reason - explains why a model-based job hasn't started yet
-    # Set by scheduler when no matching printer is available
+    # Waiting reason for a queued job, including explicit holds that need a user edit.
     waiting_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Either archive_id OR library_file_id must be set; dispatch links the attempt Archive here.
     archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="CASCADE"), nullable=True)
