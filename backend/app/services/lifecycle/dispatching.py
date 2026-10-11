@@ -451,7 +451,7 @@ class Dispatcher:
             return await self._ready_locked(db, item)
 
     async def _ready_locked(self, db: AsyncSession, item: PrintQueueItem) -> bool:
-        """Apply the persisted telemetry gate while the job and printer are held."""
+        """Apply the persisted telemetry gate; leave a ready transaction to its caller."""
         ready = self._telemetry(item.printer_id, item.dispatch_baseline_subtask_id)
         if ready is True:
             if item.deadline_kind == "dispatch_ready":
@@ -463,8 +463,6 @@ class Dispatcher:
                     values={"deadline_at": None, "deadline_kind": None},
                 )
                 await db.commit()
-            else:
-                await db.rollback()
             return True
         if ready is False:
             await fail(db, item, "Printer activity changed before the print command")
@@ -691,6 +689,11 @@ class Dispatcher:
                         self.schedule_stage(item_id, printer_id, stage)
                 else:
                     if await self._ready_locked(db, item):
+                        # Recovery only schedules a worker. Release its row
+                        # lock before returning; the worker rechecks under its
+                        # own writer at each stage, including immediately
+                        # before the send-intent commit.
+                        await db.rollback()
                         self.schedule_stage(item_id, printer_id, stage)
                 return
 
