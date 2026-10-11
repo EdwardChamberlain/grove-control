@@ -62,12 +62,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import (
-    InvalidQueueTransition,
-    release_printer,
-    transition_queue_item,
-    writer,
-)
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, release_printer, transition_queue_item
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -419,6 +414,7 @@ async def delete_printer(
     from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, PrinterMaintenance
     from backend.app.models.scheduled_drying import ScheduledDrying
     from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+    from backend.app.services.lifecycle import engine as lifecycle_engine
     from backend.app.services.lifecycle.queued import PRINTER_DELETED_WAITING_REASON
 
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
@@ -429,7 +425,7 @@ async def delete_printer(
     try:
         # Hold the printer lifecycle lock through commit so queue selection
         # cannot bind a waiting job after the deletion checks it.
-        async with writer(printer_id):
+        async with lifecycle_engine.writer(printer_id):
             await release_printer(db, printer)
             waiting_jobs = list(
                 (
