@@ -3885,6 +3885,99 @@ async def run_migrations(conn):
     # the helper is deliberately idempotent for every subsequent startup.
     await _backfill_maintenance_log_entries(conn)
 
+    # SQLite foreign-key enforcement is intentionally left disabled globally:
+    # other relationships use explicit cleanup/preservation rules. Keep the
+    # archive-backed queue relationship safe with targeted triggers instead.
+    await _ensure_sqlite_archive_queue_integrity(conn)
+
+
+async def _ensure_sqlite_archive_queue_integrity(conn) -> None:
+    """Enforce ``print_queue.archive_id`` semantics on SQLite only.
+
+    SQLite foreign keys are disabled for app connections. These triggers make
+    the archive-backed queue relationship behave like its declared
+    ``ON DELETE CASCADE`` foreign key without changing unrelated relationships.
+    They also serialize the active-job check with archive deletion and reject
+    a late queue insert whose archive was deleted after it was validated.
+    """
+    if not is_sqlite():
+        return
+
+    from sqlalchemy import text
+
+    statements = (
+        """CREATE TRIGGER IF NOT EXISTS trg_print_queue_archive_insert
+           BEFORE INSERT ON print_queue
+           FOR EACH ROW
+           WHEN NEW.archive_id IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM print_archives WHERE id = NEW.archive_id)
+           BEGIN
+             SELECT RAISE(ABORT, 'print_queue.archive_id references a missing archive');
+           END""",
+        """CREATE TRIGGER IF NOT EXISTS trg_print_queue_archive_update
+           BEFORE UPDATE OF archive_id ON print_queue
+           FOR EACH ROW
+           WHEN NEW.archive_id IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM print_archives WHERE id = NEW.archive_id)
+           BEGIN
+             SELECT RAISE(ABORT, 'print_queue.archive_id references a missing archive');
+           END""",
+        """CREATE TRIGGER IF NOT EXISTS trg_print_archive_block_active_queue_delete
+           BEFORE DELETE ON print_archives
+           FOR EACH ROW
+           WHEN EXISTS (
+             SELECT 1 FROM print_queue
+             WHERE archive_id = OLD.id
+               AND status IN ('preheating', 'dispatching', 'printing')
+           )
+           BEGIN
+             SELECT RAISE(ABORT, 'cannot delete archive with active queue item');
+           END""",
+        """CREATE TRIGGER IF NOT EXISTS trg_print_archive_delete_queue
+           AFTER DELETE ON print_archives
+           FOR EACH ROW
+           BEGIN
+             DELETE FROM print_queue WHERE archive_id = OLD.id;
+           END""",
+    )
+    for statement in statements:
+        await conn.execute(text(statement))
+
+    # Existing SQLite files may already contain rows orphaned by an earlier
+    # hard delete. Preserve them for operator review, but report them on every
+    # startup so they do not remain silent.
+    count = (
+        await conn.execute(
+            text(
+                "SELECT COUNT(*) FROM print_queue q "
+                "LEFT JOIN print_archives a ON a.id = q.archive_id "
+                "WHERE q.archive_id IS NOT NULL AND a.id IS NULL"
+            )
+        )
+    ).scalar_one()
+    if count:
+        sample = (
+            await conn.execute(
+                text(
+                    "SELECT q.id, q.archive_id, q.status FROM print_queue q "
+                    "LEFT JOIN print_archives a ON a.id = q.archive_id "
+                    "WHERE q.archive_id IS NOT NULL AND a.id IS NULL "
+                    "ORDER BY q.id LIMIT 20"
+                )
+            )
+        ).all()
+        sample_text = ", ".join(
+            f"{item_id}(archive={archive_id}, status={status})" for item_id, archive_id, status in sample
+        )
+        suffix = " (first 20 shown)" if count > len(sample) else ""
+        logger.warning(
+            "SQLite found %d print_queue row(s) referencing missing archives%s: %s. "
+            "Rows were left intact for operator review.",
+            count,
+            suffix,
+            sample_text,
+        )
+
 
 async def _backfill_maintenance_log_entries(conn) -> None:
     """Copy pre-#180 completion records to the durable maintenance log once."""

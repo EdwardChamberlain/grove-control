@@ -25,7 +25,7 @@ from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
-from backend.app.services.archive import ArchiveService
+from backend.app.services.archive import ArchiveDeletionBlockedError, ArchiveService
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +425,11 @@ class ArchivePurgeService:
                 service = ArchiveService(delete_db)
                 if purge_stats:
                     await delete_db.execute(delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
-                    removed = await service.delete_archive(archive_id)
+                    try:
+                        removed = await service.delete_archive(archive_id)
+                    except ArchiveDeletionBlockedError:
+                        await delete_db.rollback()
+                        continue
                 else:
                     removed = await service.soft_delete_archive(archive_id)
                 if removed:
