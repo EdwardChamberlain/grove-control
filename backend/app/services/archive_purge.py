@@ -73,9 +73,11 @@ def _last_activity_expr():
 
 def _unheld_archive_filter():
     """Keep waiting/active reprint sources and the persisted plate-clear Archive."""
+    # A previous-print failure skips waiting jobs until Resume restores them.
+    # Their Archive files are still needed even though they are not pending.
     return ~exists().where(
         PrintQueueItem.archive_id == PrintArchive.id,
-        PrintQueueItem.status.in_(("pending", "preheating", "dispatching", "printing")),
+        PrintQueueItem.status.in_(("pending", "preheating", "dispatching", "printing", "skipped")),
     ) & ~exists().where(
         Printer.awaiting_plate_clear.is_(True),
         Printer.awaiting_plate_clear_archive_id == PrintArchive.id,

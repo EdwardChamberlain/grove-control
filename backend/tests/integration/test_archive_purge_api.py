@@ -56,6 +56,77 @@ async def test_retention_rechecks_a_queue_source_after_preview(
     assert await archive_purge_service._delete_archive_ids([old_id], purge_stats=True) == 0
 
 
+@pytest.mark.parametrize("mode", ["age", "count"])
+@pytest.mark.parametrize("trigger", ["manual", "scheduled"])
+@pytest.mark.parametrize("purge_stats", [False, True])
+async def test_retention_preserves_resumable_skipped_jobs(
+    async_client, archive_factory, printer_factory, db_session, tmp_path, monkeypatch, mode, trigger, purge_stats
+):
+    """Retention must leave failed-gate jobs and their source files resumable."""
+    from backend.app.core.config import settings
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.archive_purge import archive_purge_service
+
+    printer = await printer_factory()
+    printer_id = printer.id
+    monkeypatch.setattr(settings, "base_dir", tmp_path)
+    monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
+    source = settings.archive_dir / "held" / "held.3mf"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"resumable print source")
+    now = datetime.now(timezone.utc)
+    archive = await archive_factory(
+        printer_id,
+        filename=source.name,
+        file_path=str(source.relative_to(tmp_path)),
+        created_at=now - timedelta(days=400),
+    )
+    archive_id = archive.id
+    await archive_factory(printer_id, filename="eligible.3mf", created_at=now - timedelta(days=500))
+    await archive_factory(printer_id, filename="recent.3mf")
+    job = PrintQueueItem(
+        printer_id=printer_id,
+        archive_id=archive_id,
+        status="skipped",
+        require_previous_success=True,
+        error_message="Previous print failed or was aborted",
+        completed_at=now,
+    )
+    db_session.add(job)
+    await db_session.commit()
+    job_id = job.id
+
+    policy = {"keep_count": 1} if mode == "count" else {"older_than_days": 365}
+    preview = await async_client.get("/api/v1/archives/purge/preview", params={**policy, "purge_stats": purge_stats})
+    assert preview.status_code == 200
+    assert preview.json()["count"] == 1
+    assert preview.json()["sample_filenames"] == ["eligible.3mf"]
+    if trigger == "manual":
+        purge = await async_client.post("/api/v1/archives/purge", json={**policy, "purge_stats": purge_stats})
+        assert purge.status_code == 200
+        deleted = purge.json()["deleted"]
+    else:
+        await archive_purge_service.set_settings(
+            db_session, enabled=True, days=365, mode=mode, max_count=1, purge_stats=purge_stats
+        )
+        deleted = await archive_purge_service._maybe_run_auto_purge(db_session)
+    assert deleted == 1
+
+    resumed = await async_client.post(f"/api/v1/queue/printer/{printer_id}/resume")
+    assert resumed.status_code == 200
+    assert resumed.json()["restored"] == 1
+    db_session.expire_all()
+    kept = await db_session.get(PrintArchive, archive_id)
+    restored = await db_session.get(PrintQueueItem, job_id)
+    assert kept is not None and kept.deleted_at is None
+    assert restored is not None and restored.status == "pending"
+    assert restored.archive_id == archive_id
+    assert restored.error_message is None
+    assert restored.completed_at is None
+    assert source.read_bytes() == b"resumable print source"
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_settings_defaults_when_unset(async_client: AsyncClient):
