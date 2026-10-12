@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.printer import Printer
 from backend.app.services.bambu_mqtt import BambuMQTTClient, MQTTLogEntry, PrinterState, get_stage_name
-from backend.app.services.job_identity import telemetry_identity
 
 logger = logging.getLogger(__name__)
 
@@ -121,16 +120,6 @@ def supports_chamber_heater(model: str | None) -> bool:
     if not model:
         return False
     return model.strip().upper() in CHAMBER_HEATER_MODELS
-
-
-AIRDUCT_MODELS = CHAMBER_HEATER_MODELS | frozenset({"P2S", "N7"})
-
-
-def supports_airduct(model: str | None) -> bool:
-    """Check if a printer model has an airduct mode control for heat soak."""
-    if not model:
-        return False
-    return model.strip().upper() in AIRDUCT_MODELS
 
 
 def has_stg_cur_idle_bug(model: str | None) -> bool:
@@ -295,7 +284,6 @@ class PrinterManager:
         self._on_print_start: Callable[[int, dict], None] | None = None
         self._on_print_complete: Callable[[int, dict], None] | None = None
         self._on_print_running_observed: Callable[[int, dict], None] | None = None
-        self._on_print_state_change: Callable[[int, dict], None] | None = None
         self._on_finish_photo_moment: Callable[[int, dict], None] | None = None
         self._on_status_change: Callable[[int, PrinterState], None] | None = None
         self._on_ams_change: Callable[[int, list], None] | None = None
@@ -305,17 +293,31 @@ class PrinterManager:
         self._on_drying_complete: Callable[[int, int], None] | None = None
         self._on_tray_change: Callable[[int, int, int], None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Track who started the current print (Issue #206)
+        self._current_print_user: dict[int, dict] = {}  # {printer_id: {"user_id": int, "username": str}}
         # Track printers awaiting plate-clear acknowledgment after a finished/failed print.
-        # Read-only view of holding jobs, rehydrated at startup and refreshed
-        # after lifecycle commits. The queue index is the reservation authority.
+        # Persisted to DB (printers.awaiting_plate_clear) so the gate survives restarts/power
+        # cycles — see issue #961. Loaded into this set at startup via load_awaiting_plate_clear_from_db().
         self._awaiting_plate_clear: set[int] = set()
         # Exact archive associated with each awaiting plate-clear gate (#43).
-        # Rehydrated from the exact holding job after restart.
+        # This is persisted on Printer so the completion card survives restarts.
         self._awaiting_plate_clear_archive_id: dict[int, int] = {}
 
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
         return self._printer_info.get(printer_id)
+
+    def set_current_print_user(self, printer_id: int, user_id: int, username: str):
+        """Track who started the current print (Issue #206)."""
+        self._current_print_user[printer_id] = {"user_id": user_id, "username": username}
+
+    def get_current_print_user(self, printer_id: int) -> dict | None:
+        """Get the user who started the current print (Issue #206)."""
+        return self._current_print_user.get(printer_id)
+
+    def clear_current_print_user(self, printer_id: int):
+        """Clear the current print user when print completes (Issue #206)."""
+        self._current_print_user.pop(printer_id, None)
 
     def is_awaiting_plate_clear(self, printer_id: int) -> bool:
         """Return True when the printer finished/failed a print and is waiting for the
@@ -328,10 +330,11 @@ class PrinterManager:
         return self._awaiting_plate_clear_archive_id.get(printer_id)
 
     def set_awaiting_plate_clear(self, printer_id: int, awaiting: bool):
-        """Publish the committed job's read-only plate-clear view.
+        """Set/clear the awaiting-plate-clear gate and persist it to DB.
 
-        The job persists the hold across restarts, even when the printer
-        boots into IDLE after Auto Off. This setter only updates the view.
+        Persisted so the gate survives Grove Control/printer restarts (#961): after Auto Off
+        cycles the printer, the printer boots into IDLE with no memory of the previous
+        finish, and without persistence the queue would bypass the confirmation prompt.
 
         Also broadcasts an updated ``printer_status`` over the WebSocket (#1128).
         ``awaiting_plate_clear`` is a Grove Control-side flag — toggling it does not
@@ -356,6 +359,7 @@ class PrinterManager:
         # Only create the coroutine when there is a loop to run it on — otherwise Python
         # emits "coroutine was never awaited" warnings (e.g. in sync unit tests).
         if self._loop and self._loop.is_running():
+            self._schedule_async(self._persist_awaiting_plate_clear(printer_id, awaiting))
             self._schedule_async(self._broadcast_status_change(printer_id))
 
     def set_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None) -> None:
@@ -367,6 +371,7 @@ class PrinterManager:
         else:
             self._awaiting_plate_clear_archive_id[printer_id] = archive_id
         if self._loop and self._loop.is_running():
+            self._schedule_async(self._persist_awaiting_plate_clear_archive_id(printer_id, archive_id))
             self._schedule_async(self._broadcast_status_change(printer_id))
 
     async def _broadcast_status_change(self, printer_id: int) -> None:
@@ -410,18 +415,58 @@ class PrinterManager:
                 e,
             )
 
+    async def _persist_awaiting_plate_clear(self, printer_id: int, awaiting: bool):
+        from backend.app.core.database import run_with_retry
+
+        async def _do(db):
+            # A queued write can be overtaken by a later in-memory transition.
+            # Persist only if this task still represents the current gate state.
+            if self.is_awaiting_plate_clear(printer_id) is not awaiting:
+                return
+            printer = await db.get(Printer, printer_id)
+            if printer is not None:
+                printer.awaiting_plate_clear = awaiting
+                printer.awaiting_plate_clear_archive_id = (
+                    self._awaiting_plate_clear_archive_id.get(printer_id) if awaiting else None
+                )
+                await db.commit()
+
+        try:
+            await run_with_retry(_do, label=f"persist awaiting_plate_clear printer={printer_id}")
+        except Exception as e:
+            logger.warning("Failed to persist awaiting_plate_clear for printer %d: %s", printer_id, e)
+
+    async def _persist_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None):
+        from backend.app.core.database import run_with_retry
+
+        async def _do(db):
+            # Do not let a late archive write revive details after the gate was
+            # cleared or overwrite a newer print's archive identity.
+            if (
+                not self.is_awaiting_plate_clear(printer_id)
+                or self._awaiting_plate_clear_archive_id.get(printer_id) != archive_id
+            ):
+                return
+            printer = await db.get(Printer, printer_id)
+            if printer is not None:
+                printer.awaiting_plate_clear = True
+                printer.awaiting_plate_clear_archive_id = archive_id
+                await db.commit()
+
+        try:
+            await run_with_retry(_do, label=f"persist awaiting_plate_clear archive printer={printer_id}")
+        except Exception as e:
+            logger.warning("Failed to persist awaiting_plate_clear archive for printer %d: %s", printer_id, e)
+
     async def load_awaiting_plate_clear_from_db(self):
-        """Rehydrate the read-only plate-clear view from holding jobs."""
+        """Rehydrate the awaiting-plate-clear set from the printers table on startup."""
         from backend.app.core.database import async_session
 
         try:
             async with async_session() as db:
-                from backend.app.models.print_queue import PrintQueueItem, awaiting_plate_clear_clause
-
                 result = await db.execute(
-                    select(PrintQueueItem.printer_id, PrintQueueItem.archive_id).where(
-                        awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
-                        PrintQueueItem.printer_id.is_not(None),
+                    select(Printer.id, Printer.awaiting_plate_clear_archive_id).where(
+                        Printer.awaiting_plate_clear.is_(True)
                     )
                 )
                 rows = result.all()
@@ -453,10 +498,6 @@ class PrinterManager:
         normally hangs off it (e.g. timelapse baseline capture) needs this
         hook to recover."""
         self._on_print_running_observed = callback
-
-    def set_print_state_change_callback(self, callback: Callable[[int, dict], None]):
-        """Set the callback for identified pause/resume telemetry, including reconnect."""
-        self._on_print_state_change = callback
 
     def set_finish_photo_moment_callback(self, callback: Callable[[int, dict], None]):
         """Set callback for the #1721 finish-photo moment.
@@ -537,28 +578,8 @@ class PrinterManager:
             self.disconnect_printer(printer.id)
 
         printer_id = printer.id
-        last_print_state = None
 
         def on_state_change(state: PrinterState):
-            nonlocal last_print_state
-
-            observation = (
-                (telemetry_identity(state), state.state) if state.connected and state.job_telemetry_ready else None
-            )
-            if observation != last_print_state:
-                last_print_state = observation
-                if (
-                    observation
-                    and observation[0]
-                    and state.state in ("PAUSE", "RUNNING")
-                    and self._on_print_state_change
-                ):
-                    # Snapshot the event: PrinterState is mutated by later MQTT pushes.
-                    self._schedule_async(
-                        self._on_print_state_change(
-                            printer_id, {"submission_id": observation[0], "state": observation[1]}
-                        )
-                    )
             if self._on_status_change:
                 self._schedule_async(self._on_status_change(printer_id, state))
 
@@ -744,7 +765,6 @@ class PrinterManager:
         nozzle_offset_cali: str = "auto",
         nozzle_mapping: str | None = None,
         submission_id: str | None = None,
-        display_name: str | None = None,
     ) -> bool:
         """Start a print on a connected printer.
 
@@ -776,7 +796,6 @@ class PrinterManager:
                 nozzle_offset_cali=nozzle_offset_cali,
                 nozzle_mapping=nozzle_mapping,
                 submission_id=submission_id,
-                **({"display_name": display_name} if display_name is not None else {}),
             )
         return False
 
@@ -784,6 +803,51 @@ class PrinterManager:
         """Stop the current print on a connected printer."""
         if printer_id in self._clients:
             return self._clients[printer_id].stop_print()
+        return False
+
+    async def wait_for_cooldown(
+        self,
+        printer_id: int,
+        target_temp: float = 50.0,
+        timeout: int = 600,
+        check_interval: int = 10,
+    ) -> bool:
+        """Wait for the nozzle to cool down to a safe temperature.
+
+        Args:
+            printer_id: The printer to monitor
+            target_temp: Target temperature to wait for (default 50°C)
+            timeout: Maximum seconds to wait (default 600s = 10 min)
+            check_interval: Seconds between temperature checks (default 10s)
+
+        Returns:
+            True if cooled down, False if timeout or not connected
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        elapsed = 0
+        while elapsed < timeout:
+            state = self.get_status(printer_id)
+            if not state or not state.connected:
+                logger.warning("Printer %s disconnected during cooldown wait", printer_id)
+                return False
+
+            # Check nozzle temperature (and nozzle_2 for dual extruders)
+            nozzle_temp = state.temperatures.get("nozzle", 0)
+            nozzle_2_temp = state.temperatures.get("nozzle_2", 0)
+            max_temp = max(nozzle_temp, nozzle_2_temp)
+
+            if max_temp <= target_temp:
+                logger.info("Printer %s cooled down to %s°C", printer_id, max_temp)
+                return True
+
+            logger.debug("Printer %s nozzle at %s°C, waiting for %s°C...", printer_id, max_temp, target_temp)
+            await asyncio.sleep(check_interval)
+            elapsed += check_interval
+
+        logger.warning("Printer %s cooldown timeout after %ss", printer_id, timeout)
         return False
 
     def enable_logging(self, printer_id: int, enabled: bool = True) -> bool:
@@ -1360,9 +1424,13 @@ def printer_state_to_dict(
         # current_archive_id is intentionally REST-only — it's stable for the life
         # of a print and needs a DB lookup the WebSocket path shouldn't pay for.
         "current_plate_id": resolve_plate_id(state),
-        # The observed submission ID is the identity for an active print and lets
+        # Bambu's subtask ID is the unique identity for an active print and lets
         # clients scope transient state across same-named back-to-back jobs (#43).
-        "current_print_identity": (telemetry_identity(state) if state.state in ("RUNNING", "PAUSE") else None),
+        "current_print_identity": (
+            str(state.subtask_id).strip()
+            if state.state in ("RUNNING", "PAUSE") and state.subtask_id not in (None, "", 0, "0")
+            else None
+        ),
         # Plate-clear gate (#939). Lives on the PrinterManager rather than PrinterState,
         # so surface it here — without this, WebSocket merges drop the flag and the
         # "Clear Plate" button only appears when the 30 s REST fallback poll runs.

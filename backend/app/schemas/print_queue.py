@@ -81,10 +81,6 @@ class QueueVariantCreate(BaseModel):
     filament_overrides: list[dict] | None = None
 
 
-class DispatchResolution(BaseModel):
-    outcome: Literal["printing", "failed"]
-
-
 class PrintQueueItemCreate(BaseModel):
     printer_id: int | None = None  # None = unassigned, user assigns later
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
@@ -98,6 +94,7 @@ class PrintQueueItemCreate(BaseModel):
     archive_id: int | None = None
     library_file_id: int | None = None
     scheduled_time: datetime | None = None  # None = ASAP (next when idle)
+    require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
     manual_start: bool = False  # Requires manual trigger to start (staged)
     chamber_heat_soak: bool = False
@@ -133,6 +130,9 @@ class PrintQueueItemCreate(BaseModel):
     quantity: int = 1
     # Project to associate the resulting archive with
     project_id: int | None = None
+    # Direct printer-card uploads are temporary library files. The scheduler
+    # deletes them after creating the durable archive copy.
+    cleanup_library_after_dispatch: bool = False
     # Cross-model alternatives (#671): several sliced files, one job, whichever
     # printer frees up first. Mutually exclusive with printer_id (a specific
     # printer defeats the purpose) and with archive_id/library_file_id (the
@@ -158,6 +158,7 @@ class PrintQueueItemUpdate(BaseModel):
     force_color_match: bool | None = None
     position: int | None = None
     scheduled_time: datetime | None = None
+    require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
     # "Print Anyway" acknowledged from the edit dialog's filament warning
@@ -195,9 +196,7 @@ class QueueVariantSummary(BaseModel):
 
 class PrintQueueItemResponse(BaseModel):
     id: int
-    printer_id: int | None  # Backwards-compatible effective printer field
-    assigned_printer_id: int | None = None  # Queue preference, present before binding
-    bound_printer_id: int | None = None  # Immutable printer binding after dispatch starts
+    printer_id: int | None  # None = unassigned
     target_model: str | None = None  # Target printer model for model-based assignment
     target_location: str | None = None  # Target location filter for model-based assignment
     required_filament_types: list[str] | None = None  # Required filament types for model-based assignment
@@ -208,6 +207,7 @@ class PrintQueueItemResponse(BaseModel):
     library_file_id: int | None  # For queue items from library files
     position: int
     scheduled_time: UTCDatetime
+    require_previous_success: bool
     auto_off_after: bool
     manual_start: bool
     chamber_heat_soak: bool = False
@@ -232,24 +232,8 @@ class PrintQueueItemResponse(BaseModel):
     timelapse: bool = False
     use_ams: bool = True
     nozzle_offset_cali: TriState = "auto"
-    status: Literal[
-        "queued",
-        "preheating",
-        "dispatching",
-        "printing",
-        "paused",
-        "finished",
-        "failed",
-        "cancelled",
-        "successful",
-        "unsuccessful",
-    ]
+    status: Literal["pending", "preheating", "dispatching", "printing", "completed", "failed", "skipped", "cancelled"]
     preheat_started_at: UTCDatetime = None
-    dispatch_needs_resolution: bool = False
-    dispatch_unsent: bool = False
-    retry_on_failure: bool = True
-    physical_outcome: str | None = None
-    awaiting_plate_clear: bool = False
     dispatched_at: UTCDatetime
     started_at: UTCDatetime
     completed_at: UTCDatetime
@@ -296,6 +280,7 @@ class PrintQueueItemResponse(BaseModel):
 
     # Auto-print G-code injection
     gcode_injection: bool = False
+    cleanup_library_after_dispatch: bool = False
 
     # H2C dual-nozzle-rack slicer pick (#1780). Surface for any future
     # "edit print → choose nozzle" UI; null on every model except O1C2
@@ -346,6 +331,7 @@ class PrintQueueBulkUpdate(BaseModel):
     # Fields to update (all optional - only set fields are applied)
     printer_id: int | None = None
     scheduled_time: datetime | None = None
+    require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
     chamber_heat_soak: bool = False

@@ -10,9 +10,9 @@ The fix is two-sided:
   - `POST /queue/{id}/start` credits the clicker as `created_by_id` when
     no prior owner is set (does NOT overwrite an existing owner — a
     UI-added queue item's original uploader keeps attribution).
-  - The print-complete callback credits the job's owner (`created_by_id`)
-    from the matched job, so the PrintLogEntry row gets the username, even
-    after a restart (#204 stage 6).
+  - `PrintScheduler._start_print` propagates `item.created_by_id` into
+    `printer_manager.set_current_print_user` so the print-complete callback
+    can write the username into the PrintLogEntry row.
 
 These tests pin both halves so a future refactor can't silently regress
 either one back to "blank User column."
@@ -26,7 +26,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
 async def _read_item(test_engine, item_id: int) -> PrintQueueItem:
@@ -89,9 +88,9 @@ async def queue_item(db_session):
     await db_session.refresh(archive)
 
     item = PrintQueueItem(
-        assigned_printer_id=printer.id,
+        printer_id=printer.id,
         archive_id=archive.id,
-        status="queued",
+        status="pending",
         position=1,
         manual_start=True,
         created_by_id=None,  # unattributed — VP-queue shape
@@ -165,16 +164,18 @@ class TestStartCreditsTheClicker:
         assert refreshed.created_by_id is None
 
 
-class TestCompletionCreditsTheJobOwner:
-    """`printing.owner_of` looks up the user row by `created_by_id`; the
-    print-complete callback credits it from the matched job, so it can write
-    the username into PrintLogEntry."""
+class TestSchedulerPropagatesOwnerToPrinterManager:
+    """`PrintScheduler._propagate_owner_to_printer_manager` looks up the
+    user row by `created_by_id` and forwards it into
+    `printer_manager.set_current_print_user` so the print-complete callback
+    can write the username into PrintLogEntry."""
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_propagates_when_created_by_id_resolves_to_user(self, db_session, queue_item, monkeypatch):
         from backend.app.models.user import User
-        from backend.app.services.lifecycle import printing as scheduler_module
+        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.print_scheduler import PrintScheduler
 
         user = User(username="clickeruser", password_hash="x", is_active=True)
         db_session.add(user)
@@ -186,7 +187,16 @@ class TestCompletionCreditsTheJobOwner:
         await db_session.commit()
         await db_session.refresh(queue_item)
 
-        assert await scheduler_module.owner_of(db_session, queue_item) == (user.id, "clickeruser")
+        captured: list[tuple[int, int, str]] = []
+        monkeypatch.setattr(
+            scheduler_module.printer_manager,
+            "set_current_print_user",
+            lambda printer_id, uid, username: captured.append((printer_id, uid, username)),
+        )
+
+        await PrintScheduler()._propagate_owner_to_printer_manager(db_session, queue_item)
+
+        assert captured == [(queue_item.printer_id, user.id, "clickeruser")]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -194,11 +204,20 @@ class TestCompletionCreditsTheJobOwner:
         """VP-uploaded queue items that never got manual-started (e.g.
         auto-dispatch) carry no owner — the helper must stay silent rather
         than synthesise a placeholder user."""
-        from backend.app.services.lifecycle import printing as scheduler_module
+        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.print_scheduler import PrintScheduler
 
         assert queue_item.created_by_id is None
 
-        assert await scheduler_module.owner_of(db_session, queue_item) is None
+        captured: list = []
+        monkeypatch.setattr(
+            scheduler_module.printer_manager,
+            "set_current_print_user",
+            lambda *args: captured.append(args),
+        )
+
+        await PrintScheduler()._propagate_owner_to_printer_manager(db_session, queue_item)
+        assert captured == []
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -206,14 +225,23 @@ class TestCompletionCreditsTheJobOwner:
         """`created_by_id` points at a user that's since been deleted —
         helper must not crash the dispatch. The print log row will just be
         un-credited for this run, same as auth-disabled."""
-        from backend.app.services.lifecycle import printing as scheduler_module
+        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.print_scheduler import PrintScheduler
 
         queue_item.created_by_id = 999_999  # no such user row
         db_session.add(queue_item)
         await db_session.commit()
         await db_session.refresh(queue_item)
 
+        captured: list = []
+        monkeypatch.setattr(
+            scheduler_module.printer_manager,
+            "set_current_print_user",
+            lambda *args: captured.append(args),
+        )
+
         # Must not raise — the dispatch loop would otherwise lose the whole
         # queue item to an exception trace for what's effectively a missing
         # foreign key.
-        assert await scheduler_module.owner_of(db_session, queue_item) is None
+        await PrintScheduler()._propagate_owner_to_printer_manager(db_session, queue_item)
+        assert captured == []

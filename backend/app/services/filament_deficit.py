@@ -273,14 +273,8 @@ async def _get_printer_backup_context(
 async def compute_deficit_for_queue_item(
     db: AsyncSession,
     item: PrintQueueItem,
-    *,
-    printer_id: int | None = None,
-    ams_mapping: str | None = None,
 ) -> list[FilamentDeficit]:
     """Return per-slot filament shortfalls for ``item``, or [] when it's safe to dispatch.
-
-    ``printer_id`` and ``ams_mapping`` check an "Any machine" job against the
-    printer the scheduler selected, which is not written to the queued job.
 
     Returns an empty list whenever any of the following hold:
 
@@ -305,8 +299,7 @@ async def compute_deficit_for_queue_item(
     """
     if await _warnings_disabled(db):
         return []
-    printer_id = printer_id if printer_id is not None else (item.printer_id or item.assigned_printer_id)
-    if printer_id is None:
+    if item.printer_id is None:
         return []
 
     # Refresh the relationships we need without assuming the caller eagerly
@@ -330,12 +323,12 @@ async def compute_deficit_for_queue_item(
     if not requirements:
         return []
 
-    mapping = _parse_ams_mapping(ams_mapping if ams_mapping is not None else item.ams_mapping)
+    mapping = _parse_ams_mapping(item.ams_mapping)
     if not mapping:
         return []
 
     spoolman_mode = await _is_spoolman_mode(db)
-    backup_on, ams_extruder_map, is_dual = await _get_printer_backup_context(printer_id)
+    backup_on, ams_extruder_map, is_dual = await _get_printer_backup_context(item.printer_id)
 
     # ------------------------------------------------------------------ phase 1
     # Resolve each requirement to (ams_id, tray_id, identity, remaining_grams).
@@ -376,7 +369,7 @@ async def compute_deficit_for_queue_item(
         if spoolman_mode:
             sm_result = await db.execute(
                 select(SpoolmanSlotAssignment).where(
-                    SpoolmanSlotAssignment.printer_id == printer_id,
+                    SpoolmanSlotAssignment.printer_id == item.printer_id,
                     SpoolmanSlotAssignment.ams_id == ams_id,
                     SpoolmanSlotAssignment.tray_id == tray_id,
                 )
@@ -415,7 +408,7 @@ async def compute_deficit_for_queue_item(
                 select(SpoolAssignment)
                 .options(selectinload(SpoolAssignment.spool))
                 .where(
-                    SpoolAssignment.printer_id == printer_id,
+                    SpoolAssignment.printer_id == item.printer_id,
                     SpoolAssignment.ams_id == ams_id,
                     SpoolAssignment.tray_id == tray_id,
                 )
@@ -477,7 +470,9 @@ async def compute_deficit_for_queue_item(
     required_by_key: dict[tuple[str, int], float] = defaultdict(float)
 
     if spoolman_mode:
-        sm_all = await db.execute(select(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == printer_id))
+        sm_all = await db.execute(
+            select(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == item.printer_id)
+        )
         from backend.app.services.spoolman import (
             SpoolmanClientError,
             SpoolmanNotFoundError,
@@ -518,7 +513,7 @@ async def compute_deficit_for_queue_item(
         internal_all = await db.execute(
             select(SpoolAssignment)
             .options(selectinload(SpoolAssignment.spool))
-            .where(SpoolAssignment.printer_id == printer_id)
+            .where(SpoolAssignment.printer_id == item.printer_id)
         )
         for assignment in internal_all.scalars().all():
             spool = assignment.spool

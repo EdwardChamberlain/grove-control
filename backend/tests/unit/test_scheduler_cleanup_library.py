@@ -1,30 +1,24 @@
-import asyncio
-import zipfile
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
-import backend.app.models.print_log  # noqa: F401
+import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.models.settings import Settings
-from backend.app.services.lifecycle import dispatching as lifecycle_dispatching, dispatching as scheduler_module
-from backend.app.services.lifecycle.engine import writer
-from backend.app.services.print_scheduler import PrintScheduler, scheduler
+from backend.app.services.print_scheduler import PrintScheduler
 
 
 @pytest.fixture
 async def queue_factory(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}", echo=False)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -74,15 +68,14 @@ async def queue_factory(tmp_path):
                 thumbnail_path=thumbnail_db_path,
                 file_metadata=None,
                 is_external=is_external,
-                queue_only=cleanup,
             )
             db.add_all([printer, library_file])
             await db.flush()
 
             item = PrintQueueItem(
-                assigned_printer_id=printer.id,
+                printer_id=printer.id,
                 library_file_id=library_file.id,
-                status="queued",
+                status="pending",
                 cleanup_library_after_dispatch=cleanup,
                 wait_for_drying_complete=wait_for_drying_complete,
                 bed_levelling="on",
@@ -111,10 +104,7 @@ async def queue_factory(tmp_path):
             )
 
     try:
-        # Dispatch stages use their own sessions. Keep the test database
-        # file-backed so those sessions have independent SQLite connections.
-        with patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()):
-            yield make_case
+        yield make_case
     finally:
         await engine.dispose()
 
@@ -126,43 +116,17 @@ async def _dispatch_library_item(
     unlink_side_effect=None,
     printer_status=None,
     printer_statuses=None,
-    drying_checks=None,
-    before_reservation=None,
-    during_archive=None,
-    binding=None,
-    connected=True,
-    assigned_notification=None,
 ):
     scheduler = PrintScheduler()
 
-    async def archive_print(
-        self,
-        *,
-        printer_id,
-        source_file,
-        original_filename,
-        print_data=None,
-        created_by_id=None,
-        project_id=None,
-        subtask_id=None,
-        dispatched_queue_item_id=None,
-        prefer_filename_for_name=False,
-        commit=True,
-        flush=True,
-        unique_dir=False,
-        created_dirs=None,
-    ):
+    async def archive_print(self, *, printer_id, source_file, original_filename, created_by_id=None, project_id=None):
         if archive_failure:
             raise RuntimeError("archive copy failed")
 
-        archive_rel_path = Path("archives") / f"attempt-{ctx.queue_item_id}" / "copy.3mf"
+        archive_rel_path = Path("archives") / f"archive-{ctx.queue_item_id}.3mf"
         ctx.archive_path = ctx.base_dir / archive_rel_path
         ctx.archive_path.parent.mkdir(parents=True, exist_ok=True)
-        if created_dirs is not None:
-            created_dirs.append(ctx.archive_path.parent)
         ctx.archive_path.write_bytes(Path(source_file).read_bytes())
-        if during_archive:
-            await during_archive()
 
         archive = PrintArchive(
             printer_id=printer_id,
@@ -173,130 +137,56 @@ async def _dispatch_library_item(
             thumbnail_path=None,
             timelapse_path=None,
             print_time_seconds=120,
-            status=(print_data or {}).get("status", "completed"),
+            status="completed",
             project_id=project_id,
             created_by_id=created_by_id,
-            dispatched_queue_item_id=dispatched_queue_item_id,
         )
         self.db.add(archive)
-        if flush:
-            await self.db.flush()
+        await self.db.flush()
         return archive
 
-    states = printer_statuses if printer_statuses is not None else [printer_status]
-    for state in states:
-        if state is not None:
-            state.state = "IDLE"
-            state.connected = True
-            if not hasattr(state, "job_telemetry_ready"):
-                state.job_telemetry_ready = True
-    printer_status = printer_status or SimpleNamespace(
-        state="IDLE", connected=True, job_telemetry_ready=True, raw_data={}
-    )
     status_mock = (
-        MagicMock(side_effect=[printer_statuses[0], *printer_statuses])
+        MagicMock(side_effect=printer_statuses)
         if printer_statuses is not None
         else MagicMock(return_value=printer_status)
     )
     patches = [
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
-        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.intake.async_session", ctx.session_maker),
-        patch("backend.app.services.print_effects.async_session", ctx.session_maker),
         patch("backend.app.services.archive.ArchiveService.archive_print", new=archive_print),
+        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
         patch(
-            "backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=connected)
-        ),
-        patch(
-            "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
+            "backend.app.services.print_scheduler.printer_manager.get_status",
             status_mock,
         ),
         patch(
-            "backend.app.services.lifecycle.dispatching.printer_manager.send_drying_command",
+            "backend.app.services.print_scheduler.printer_manager.send_drying_command",
             ctx.stop_drying,
         ),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_awaiting_plate_clear", return_value=False),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.start_print", ctx.start_print),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.set_awaiting_plate_clear", MagicMock()),
+        patch("backend.app.services.print_scheduler.printer_manager.start_print", ctx.start_print),
+        patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear", MagicMock()),
         patch(
-            "backend.app.services.lifecycle.dispatching.get_ftp_retry_settings",
-            AsyncMock(return_value=(False, 0, 0, 1.0)),
+            "backend.app.services.print_scheduler.get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0))
         ),
-        patch("backend.app.services.lifecycle.dispatching.delete_file_async", AsyncMock(return_value=True)),
-        patch("backend.app.services.lifecycle.dispatching.upload_file_async", ctx.upload),
-        patch("backend.app.services.lifecycle.dispatching.cache_3mf_download", MagicMock()),
+        patch("backend.app.services.print_scheduler.delete_file_async", AsyncMock(return_value=True)),
+        patch("backend.app.services.print_scheduler.upload_file_async", ctx.upload),
+        patch("backend.app.services.print_scheduler.cache_3mf_download", MagicMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_started", AsyncMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
-        patch(
-            "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
-            assigned_notification or AsyncMock(),
-        ),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
+        patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
+        patch.object(scheduler, "_power_off_if_needed", AsyncMock()),
+        patch.object(scheduler, "_schedule_dispatch_confirmation", MagicMock()),
     ]
     if unlink_side_effect:
         patches.append(patch.object(type(ctx.source_path), "unlink", unlink_side_effect))
-    if binding is not None:
-        patches.append(patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker))
-    if drying_checks is not None:
-        # Persisted stages run through the process scheduler singleton even
-        # when this helper starts a focused PrintScheduler instance.
-        from backend.app.services.print_scheduler import scheduler as process_scheduler
-
-        patches.append(patch.object(process_scheduler.drying, "_active_drying_ams_ids", side_effect=drying_checks))
 
     with ExitStack() as stack:
         for patcher in patches:
             stack.enter_context(patcher)
 
-        if binding is not None:
-            # The real worker path: bind only at the hold.
-            await scheduler.workers._work(ctx.queue_item_id, binding)
-            await _wait_for_dispatch(ctx)
-            return
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            if before_reservation:
-                await before_reservation(db, item)
-            await scheduler.workers.leave(db, item)
-        await _wait_for_dispatch(ctx)
-
-
-async def _wait_for_dispatch(ctx):
-    """Drain the tracked stage chain started by a committed dispatch transition."""
-    from backend.app.services.print_scheduler import scheduler as process_scheduler
-
-    deadline = asyncio.get_running_loop().time() + 10
-    while asyncio.get_running_loop().time() < deadline:
-        current = process_scheduler.workers.inflight.get(ctx.queue_item_id)
-        if current is None:
-            await asyncio.sleep(0)
-            if ctx.queue_item_id not in process_scheduler.workers.inflight:
-                return
-            continue
-        task = current[0]
-        if task.done():
-            await asyncio.sleep(0)
-        else:
-            await asyncio.wait_for(asyncio.shield(task), deadline - asyncio.get_running_loop().time())
-    raise TimeoutError(f"Dispatch stages for queue item {ctx.queue_item_id} did not settle")
-
-
-async def _finish_and_clear(ctx):
-    from backend.app.services.lifecycle.awaiting import clear_job_plate
-    from backend.app.services.lifecycle.engine import transition_queue_item
-
-    with patch.object(scheduler_module.settings, "base_dir", ctx.base_dir):
-        async with ctx.session_maker() as db:
-            item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
-                await transition_queue_item(db, item, "dispatching", "printing")
-            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
-                await transition_queue_item(db, item, "printing", "finished")
-            await db.commit()
-            assert ctx.source_path.exists()
-            await clear_job_plate(db, item)
-            await db.commit()
+            await scheduler._start_print(db, item)
 
 
 async def _queue_snapshot(ctx):
@@ -307,196 +197,14 @@ async def _queue_snapshot(ctx):
         return item, library_file, archive
 
 
-async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
-    from datetime import datetime, timezone
-
-    from fastapi import HTTPException
-
-    from backend.app.api.routes.print_queue import get_queue_item, resolve_queue_dispatch
-    from backend.app.schemas.print_queue import DispatchResolution
-
-    ctx = await queue_factory(cleanup=False)
-    dispatch_scheduler = PrintScheduler()
-
-    async def uploading(*_args, **_kwargs):
-        ctx.start_print.assert_not_called()
-        async with ctx.session_maker() as db:
-            response = await get_queue_item(ctx.queue_item_id, db, (None, True))
-            assert response.status == "dispatching" and not response.dispatch_needs_resolution
-            with pytest.raises(HTTPException) as conflict:
-                await resolve_queue_dispatch(
-                    ctx.queue_item_id, DispatchResolution(outcome="printing"), db, (None, True)
-                )
-            assert conflict.value.status_code == 409
-            await db.rollback()
-            await dispatch_scheduler.dispatcher.reconcile_printer_reports(db)
-            assert (await db.get(PrintQueueItem, ctx.queue_item_id)).error_message is None
-        return True
-
-    ctx.upload.side_effect = uploading
-    binding = await _selection_binding(ctx, ctx.printer_id, None, unassigned=False)
-    dispatch_scheduler.workers.inflight[ctx.queue_item_id] = (asyncio.current_task(), ctx.printer_id)
-    try:
-        await _dispatch_library_item(ctx, binding=binding)
-    finally:
-        dispatch_scheduler.workers.inflight.pop(ctx.queue_item_id, None)
-    ctx.start_print.assert_called_once()
-    item, _, _ = await _queue_snapshot(ctx)
-    assert item.status == "dispatching" and item.started_at is None
-
-
-@pytest.mark.parametrize("cancelled", [False, True])
-async def test_archive_preparation_is_unsent_and_cancellation_still_fences_mqtt(queue_factory, cancelled):
-    from datetime import datetime, timezone
-
-    from backend.app.services.job_identity import needs_dispatch_resolution
-    from backend.app.services.lifecycle.engine import transition_queue_item
-
-    ctx = await queue_factory(cleanup=False)
-    preparation_finished = None
-
-    async def copying():
-        nonlocal preparation_finished
-        async with ctx.session_maker() as db:
-            item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            assert item.status == "dispatching" and item.dispatch_subtask_id is None
-            assert item.dispatched_at is None and not needs_dispatch_resolution(item)
-            if cancelled:
-                async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
-                    await transition_queue_item(db, item, "dispatching", "cancelled", action="cancel")
-                await db.commit()
-        preparation_finished = datetime.now(timezone.utc)
-
-    await _dispatch_library_item(ctx, during_archive=copying)
-    item, _, archive = await _queue_snapshot(ctx)
-    if cancelled:
-        ctx.start_print.assert_not_called()
-        assert item.status == "cancelled" and item.dispatched_at is None and archive is None
-        assert not ctx.archive_path.exists()
-    else:
-        ctx.start_print.assert_called_once()
-        assert item.dispatched_at.replace(tzinfo=timezone.utc) >= preparation_finished
-        assert not needs_dispatch_resolution(item)
-
-
-@pytest.mark.parametrize("recorded_path, subtask_name", [(True, "same"), (True, ""), (False, "same")])
-async def test_old_completion_cannot_delete_a_later_upload(queue_factory, recorded_path, subtask_name):
-    """Overlap real completion and dispatch; only the completed upload may go."""
-    import backend.app.main as main
-    from backend.app.services import print_effects
-    from backend.app.services.archive import ArchiveService
-    from backend.app.services.bambu_ftp import DeleteResult
-    from backend.app.services.lifecycle import intake
-
-    ctx = await queue_factory(cleanup=False)
-    old_remote = "/same__grove_previous.3mf" if recorded_path else "/same.3mf"
-    old_file = ctx.base_dir / "archives/previous/same.gcode.3mf"
-    old_file.parent.mkdir(parents=True)
-    old_file.write_bytes(b"old attempt")
-    async with ctx.session_maker() as db:
-        library = await db.get(LibraryFile, ctx.library_file_id)
-        library.filename = "same.gcode.3mf"
-        archive = PrintArchive(
-            printer_id=ctx.printer_id,
-            filename=library.filename,
-            file_path=str(old_file),
-            file_size=old_file.stat().st_size,
-            status="printing",
-            extra_data={"remote_filename": old_remote[1:]} if recorded_path else None,
-        )
-        db.add(archive)
-        await db.flush()
-        old = PrintQueueItem(
-            printer_id=ctx.printer_id,
-            archive_id=archive.id,
-            status="printing",
-            dispatch_subtask_id="123",
-        )
-        db.add_all([old, Settings(key="require_plate_clear", value="false")])
-        await db.flush()
-        archive.dispatched_queue_item_id = old.id
-        await db.commit()
-        old_id, archive_id = old.id, archive.id
-
-    remote_files = {old_remote: b"old attempt"}
-    if recorded_path:
-        remote_files["/same.3mf"] = b"unrelated display-name file"
-    entered, release = asyncio.Event(), asyncio.Event()
-    deleted_paths = []
-
-    async def delete_old(_ip, _code, path, **_kwargs):
-        deleted_paths.append(path)
-        if path == old_remote:
-            entered.set()
-            await release.wait()
-        return DeleteResult.DELETED if remote_files.pop(path, None) is not None else DeleteResult.NOT_FOUND
-
-    async def upload_new(_ip, _code, file_path, remote_path, **_kwargs):
-        remote_files[remote_path] = Path(file_path).read_bytes()
-        return True
-
-    ctx.upload.side_effect = upload_new
-    state = SimpleNamespace(state="FINISH", connected=True, submission_id="123", subtask_id="123", raw_data={})
-    with (
-        patch.object(intake, "async_session", ctx.session_maker),
-        patch.object(print_effects, "async_session", ctx.session_maker),
-        patch.object(main.printer_manager, "get_status", return_value=state),
-        patch.object(main.printer_manager, "is_connected", return_value=True),
-        patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
-        patch.object(scheduler_module.settings, "archive_dir", ctx.base_dir / "archives"),
-        patch("backend.app.services.bambu_ftp.delete_file_async", new=delete_old),
-        # End the callback after SD cleanup, before unrelated completion effects.
-        patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(side_effect=asyncio.CancelledError)),
-    ):
-        completion = asyncio.create_task(
-            intake._complete_identified_print(
-                ctx.printer_id,
-                {
-                    "status": "completed",
-                    "filename": "same.gcode.3mf",
-                    "subtask_name": subtask_name,
-                    "submission_id": "123",
-                },
-            )
-        )
-        try:
-            await asyncio.wait_for(entered.wait(), 5)
-            async with ctx.session_maker() as db:
-                assert (await db.get(PrintQueueItem, old_id)).status == "successful"
-                # Automatic Clear Plate permits Archive purge before FTP ends.
-                assert await ArchiveService(db).delete_archive(archive_id)
-            await _dispatch_library_item(ctx)
-            ctx.start_print.assert_called_once()
-            remote_path = ctx.upload.call_args.args[3]
-            assert remote_path != old_remote
-            assert ctx.start_print.call_args.args[1] == remote_path[1:]
-            assert ctx.start_print.call_args.kwargs["display_name"] == "same.gcode.3mf"
-            _, _, new_archive = await _queue_snapshot(ctx)
-            assert new_archive.filename == "same.gcode.3mf"
-            assert new_archive.extra_data["remote_filename"] == remote_path[1:]
-            release.set()
-            with suppress(asyncio.CancelledError):
-                await asyncio.wait_for(completion, 5)
-            assert remote_path in remote_files
-            assert old_remote not in remote_files
-            if recorded_path:
-                assert deleted_paths == [old_remote]
-                assert remote_files["/same.3mf"] == b"unrelated display-name file"
-        finally:
-            completion.cancel()
-            with suppress(asyncio.CancelledError):
-                await completion
-
-
 @pytest.mark.asyncio
 async def test_cleanup_unlinks_library_file_and_removes_db_row(queue_factory):
     ctx = await queue_factory(cleanup=True)
 
     await _dispatch_library_item(ctx)
-    await _finish_and_clear(ctx)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "successful"
+    assert item.status == "dispatching"
     assert item.library_file_id is None
     assert item.archive_id == archive.id
     assert library_file is None
@@ -525,7 +233,7 @@ async def test_archive_creation_failure_skips_cleanup_and_dispatch(queue_factory
 
     item, library_file, archive = await _queue_snapshot(ctx)
     assert item.status == "failed"
-    assert item.error_message == "Failed to create Archive record for dispatch"
+    assert item.error_message == "Failed to create archive from library file"
     assert item.archive_id is None
     assert archive is None
     assert library_file is not None
@@ -541,10 +249,9 @@ async def test_cleanup_resolves_absolute_and_relative_thumbnail_paths(queue_fact
     ctx = await queue_factory(cleanup=True, thumbnail_path=thumbnail_path)
 
     await _dispatch_library_item(ctx)
-    await _finish_and_clear(ctx)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "successful"
+    assert item.status == "dispatching"
     assert item.archive_id == archive.id
     assert library_file is None
     assert not ctx.source_path.exists()
@@ -556,70 +263,12 @@ async def test_archive_copy_survives_library_cleanup(queue_factory):
     ctx = await queue_factory(cleanup=True)
 
     await _dispatch_library_item(ctx)
-    await _finish_and_clear(ctx)
 
     assert not ctx.source_path.exists()
     assert ctx.archive_path.exists()
     assert ctx.archive_path.read_bytes() == b"library source"
     uploaded_path = ctx.upload.await_args.args[2]
     assert uploaded_path == ctx.archive_path
-
-
-@pytest.mark.parametrize("source_kind", ["archive", "files"])
-@pytest.mark.asyncio
-async def test_dispatch_strips_saved_grove_snippets_with_injection_off(queue_factory, source_kind):
-    """Reprints and Files copies must not replay snippets from an earlier printer."""
-    ctx = await queue_factory(cleanup=False)
-    source_path = ctx.source_path
-    if source_kind == "archive":
-        source_path = ctx.base_dir / "archives" / "saved-snapshot.3mf"
-        source_path.parent.mkdir()
-
-    with zipfile.ZipFile(source_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(
-            "Metadata/plate_1.gcode",
-            "; MACHINE_START_GCODE_END\n"
-            "; GROVE_INJECT_START_BEGIN\nOLD_START\n; GROVE_INJECT_START_END\n"
-            "G1 X1\n"
-            "; GROVE_INJECT_END_BEGIN\nOLD_END\n; GROVE_INJECT_END_END\n"
-            "; EXECUTABLE_BLOCK_END\n",
-        )
-    original_bytes = source_path.read_bytes()
-
-    if source_kind == "archive":
-        async with ctx.session_maker() as db:
-            source_archive = PrintArchive(
-                printer_id=ctx.printer_id,
-                filename=source_path.name,
-                file_path=str(source_path.relative_to(ctx.base_dir)),
-                file_size=len(original_bytes),
-                status="completed",
-            )
-            db.add(source_archive)
-            await db.flush()
-            item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            item.archive_id = source_archive.id
-            item.library_file_id = None
-            await db.commit()
-
-    uploaded_bytes = []
-
-    async def capture_upload(*args, **kwargs):
-        uploaded_bytes.append(Path(args[2]).read_bytes())
-        return True
-
-    ctx.upload.side_effect = capture_upload
-    await _dispatch_library_item(ctx)
-
-    assert ctx.upload.await_count == 1
-    assert ctx.archive_path.read_bytes() == uploaded_bytes[0]
-    assert source_path.read_bytes() == original_bytes
-    with zipfile.ZipFile(ctx.archive_path) as zf:
-        dispatched_gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
-    assert "OLD_START" not in dispatched_gcode
-    assert "OLD_END" not in dispatched_gcode
-    assert "GROVE_INJECT" not in dispatched_gcode
-    assert "G1 X1" in dispatched_gcode
 
 
 @pytest.mark.asyncio
@@ -631,65 +280,28 @@ async def test_final_dispatch_boundary_stops_new_drying_and_does_not_send_print(
     await _dispatch_library_item(ctx, printer_status=status)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "failed"
-    assert item.error_message == "Stopping AMS drying before dispatch"
+    assert item.status == "pending"
+    assert item.waiting_reason == "Stopping AMS drying before dispatch"
     assert library_file is not None
-    assert archive.status == "failed"
+    assert archive is not None
     ctx.stop_drying.assert_called_once_with(ctx.printer_id, 0, 0, 0, mode=0)
-    ctx.start_print.assert_not_called()
-    async with ctx.session_maker() as db:
-        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
-        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
-
-
-@pytest.mark.parametrize("after_upload_state", ["RUNNING", "FINISH"])
-async def test_external_print_during_upload_blocks_project_file(queue_factory, after_upload_state):
-    ctx = await queue_factory(cleanup=False)
-    status = SimpleNamespace(
-        state="IDLE", connected=True, job_telemetry_ready=True, submission_id="previous", raw_data={}
-    )
-
-    async def upload(*_args, **_kwargs):
-        status.state = after_upload_state
-        status.submission_id = "external-run"
-        return True
-
-    ctx.upload.side_effect = upload
-    await _dispatch_library_item(ctx, printer_status=status)
-
-    item, _, attempt = await _queue_snapshot(ctx)
-    if after_upload_state == "RUNNING":
-        assert item.status == "failed" and attempt.status == "failed"
-        assert "Printer activity changed" in item.error_message
-        async with ctx.session_maker() as db:
-            retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
-            assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
-    else:
-        # FINISH is not fresh idle telemetry. Keep the upload reserved and
-        # wait for an explicit idle report before considering the send stage.
-        assert item.status == "dispatching" and attempt.status == "dispatching"
-        assert item.deadline_kind == "dispatch_ready"
     ctx.start_print.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(queue_factory):
-    """A job held for natural drying has not crossed the dispatch boundary."""
     ctx = await queue_factory(cleanup=False, wait_for_drying_complete=True)
     status = SimpleNamespace(raw_data={"ams": [{"id": 128, "dry_time": 45}]})
 
     await _dispatch_library_item(ctx, printer_status=status)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "failed"
-    assert item.error_message == "Waiting for AMS drying to complete"
+    assert item.status == "pending"
+    assert item.waiting_reason == "Waiting for AMS drying to complete"
     assert library_file is not None
-    assert archive.status == "failed"
+    assert archive is not None
     ctx.stop_drying.assert_not_called()
     ctx.start_print.assert_not_called()
-    async with ctx.session_maker() as db:
-        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
-        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
 
 
 @pytest.mark.parametrize(
@@ -700,7 +312,7 @@ async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(qu
     ],
 )
 @pytest.mark.asyncio
-async def test_command_boundary_retains_reservation_if_drying_starts_after_final_check(
+async def test_command_boundary_releases_reservation_if_drying_starts_after_final_check(
     queue_factory,
     wait_for_drying_complete,
     waiting_reason,
@@ -711,34 +323,40 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
         wait_for_drying_complete=wait_for_drying_complete,
     )
     clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
-    drying_checks = [(0,), (0,)] if not wait_for_drying_complete else [(0,)]
-    await _dispatch_library_item(
-        ctx,
-        printer_status=clear,
-        # Drying appears at the final pre-send gate; stopping checks it once
-        # more to confirm the stop command can be sent.
-        drying_checks=drying_checks,
-    )
+    drying = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 120}]})
+
+    with (
+        patch("backend.app.main.register_expected_print") as register_expected,
+        patch("backend.app.main.unregister_expected_print") as unregister_expected,
+        patch(
+            "backend.app.services.print_scheduler.printer_manager.clear_current_print_user"
+        ) as clear_current_print_user,
+    ):
+        await _dispatch_library_item(
+            ctx,
+            # First read: clear at the post-upload check. Second read: drying
+            # at the command boundary. Under the stop-first policy, a third
+            # read lets _stop_drying confirm which AMS still needs the command.
+            printer_statuses=[clear, drying, drying],
+        )
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "failed"
+    assert item.status == "pending"
     assert item.dispatched_at is None
     assert item.dispatch_subtask_id is None
-    assert item.error_message == waiting_reason
-    assert item.library_file_id == ctx.library_file_id
+    assert item.waiting_reason == waiting_reason
+    assert item.library_file_id is None
     assert item.archive_id == archive.id
-    assert library_file is not None
-    assert archive.status == "failed"
-    assert ctx.source_path.exists()
+    assert library_file is None
     assert ctx.archive_path.exists()
+    register_expected.assert_called_once()
+    unregister_expected.assert_called_once()
+    clear_current_print_user.assert_called_once_with(ctx.printer_id)
     if wait_for_drying_complete:
         ctx.stop_drying.assert_not_called()
     else:
         ctx.stop_drying.assert_called_once_with(ctx.printer_id, 0, 0, 0, mode=0)
     ctx.start_print.assert_not_called()
-    async with ctx.session_maker() as db:
-        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
-        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
 
 
 @pytest.mark.asyncio
@@ -751,211 +369,17 @@ async def test_oserror_during_unlink_logs_orphan_path_and_does_not_crash_dispatc
             raise OSError("permission denied")
         return original_unlink(path, *args, **kwargs)
 
-    with caplog.at_level("WARNING", logger="backend.app.services.queue_source_cleanup"):
-        await _dispatch_library_item(ctx)
-        with patch.object(type(ctx.source_path), "unlink", unlink_with_source_failure):
-            await _finish_and_clear(ctx)
+    with caplog.at_level("WARNING", logger="backend.app.services.print_scheduler"):
+        await _dispatch_library_item(ctx, unlink_side_effect=unlink_with_source_failure)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "successful"
+    assert item.status == "dispatching"
     assert item.archive_id == archive.id
     assert item.library_file_id is None
     assert library_file is None
     assert ctx.source_path.exists()
     assert not ctx.thumbnail_path.exists()
     assert ctx.archive_path.exists()
-    assert "QUEUE_ONLY_SOURCE_ORPHAN" in caplog.text
+    assert "TRANSIENT_LIBRARY_FILE_ORPHAN" in caplog.text
     assert str(ctx.source_path) in caplog.text
     assert "permission denied" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_proven_unsent_upload_failure_creates_one_fresh_retry_without_plate_hold(queue_factory):
-    from sqlalchemy import select
-
-    from backend.app.models.print_queue import physical_holding_clause
-    from backend.app.models.settings import Settings
-
-    ctx = await queue_factory(cleanup=True)
-    failed_id = ctx.queue_item_id
-    async with ctx.session_maker() as db:
-        db.add(Settings(key="require_plate_clear", value="false"))
-        next_job = PrintQueueItem(
-            assigned_printer_id=ctx.printer_id,
-            library_file_id=ctx.library_file_id,
-            status="queued",
-        )
-        db.add(next_job)
-        await db.commit()
-        next_id = next_job.id
-    ctx.upload.return_value = False
-    await _dispatch_library_item(ctx)
-    failed, library, _ = await _queue_snapshot(ctx)
-    assert failed.status == "failed" and failed.physical_outcome is None
-    assert library is not None and ctx.source_path.is_file()
-    async with ctx.session_maker() as db:
-        held = await db.scalar(
-            select(PrintQueueItem.id).where(
-                PrintQueueItem.printer_id == ctx.printer_id,
-                physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
-            )
-        )
-        retry = await db.scalar(
-            select(PrintQueueItem).where(
-                PrintQueueItem.id != failed.id,
-                PrintQueueItem.status == "queued",
-                PrintQueueItem.retry_on_failure.is_(False),
-            )
-        )
-        next_job = await db.get(PrintQueueItem, next_id)
-        assert held is None
-        assert retry is not None and retry.retry_on_failure is False
-        assert retry.position < next_job.position
-
-    # The retry has no parent link and cannot start an automatic retry chain.
-    ctx.queue_item_id = retry.id
-    await _dispatch_library_item(ctx)
-    retry, _, _ = await _queue_snapshot(ctx)
-    async with ctx.session_maker() as db:
-        jobs = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
-    assert len(jobs) == 3
-    assert retry.status == "failed" and retry.physical_outcome is None
-    assert ctx.upload.await_count == 2
-    ctx.start_print.assert_not_called()
-    assert failed.id == failed_id
-
-
-async def _make_any_machine_job(ctx):
-    """Turn the case's job into an "Any machine" job, as the Queue creates it."""
-    async with ctx.session_maker() as db:
-        item = await db.get(PrintQueueItem, ctx.queue_item_id)
-        item.printer_id = None
-        item.assigned_printer_id = None
-        item.target_model = "X1C"
-        item.ams_mapping = None
-        await db.commit()
-
-
-async def _row(ctx):
-    async with ctx.session_maker() as db:
-        return await db.get(PrintQueueItem, ctx.queue_item_id)
-
-
-@pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
-@pytest.mark.asyncio
-async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_factory, pool):
-    from backend.app.services.lifecycle.queued import _DispatchBinding
-
-    ctx = await queue_factory(cleanup=False)
-    if pool:
-        await _make_any_machine_job(ctx)
-    binding = _DispatchBinding(ctx.printer_id, None, unassigned=True) if pool else None
-
-    await _dispatch_library_item(ctx, binding=binding, connected=False)
-
-    row = await _row(ctx)
-    assert row.status == "queued"
-    assert row.printer_id is None, "a waiting job is never bound to a printer"
-    assert row.assigned_printer_id == (None if pool else ctx.printer_id)
-    assert row.waiting_reason == "Printer not connected"
-    assert row.manual_start is False, "a transient printer problem retries on its own"
-    ctx.upload.assert_not_awaited()
-    async with ctx.session_maker() as db:
-        # Nothing holds the printer, so the next compatible job can use it.
-        held = await db.scalar(
-            select(PrintQueueItem.id).where(
-                PrintQueueItem.printer_id == ctx.printer_id, PrintQueueItem.status != "queued"
-            )
-        )
-    assert held is None
-
-
-@pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
-@pytest.mark.asyncio
-async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
-    from backend.app.services.lifecycle.queued import _DispatchBinding
-
-    ctx = await queue_factory(cleanup=False)
-    if pool:
-        await _make_any_machine_job(ctx)
-    ctx.source_path.unlink()
-
-    await _dispatch_library_item(ctx, binding=_DispatchBinding(ctx.printer_id, None, unassigned=True) if pool else None)
-
-    row = await _row(ctx)
-    assert row.status == "queued"
-    assert row.printer_id is None
-    assert row.assigned_printer_id == (None if pool else ctx.printer_id)
-    assert row.waiting_reason == "Source file not found on disk"
-    # Parked for a manual start, so it neither fails onto a printer nor
-    # blocks the jobs behind it by being retried every tick.
-    assert row.manual_start is True
-    ctx.upload.assert_not_awaited()
-
-
-async def _selection_binding(ctx, printer_id, ams_mapping, *, unassigned):
-    """The decision a selection pass hands its worker, from the row it read."""
-    from backend.app.services.lifecycle.queued import _DispatchBinding
-
-    async with ctx.session_maker() as db:
-        item = await db.get(PrintQueueItem, ctx.queue_item_id)
-        return _DispatchBinding.for_item(item, printer_id, ams_mapping, unassigned=unassigned)
-
-
-@pytest.mark.asyncio
-async def test_specific_machine_edit_after_selection_is_honoured(queue_factory):
-    ctx = await queue_factory(cleanup=False)
-    binding = await _selection_binding(ctx, ctx.printer_id, "[4]", unassigned=False)
-    async with ctx.session_maker() as db:
-        item = await db.get(PrintQueueItem, ctx.queue_item_id)
-        item.ams_mapping = "[1]"
-        await db.commit()
-
-    await _dispatch_library_item(ctx, binding=binding)
-
-    row = await _row(ctx)
-    assert (row.status, row.printer_id, row.assigned_printer_id, row.ams_mapping) == (
-        "queued",
-        None,
-        ctx.printer_id,
-        "[1]",
-    )
-    ctx.upload.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_unedited_job_with_a_start_time_is_dispatched_with_its_decision(queue_factory):
-    from datetime import timedelta
-
-    from backend.app.services.lifecycle import clock
-
-    ctx = await queue_factory(cleanup=False)
-    await _make_any_machine_job(ctx)
-    async with ctx.session_maker() as db:
-        item = await db.get(PrintQueueItem, ctx.queue_item_id)
-        item.scheduled_time = clock.naive_now() - timedelta(minutes=5)  # Due; compared after a reload.
-        await db.commit()
-    binding = await _selection_binding(ctx, ctx.printer_id, "[4]", unassigned=True)
-
-    await _dispatch_library_item(ctx, binding=binding)
-
-    row = await _row(ctx)
-    assert (row.status, row.printer_id, row.ams_mapping) == ("dispatching", ctx.printer_id, "[4]")
-    ctx.upload.assert_awaited_once()
-
-
-async def test_printer_becoming_busy_during_archive_copy_fails_the_hold_before_ftp(queue_factory):
-    ctx = await queue_factory(cleanup=False)
-    state = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
-
-    async def external_start():
-        # Fresh telemetry can precede the external-job callback's database hold.
-        state.state = "RUNNING"
-
-    await _dispatch_library_item(ctx, printer_status=state, during_archive=external_start)
-    job, _, attempt = await _queue_snapshot(ctx)
-    assert job.status == "failed" and attempt.status == "failed"
-    assert attempt.dispatched_queue_item_id == job.id
-    assert ctx.archive_path.exists()
-    ctx.upload.assert_not_awaited()
-    ctx.start_print.assert_not_called()

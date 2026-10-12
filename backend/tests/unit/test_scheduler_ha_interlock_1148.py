@@ -77,9 +77,9 @@ async def _add_item(ctx, *, printer_id=None, target_model=None):
         db.add(lib)
         await db.flush()
         item = PrintQueueItem(
-            status="queued",
+            status="pending",
             position=1,
-            assigned_printer_id=printer_id,
+            printer_id=printer_id,
             target_model=target_model,
             library_file_id=lib.id,
             # This suite isolates Home Assistant availability. Grove's
@@ -97,8 +97,8 @@ async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying
     patches = [
         patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=None)),
+        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=None)),
         patch(
             "backend.app.services.notification_service.notification_service.on_queue_job_waiting",
             AsyncMock(),
@@ -107,13 +107,12 @@ async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying
             "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
             AsyncMock(),
         ),
-        patch.object(scheduler.selection, "_is_printer_idle", MagicMock(return_value=idle)),
-        patch.object(scheduler.drying, "_is_printer_idle", MagicMock(return_value=idle)),
-        patch.object(scheduler.drying, "_check_auto_drying", drying or AsyncMock()),
-        patch.object(scheduler.mapping, "_compute_ams_mapping_for_printer", AsyncMock(return_value=None)),
-        patch.object(scheduler.selection, "_block_on_filament_deficit", AsyncMock(return_value=False)),
-        patch.object(scheduler.drying, "_prepare_drying_for_dispatch", AsyncMock(return_value=True)),
-        patch.object(scheduler.workers, "launch", launched),
+        patch.object(scheduler, "_is_printer_idle", MagicMock(return_value=idle)),
+        patch.object(scheduler, "_check_auto_drying", drying or AsyncMock()),
+        patch.object(scheduler, "_compute_ams_mapping_for_printer", AsyncMock(return_value=None)),
+        patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
+        patch.object(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True)),
+        patch.object(scheduler, "_launch_uploads", launched),
     ]
     if blocked is not None:
         patches.append(
@@ -123,7 +122,7 @@ async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying
             )
         )
     if finder is not None:
-        patches.append(patch.object(scheduler.selection, "_find_idle_printer_for_model", finder))
+        patches.append(patch.object(scheduler, "_find_idle_printer_for_model", finder))
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
@@ -145,7 +144,7 @@ class TestFixedPrinter:
 
         launched.assert_not_called()
         item = await _get_item(queue_db, item_id)
-        assert item.status == "queued"
+        assert item.status == "pending"
         assert item.waiting_reason == "Waiting on Enclosure Door"
 
     @pytest.mark.asyncio
@@ -157,7 +156,7 @@ class TestFixedPrinter:
         await _run(queue_db, PrintScheduler(), {1: "Enclosure Door"}, MagicMock())
 
         item = await _get_item(queue_db, item_id)
-        assert item.status == "queued"
+        assert item.status == "pending"
         assert item.error_message is None
         assert item.completed_at is None
 
@@ -171,7 +170,7 @@ class TestFixedPrinter:
         await _run(queue_db, scheduler, {}, launched)
 
         launched.assert_called_once()
-        assert list(launched.call_args[0][0]) == [item_id]
+        assert launched.call_args[0][0] == [item_id]
 
     @pytest.mark.asyncio
     async def test_the_stale_reason_is_cleared_on_dispatch(self, queue_db):
@@ -211,7 +210,7 @@ class TestFixedPrinter:
         await _run(queue_db, PrintScheduler(), {2: "Enclosure Door"}, launched)
 
         launched.assert_called_once()
-        assert list(launched.call_args[0][0]) == [item_id]
+        assert launched.call_args[0][0] == [item_id]
 
     @pytest.mark.asyncio
     async def test_nothing_blocked_dispatches_as_before(self, queue_db):
@@ -221,7 +220,7 @@ class TestFixedPrinter:
         await _run(queue_db, PrintScheduler(), {}, launched)
 
         launched.assert_called_once()
-        assert list(launched.call_args[0][0]) == [item_id]
+        assert launched.call_args[0][0] == [item_id]
 
     @pytest.mark.asyncio
     async def test_a_held_printer_is_not_reported_as_busy(self, queue_db):
@@ -257,7 +256,7 @@ class TestFixedPrinter:
             await _run(queue_db, PrintScheduler(), None, launched)
 
         launched.assert_called_once()
-        assert list(launched.call_args[0][0]) == [item_id]
+        assert launched.call_args[0][0] == [item_id]
 
 
 class TestModelBased:
@@ -292,10 +291,8 @@ class TestModelBased:
         )
 
         launched.assert_called_once()
-        assert list(launched.call_args[0][0]) == [item_id]
-        # The printer travels with the worker; the waiting job stays unbound.
-        assert launched.call_args[0][0][item_id].printer_id == 2
-        assert (await _get_item(queue_db, item_id)).printer_id is None
+        assert launched.call_args[0][0] == [item_id]
+        assert (await _get_item(queue_db, item_id)).printer_id == 2
 
     @pytest.mark.asyncio
     async def test_every_printer_held_leaves_the_job_waiting(self, queue_db):
@@ -312,5 +309,5 @@ class TestModelBased:
 
         launched.assert_not_called()
         item = await _get_item(queue_db, item_id)
-        assert item.status == "queued"
+        assert item.status == "pending"
         assert item.printer_id is None

@@ -19,6 +19,27 @@ later. Docker Compose is the supported production install path.
 
 ## Before you upgrade
 
+### Restoration candidate
+
+The restoration candidate uses the `ee00437` print model with queue editing,
+direct Queue uploads, dependency security fixes, live Print/Queue labels, and
+count-based Archive retention. It excludes the Files/Archive split and the
+later lifecycle migrations. Production installations still on `ee00437` do
+not need a database downgrade.
+
+This candidate does not convert databases already migrated by the withdrawn
+development lifecycle. Test with a fresh database or a copy of a compatible
+production backup. Keep the original data intact. Use copied data for offline
+upgrade tests; use a dedicated printer or stop the production instance for
+hardware checks. Do not point two running Grove instances at the same printers.
+
+The previous development code is preserved on
+`archive/dev-before-restoration-2026-10-12`. Its presence does not make the
+restoration candidate production-qualified; complete the candidate checks
+before releasing it through `main`.
+
+### Backup
+
 1. In Grove Control, open **Settings → Backup** and use **Create Backup**.
    Download the ZIP and keep a copy outside the Docker volume or application
    directory until the upgraded installation has been verified.
@@ -98,12 +119,6 @@ schema and data migrations for SQLite or PostgreSQL, and then starts the
 background services. No separate migration command is required for a normal
 `1.0.0` upgrade.
 
-The Files and Archive workflow update adds a nullable, unique link from each
-new dispatch-attempt Archive to its queue item. Existing Archive rows keep a
-NULL link; no released database contains dispatch-attempt links to backfill.
-Deleting a queue item clears its link and keeps the Archive history. No manual
-database step is needed.
-
 Keep the backup until the service starts successfully and you have checked the
 printer list, archive, queue, and settings. If startup reports a migration
 failure, stop the service, keep the original database and backup intact, and
@@ -115,133 +130,6 @@ problems, not routine upgrade steps; see the recovery notes in
 An older SQLite installation that has only `bambutrack.db` is renamed to
 `bambuddy.db` automatically on startup when the new filename does not already
 exist. Back up the data directory before starting that upgrade.
-
-## Files, Queue, and Archive workflow changes
-
-Each print that reaches dispatch, including a reprint, now creates its own
-Archive entry containing the exact file sent to the printer. Direct Queue
-uploads are held as temporary sources and no longer appear in Files. Use
-**Save to Files** on an Archive or pending virtual-printer upload when the
-file should be kept in the user-managed library. The virtual printer's former
-**Archive** mode now saves to Files.
-
-API clients should replace `POST /api/v1/archives/upload` and
-`POST /api/v1/archives/upload-bulk` with Files or Queue uploads; both old
-Archive routes return HTTP 410. Pending-upload routes
-`POST /api/v1/pending-uploads/{id}/archive` and
-`POST /api/v1/pending-uploads/archive-all` also return HTTP 410. Replace them
-with `POST /api/v1/pending-uploads/{id}/save-to-files` and
-`POST /api/v1/pending-uploads/save-to-files-all`.
-
-The `library_archive_mode` setting has been removed. Queue-create requests and
-responses no longer have the `cleanup_library_after_dispatch` field; the
-server derives cleanup from whether the source is a hidden Queue upload.
-
-## Queue job identity (stage 2)
-
-No schema migration is required. Printer events now need a matching submission
-ID; legacy active jobs without one remain in place until resolved by the user.
-The Queue offers **It's printing** / **It didn't start** for unconfirmed
-dispatches after 270 seconds. Inspect the physical printer before choosing.
-Interrupted heat soaks remain reserved with Stop and Skip controls. Local prints
-that report no firmware ID cannot be reattached automatically after reconnect
-or restart. Use Stop to resolve an old active reservation when necessary.
-See [Queue job identity](docs/queue-job-identity.md) for details and the required
-hardware validation. Status names sent to integrations remain unchanged.
-
-## Queue pause and resume (stage 4)
-
-No additional migration is needed after stage 3: `paused` is already included
-in its versioned lifecycle and printer holding index. The next fresh, matching
-PAUSE observation changes an active job to Paused; matching RUNNING telemetry
-returns it to Printing. Existing ambiguous or offline jobs stay where they are,
-with Stop available. Inspect the printer before resolving them.
-
-Queue REST clients now receive `paused`. The webhook Queue view continues to
-report `printing` for paused jobs and includes them in its printing count;
-the existing Prometheus queue printing gauge does the same. Pause/resume does
-not create another Archive or change its physical outcome. See the
-[lifecycle guide and stage 4 hardware checklist](docs/queue-status-transitions.md).
-
-## Queue Archive alignment (stage 5)
-
-The upgrade adds nullable physical-outcome fields to Queue jobs and backfills
-known outcomes once, controlled by `queue_archive_outcome_version = 1`.
-An exact Archive/job link or an unambiguous terminal job state supplies the
-backfill; an older `unsuccessful` job without that evidence stays unknown.
-Display reasons are never used to guess whether a print failed or was stopped.
-
-New attempts create their exact Archive copy atomically with entry into
-Dispatching, before uploading to the printer. Callers prepare that copy before
-taking the transition lock; the writer only conditionally changes the job and
-flushes its prepared Archive. Entry without this job's prepared attempt is
-rejected. A copy failure takes a Failed hold directly, without entering
-Dispatching or sending a print. Heat-soak and Skip preparation release the control
-lock after committing a heartbeat, allowing Stop to win during copying.
-The handoff rechecks the job's status and owner before linking the attempt;
-cancelled preparations leave no Archive row or prepared directory.
-An upload or command failure
-therefore appears in Archive while its
-job holds the printer on the Queue. Jobs cancelled while waiting, or stopped
-or failed during preheating, still create no Archive entry.
-
-Archive outcomes commit when jobs enter Finished, Failed, or Cancelled.
-Clear Plate changes only the job. Existing Archive outcome names remain
-`completed`, `failed`, and `aborted`, including for paused and external jobs.
-An external Archive download that finishes after Clear Plate uses the retained
-physical outcome, timestamp and failure reason. Copy failures also honor the
-job's Auto Off setting, including completed and skipped heat-soak handoffs.
-Heat-soak handoffs check current telemetry after copying, including when a
-reconnection replaces the client. They also check readiness before copying;
-unready telemetry keeps the heartbeat alive without repeated copies. A final
-readiness rejection after a slow copy refreshes the same soak's heartbeat,
-preventing a false scheduler-timeout failure. Database or flush errors in one
-handoff, including heartbeat recovery, preserve other committed handoffs from
-the tick.
-Missing/deleted sources found before taking the printer stay parked for manual
-start, including reprints of trashed Archives. Preparation also rejects sources
-deleted during heat soaking. If a source disappears between the eligibility
-read and preparation, a queued job still parks without taking the printer;
-an existing heat soak shuts down and retains its Failed hold.
-All three dispatch paths share user-safe preparation-error reporting. A deleted
-source and insufficient disk space have specific messages; other copy failures
-use a generic message. Full exceptions, including server paths, stay in the log.
-A Skip copy failure
-commits Failed with its printer hold and Auto Off, then returns HTTP 409 with
-the job's error instead of reporting success. The Queue shows that error and
-refreshes the failed job. Pool copy failures send a failure notification;
-assignment notifications require a successful dispatch handoff.
-Skip succeeds when the same job's exact attempt has already progressed during
-the request; it neither copies again nor launches another dispatch worker.
-Skip checks fresh ready/idle telemetry before copying and at handoff. If the
-printer becomes busy, disconnected or unready, it returns HTTP 409 and keeps
-the soak alive; any prepared attempt is discarded and no worker starts.
-The response describes current readiness or a changed soak, rather than an
-older job error. Only a copy-failure response uses the newly committed job error.
-A readiness rejection at the final handoff also reports that the printer is
-not ready. The same soak keeps its heartbeat and remains available to retry.
-When cancellation wins a dispatch update after upload, staged printer-file
-cleanup is attempted without removing the committed cancelled Archive or hold.
-Repeated completion callbacks still repair proven restored legacy Archive links
-without rewriting the job's recorded physical outcome.
-Reconnect reconciliation reaches this repair for already-ended and final jobs,
-including cached completions, without replaying notifications or other completion
-effects. Duplicate identities still cannot establish a link.
-Retry starts with empty physical-outcome
-fields; cancelling the retry while queued does not inherit the old result.
-Hidden Queue uploads remain available while any nonfinal job references them,
-including a queued file variant; deletion happens after the last job finalizes
-and its transaction commits. Files copies remain independent.
-
-Existing active attempts retain their Archive and use the normal identity
-checks. When an older active Archive lacks its job link, the transition writer
-establishes it only if printer and submission IDs match uniquely and the Archive
-is still printing. The link, any late firmware-ID binding and physical outcome
-commit together. Reused IDs, other jobs' attempts, deleted Archives and historical
-reprint sources remain untouched. No additional schema migration is needed.
-An older in-flight upload with no attempt Archive remains held for
-inspection and Retry rather than sending without an Archive. Review the
-[stage 5 qualification checklist](docs/queue-status-transitions.md).
 
 ## Timezone
 

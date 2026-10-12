@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'Geliştirici LAN modu şunlarda etkin değil: {{names}}. Bazı özellikler çalışmayabilir.',
     howToEnable: 'Nasıl etkinleştirilir',
     incompatibleFile: 'Bu dosya {{slicedFor}} için dilimlendi, ancak bu yazıcı bir {{printerModel}}',
-    directUploadLibraryNote: 'Bu yükleme kuyruğa eklenir ve Dosya Yöneticisi’ne kaydedilmez.',
+    directUploadLibraryNote: 'Yüklenen dosya kuyruğa eklenmeden önce Dosya Yöneticisi’ne kaydedilir.',
     dropNotPrintable: 'Yalnızca .gcode ve .gcode.3mf dosyaları yazdırılabilir',
     dropToPrint: 'Yazdırmak için bırakın',
     cannotPrint: 'Yazıcı meşgul',
@@ -835,8 +835,6 @@ export default {
       failedUpdateFavorites: 'Favoriler güncellenemedi',
       exportDownloaded: 'Dışa aktarma indirildi',
       exportFailed: 'Dışa aktarma başarısız',
-      savedToFiles: '{{filename}} Dosyalar’a kaydedildi',
-      failedSaveToFiles: 'Baskı dosyası Dosyalar’a kaydedilemedi',
     },
     menu: {
       print: 'Yazdır',
@@ -876,7 +874,6 @@ export default {
       select: 'Seç',
       deselect: 'Seçimi Kaldır',
       delete: 'Sil',
-      saveToFiles: 'Dosyalara Kaydet',
     },
     permission: {
       noReprint: 'Bu arşivi yeniden yazdırma izniniz yok',
@@ -974,7 +971,7 @@ export default {
       deleteButton: 'Sil',
       deletePurgeStats: 'Ayrıca bu baskıyı Hızlı İstatistiklerden de kaldır (filament, süre, maliyet, enerji)',
       deleteQueueItemsWarning: 'Bu arşive bağlı {{count}} kuyruk öğesi de kaldırılacak.',
-      deleteBlockedByPrinting: 'Silinemiyor — {{count}} iş hâlâ bir yazıcıyı ayırıyor. Önce etkin işleri durdurun ve tablalarını boşaltın.',
+      deleteBlockedByPrinting: 'Silinemiyor — {{count}} kuyruk öğesi gönderiliyor veya yazdırılıyor. Önce etkin işi durdurun, ardından tekrar deneyin.',
       removeSource3mf: 'Kaynak 3MF Kaldır',
       removeSource3mfConfirm: '"{{name}}" dosyasından kaynak 3MF dosyasını kaldırmak istediğinizden emin misiniz? Bu, orijinal dilimleyici proje dosyasını silecek.',
       removeButton: 'Kaldır',
@@ -1064,12 +1061,6 @@ export default {
 
   // Kuyruk sayfası
   queue: {
-    awaitingPlateClear: 'Tabla temizliği bekleniyor',
-    resolveDispatch: {
-      prompt: "Yazıcı bu işi onaylamadı. Seçmeden önce yazıcıyı kontrol edin:",
-      printing: "Yazdırıyor",
-      failed: "Yazdırma başlamadı",
-    },
     title: 'Baskı Kuyruğu',
     subtitle: 'Baskı işlerinizi zamanlayın ve yönetin',
     filamentShort: {
@@ -1150,10 +1141,6 @@ export default {
     },
     // Durum
     status: {
-      queued: 'Kuyrukta',
-      finished: 'Bitti',
-      successful: 'Başarılı',
-      unsuccessful: 'Başarısız',
       pending: 'Beklemede',
       scheduled: 'Planlandı',
       waiting: 'Bekliyor',
@@ -1193,7 +1180,8 @@ export default {
     },
     // Rozetler
     badges: {
-      manualStart: 'Manuel başlatma',
+      staged: 'Hazırlandı',
+      requiresPrevious: 'Önceki başarı gerekli',
       autoPowerOff: 'Otomatik kapanma',
       gcodeInjection: 'G-kod',
     },
@@ -1213,8 +1201,6 @@ export default {
     },
     // İşlemler
     actions: {
-      clearPlate: 'Tablayı temizle',
-      retry: 'Yeniden dene',
       startPrint: 'Baskıyı Başlat',
       stopPrint: 'Baskıyı Durdur',
       requeue: 'Yeniden Kuyrukla',
@@ -1858,6 +1844,11 @@ export default {
     captureFinishPhoto: 'Bitiş fotoğrafı çek',
     noPrintersConfigured: 'Yapılandırılmış yazıcı yok',
     // Arşiv ayarları
+    archiveMode: {
+      always: 'Her zaman arşiv girişi oluştur',
+      never: 'Asla arşiv girişi oluşturma',
+      ask: 'Her seferinde sor',
+    },
     // Güncellemeler
     checkForUpdatesLabel: 'Güncellemeleri kontrol et',
     checkPrinterFirmware: 'Yazıcı firmware\'ini kontrol et',
@@ -2366,6 +2357,8 @@ export default {
     energyModeTotalDescription: 'Gösterge paneli, akıllı prizlerden ömür boyu enerjiyi gösterir',
     // Dosya Yöneticisi
     fileManager: 'Dosya Yöneticisi',
+    createArchiveEntry: 'Yazdırırken Arşiv Girişi Oluştur',
+    createArchiveEntryDescription: 'Dosya Yöneticisinden yazdırırken isteğe bağlı olarak bir arşiv girişi oluştur',
     lowDiskSpaceWarning: 'Düşük Disk Alanı Uyarısı',
     lowDiskSpaceDescription: 'Boş disk alanı bu eşiğin altına düştüğünde uyarı göster',
     // Güncellemeler
@@ -3824,7 +3817,6 @@ export default {
     runningWithProgress: '{{name}} — {{stage}} (%{{percent}}) — {{elapsed}}',
     runningWithProgressMultiPlate: '{{plateCount}}/{{plateIndex}} plaka • {{name}} — {{stage}} (%{{percent}}) — {{elapsed}}',
     completedToast: '{{name}} dilimlendi',
-    completedToFilesToast: '{{name}} dilimlendi ve Dosyalar’a kaydedildi',
     failedTitle: 'Dilimleme başarısız',
     failedToast: '{{name}} dilimleme başarısız: {{detail}}',
     tier: {
@@ -4884,12 +4876,12 @@ export default {
     },
     mode: {
       title: 'Mod',
-      archive: 'Dosyalar',
-      archiveDesc: 'Yüklemeleri Dosyalar\'a kaydet',
+      archive: 'Arşiv',
+      archiveDesc: 'Dosyaları hemen arşivle',
       review: 'İnceleme',
-      reviewDesc: 'Yüklemeleri Dosyalar\'a kaydetmeden önce incele',
+      reviewDesc: 'Arşivlemeden önce incele',
       queue: 'Kuyruk',
-      queueDesc: 'Yüklemeleri yazdırma kuyruğuna ekle',
+      queueDesc: 'Arşivle ve kuyruğa ekle',
       proxy: 'Proxy',
       proxyDesc: 'Gerçek yazıcıya ilet',
     },
@@ -4915,8 +4907,8 @@ export default {
       readGuide: 'Etkinleştirmeden önce kurulum kılavuzunu okuyun',
     },
     archiveNameSource: {
-      title: 'Yükleme görüntüleme adı',
-      description: 'Yüklemelerin inceleme listesinde nasıl görüneceğini seçin. “Meta veriler” 3MF içine gömülü başlığı, “Dosya adı” FTP ile alınan dosya adını kullanır.',
+      title: 'Arşiv ad kaynağı',
+      description: 'Dosyalar sanal yazıcı aracılığıyla geldiğinde yeni arşivlerin nasıl adlandırılacağını seçin. "Meta veri" 3MF\'den dilimleyici-gömülü başlığı kullanır (varsayılan). "Dosya adı" Bambu Studio\'nun FTP üzerinden gönderdiği dosya adını kullanır. Not: Bambu Studio, 3MF\'de bir Başlık alanı varsa "yazıcıya gönder" iletişim kutusunda yazdığınız adı bu alanla geçersiz kılar, bu nedenle her iki mod da genellikle aynı dizeyi üretir.',
       metadata: 'Meta veri',
       filename: 'Dosya adı',
     },
@@ -4931,7 +4923,7 @@ export default {
     howItWorks: {
       title: 'Nasıl çalışır',
       step1: "Aynı LAN'da, sanal yazıcılar dilimleyicinizde (Bambu Studio / OrcaSlicer) keşif yoluyla otomatik olarak görünür. Diğer ağlardan, IP adresi ve erişim koduyla manuel olarak ekleyin.",
-      step2: 'Dosyalar, İnceleme ve Kuyruk modlarında 3MF dosyalarını Grove Control’e yüklemek için dilimleyicinizdeki “Gönder” düğmesini kullanın. Dosyalar modu dosyaları kaydeder, İnceleme modu kaydetme veya silme seçeneği sunar, Kuyruk modu yazdırma işleri ekler. “Baskı başarılı” yüklemenin tamamlandığı anlamına gelir.',
+      step2: '3MF dosyalarını Grove Control\'ye yüklemek için Arşiv, İnceleme ve Kuyruk modlarında dilimleyicinizdeki "Gönder" düğmesini kullanın. Dilimleyici "Baskı başarılı" gösterecek — dosya saklanır, yazdırılmaz.',
       step3: 'Proxy modunda, sanal yazıcı tüm trafiği gerçek bir yazıcıya iletir — baskılar doğrudan bağlıymış gibi hemen başlar.',
     },
     status: {
@@ -5213,6 +5205,12 @@ export default {
     autoOffAfterDrying: 'Kurutmadan Sonra Otomatik Kapat',
     autoOffAfterDryingDescription: 'AMS kurutması tamamlandığında kapat',
     delayAfterDryingMinutes: 'Kurutma gecikmesi (dakika)',
+    turnOffDelayMode: 'Kapatma Gecikme Modu',
+    time: 'Süre',
+    temp: 'Sıcaklık',
+    delayMinutes: 'Gecikme (dakika)',
+    tempThreshold: 'Sıcaklık eşiği (°C)',
+    tempThresholdDescription: 'Nozul bu sıcaklığın altına soğuduğunda kapanır',
     edit: 'Düzenle',
     deleteConfirm: '"{{name}}" silmek istediğinizden emin misiniz? Bu geri alınamaz.',
     turnOnConfirm: '"{{name}}" açmak istediğinizden emin misiniz?',

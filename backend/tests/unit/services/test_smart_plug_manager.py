@@ -5,24 +5,12 @@ that were identified as common regression points.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
 
-from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.smart_plug_manager import SmartPlugManager
-
-
-@pytest.fixture
-def queue_sessions(test_engine, monkeypatch):
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    from backend.app.core import database
-
-    monkeypatch.setattr(database, "async_session", async_sessionmaker(test_engine, expire_on_commit=False))
 
 
 class TestSmartPlugManager:
@@ -45,6 +33,9 @@ class TestSmartPlugManager:
         plug.enabled = True
         plug.auto_on = True
         plug.auto_off = True
+        plug.off_delay_mode = "time"
+        plug.off_delay_minutes = 5
+        plug.off_temp_threshold = 70
         plug.printer_id = 1
         plug.auto_off_executed = False
         plug.auto_off_pending = False
@@ -167,6 +158,103 @@ class TestSmartPlugManager:
             await manager.on_print_start(printer_id=1, db=mock_db)
 
             assert mock_plug.auto_off_executed is False
+
+    # ========================================================================
+    # Tests for on_print_complete
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    async def test_on_print_complete_schedules_time_based_off(self, manager, mock_plug, mock_db):
+        """Verify time-based auto-off is scheduled when print completes."""
+        mock_plug.off_delay_mode = "time"
+        mock_plug.off_delay_minutes = 5
+
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get_plug,
+            patch.object(manager, "_schedule_delayed_off") as mock_schedule,
+        ):
+            mock_get_plug.return_value = [mock_plug]
+
+            await manager.on_print_complete(printer_id=1, status="completed", db=mock_db)
+
+            mock_schedule.assert_called_once_with(mock_plug, 1, 300)  # 5 min * 60 sec
+
+    @pytest.mark.asyncio
+    async def test_on_print_complete_schedules_temp_based_off(self, manager, mock_plug, mock_db):
+        """Verify temperature-based auto-off is scheduled when print completes."""
+        mock_plug.off_delay_mode = "temperature"
+        mock_plug.off_temp_threshold = 70
+
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get_plug,
+            patch.object(manager, "_schedule_temp_based_off") as mock_schedule,
+        ):
+            mock_get_plug.return_value = [mock_plug]
+
+            await manager.on_print_complete(printer_id=1, status="completed", db=mock_db)
+
+            mock_schedule.assert_called_once_with(mock_plug, 1, 70)
+
+    @pytest.mark.asyncio
+    async def test_on_print_complete_skipped_when_auto_off_disabled(self, manager, mock_plug, mock_db):
+        """CRITICAL: Verify auto-off does NOT trigger when auto_off is False.
+
+        This is a key regression test - the toggle must respect the setting.
+        """
+        mock_plug.auto_off = False
+
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get_plug,
+            patch.object(manager, "_schedule_delayed_off") as mock_schedule,
+            patch.object(manager, "_schedule_temp_based_off") as mock_temp,
+        ):
+            mock_get_plug.return_value = [mock_plug]
+
+            await manager.on_print_complete(printer_id=1, status="completed", db=mock_db)
+
+            mock_schedule.assert_not_called()
+            mock_temp.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_on_print_complete_skipped_when_plug_disabled(self, manager, mock_plug, mock_db):
+        """Verify auto-off does NOT trigger when plug is disabled."""
+        mock_plug.enabled = False
+
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get_plug,
+            patch.object(manager, "_schedule_delayed_off") as mock_schedule,
+        ):
+            mock_get_plug.return_value = [mock_plug]
+
+            await manager.on_print_complete(printer_id=1, status="completed", db=mock_db)
+
+            mock_schedule.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_on_print_complete_skipped_on_failed_print(self, manager, mock_plug, mock_db):
+        """Verify auto-off does NOT trigger on failed prints for investigation."""
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get_plug,
+            patch.object(manager, "_schedule_delayed_off") as mock_schedule,
+        ):
+            mock_get_plug.return_value = [mock_plug]
+
+            await manager.on_print_complete(printer_id=1, status="failed", db=mock_db)
+
+            mock_schedule.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_on_print_complete_skipped_on_aborted_print(self, manager, mock_plug, mock_db):
+        """Verify auto-off does NOT trigger on aborted prints."""
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get_plug,
+            patch.object(manager, "_schedule_delayed_off") as mock_schedule,
+        ):
+            mock_get_plug.return_value = [mock_plug]
+
+            await manager.on_print_complete(printer_id=1, status="aborted", db=mock_db)
+
+            mock_schedule.assert_not_called()
 
     # ========================================================================
     # Tests for on_drying_complete (#1349)
@@ -418,8 +506,8 @@ class TestAutoOffPersistent:
         return SmartPlugManager()
 
     @pytest.mark.asyncio
-    async def test_mark_auto_off_executed_does_not_change_job_policy(self, manager):
-        """Executing one job must not change future jobs' Auto Off setting."""
+    async def test_mark_auto_off_executed_one_shot_disables_auto_off(self, manager):
+        """Default one-shot: auto_off should be set to False after execution."""
         mock_plug = MagicMock()
         mock_plug.id = 1
         mock_plug.auto_off = True
@@ -440,8 +528,7 @@ class TestAutoOffPersistent:
 
             await manager._mark_auto_off_executed(1)
 
-            assert mock_plug.auto_off is True, "A job outcome must not mutate the plug's policy"
-            assert mock_plug.auto_off_executed is True
+            assert mock_plug.auto_off is False, "One-shot: auto_off should be disabled"
             assert mock_plug.auto_off_pending is False
             assert mock_plug.auto_off_pending_since is None
             mock_db.commit.assert_called_once()
@@ -473,6 +560,81 @@ class TestAutoOffPersistent:
             assert mock_plug.auto_off_pending is False
             assert mock_plug.auto_off_pending_since is None
             mock_db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_persistent_auto_off_full_cycle(self, manager):
+        """Verify persistent auto-off survives a full print cycle.
+
+        Simulates: print start → print complete → auto-off executes → next print start.
+        auto_off should remain True throughout for persistent plugs.
+        """
+        mock_plug = MagicMock()
+        mock_plug.id = 3
+        mock_plug.name = "HA BentoBox Filter"
+        mock_plug.plug_type = "homeassistant"
+        mock_plug.ha_entity_id = "switch.bentobox_filter"
+        mock_plug.ip_address = None
+        mock_plug.username = None
+        mock_plug.password = None
+        mock_plug.enabled = True
+        mock_plug.auto_on = True
+        mock_plug.auto_off = True
+        mock_plug.auto_off_persistent = True
+        mock_plug.off_delay_mode = "time"
+        mock_plug.off_delay_minutes = 1
+        mock_plug.off_temp_threshold = 70
+        mock_plug.printer_id = 1
+        mock_plug.auto_off_executed = False
+        mock_plug.auto_off_pending = False
+        mock_plug.last_state = "OFF"
+        mock_plug.last_checked = None
+
+        mock_db = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        # Step 1: Print starts — plug turns on
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get,
+            patch.object(manager, "get_service_for_plug", new_callable=AsyncMock) as mock_svc,
+        ):
+            mock_get.return_value = [mock_plug]
+            mock_service = AsyncMock()
+            mock_service.turn_on = AsyncMock(return_value=True)
+            mock_svc.return_value = mock_service
+
+            await manager.on_print_start(printer_id=1, db=mock_db)
+
+            assert mock_plug.auto_off_executed is False
+            assert mock_plug.auto_off is True  # Still enabled
+
+        # Step 2: Print completes — auto-off is scheduled
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock) as mock_get,
+            patch.object(manager, "_schedule_delayed_off") as mock_schedule,
+        ):
+            mock_get.return_value = [mock_plug]
+
+            await manager.on_print_complete(printer_id=1, status="completed", db=mock_db)
+
+            mock_schedule.assert_called_once()
+            assert mock_plug.auto_off is True  # Still enabled after scheduling
+
+        # Step 3: Auto-off executes via _mark_auto_off_executed
+        with patch("backend.app.core.database.async_session") as mock_session_ctx:
+            mock_db2 = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.scalar_one_or_none.return_value = mock_plug
+            mock_db2.execute = AsyncMock(return_value=mock_result)
+            mock_db2.commit = AsyncMock()
+
+            mock_session_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_db2)
+            mock_session_ctx.return_value.__aexit__ = AsyncMock()
+
+            await manager._mark_auto_off_executed(3)
+
+            # KEY ASSERTION: auto_off stays True for persistent mode
+            assert mock_plug.auto_off is True, "Persistent auto_off must survive execution"
+            assert mock_plug.auto_off_pending is False
 
 
 class TestScheduleLoop:
@@ -598,30 +760,127 @@ class TestScheduleLoop:
             mock_tasmota.turn_on.assert_not_called()
 
 
-class TestDryingAutoOffGuard:
-    """A drying cooldown must not cut power while a print is active."""
+class TestPendingAutoOffPersistence:
+    """Tests for auto-off pending state persistence (restart recovery)."""
 
     @pytest.fixture
     def manager(self):
         return SmartPlugManager()
 
-    async def test_queue_lookup_failure_defers_auto_off(self, manager, queue_sessions, test_engine, monkeypatch):
-        from sqlalchemy import event
-        from sqlalchemy.exc import OperationalError
+    @pytest.mark.asyncio
+    async def test_resume_pending_auto_offs_temperature_mode(self, manager):
+        """Verify temperature-based pending auto-offs are resumed on startup."""
+        mock_plug = MagicMock()
+        mock_plug.id = 1
+        mock_plug.name = "Test Plug"
+        mock_plug.ip_address = "192.168.1.100"
+        mock_plug.username = None
+        mock_plug.password = None
+        mock_plug.printer_id = 1
+        mock_plug.auto_off_pending = True
+        mock_plug.auto_off_pending_since = datetime.now(timezone.utc)
+        mock_plug.off_delay_mode = "temperature"
+        mock_plug.off_temp_threshold = 70
 
-        from backend.app.services.printer_manager import printer_manager
+        with (
+            patch("backend.app.core.database.async_session") as mock_session_ctx,
+            patch.object(manager, "_schedule_temp_based_off") as mock_schedule,
+        ):
+            mock_db = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.scalars.return_value.all.return_value = [mock_plug]
+            mock_db.execute = AsyncMock(return_value=mock_result)
 
-        monkeypatch.setattr(printer_manager, "is_print_active", lambda _id: False)
+            mock_session_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session_ctx.return_value.__aexit__ = AsyncMock()
 
-        def fail_queue_query(connection, cursor, statement, parameters, context, executemany):
-            if "FROM print_queue" in statement:
-                raise OperationalError(statement, parameters, Exception("database unavailable"))
+            await manager.resume_pending_auto_offs()
 
-        event.listen(test_engine.sync_engine, "before_cursor_execute", fail_queue_query)
-        try:
-            assert await manager._printer_has_active_work(1)
-        finally:
-            event.remove(test_engine.sync_engine, "before_cursor_execute", fail_queue_query)
+            mock_schedule.assert_called_once_with(mock_plug, 1, 70)
+
+    @pytest.mark.asyncio
+    async def test_resume_pending_auto_offs_time_mode_immediate_off(self, manager):
+        """Verify time-based pending auto-offs turn off immediately on resume."""
+        mock_plug = MagicMock()
+        mock_plug.id = 1
+        mock_plug.name = "Test Plug"
+        mock_plug.ip_address = "192.168.1.100"
+        mock_plug.username = None
+        mock_plug.password = None
+        mock_plug.printer_id = 1
+        mock_plug.auto_off_pending = True
+        mock_plug.auto_off_pending_since = datetime.now(timezone.utc)
+        mock_plug.off_delay_mode = "time"
+
+        with (
+            patch("backend.app.core.database.async_session") as mock_session_ctx,
+            patch("backend.app.services.smart_plug_manager.tasmota_service") as mock_tasmota,
+            patch.object(manager, "_mark_auto_off_executed", new_callable=AsyncMock) as mock_mark,
+            patch("backend.app.services.smart_plug_manager.printer_manager") as mock_pm,
+        ):
+            mock_db = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.scalars.return_value.all.return_value = [mock_plug]
+            mock_db.execute = AsyncMock(return_value=mock_result)
+
+            mock_session_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session_ctx.return_value.__aexit__ = AsyncMock()
+
+            mock_tasmota.turn_off = AsyncMock(return_value=True)
+            mock_pm.is_print_active.return_value = False  # printer idle on restart
+
+            await manager.resume_pending_auto_offs()
+
+            mock_tasmota.turn_off.assert_called_once()
+            mock_mark.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_resume_pending_auto_off_skipped_when_printing(self, manager):
+        """#1890: on restart, a stale pending off must NOT power off a live print;
+        the pending flag is cleared instead."""
+        mock_plug = MagicMock()
+        mock_plug.id = 1
+        mock_plug.name = "Test Plug"
+        mock_plug.printer_id = 1
+        mock_plug.auto_off_pending = True
+        mock_plug.auto_off_pending_since = datetime.now(timezone.utc)
+        mock_plug.off_delay_mode = "time"
+
+        with (
+            patch("backend.app.core.database.async_session") as mock_session_ctx,
+            patch("backend.app.services.smart_plug_manager.tasmota_service") as mock_tasmota,
+            patch("backend.app.services.smart_plug_manager.printer_manager") as mock_pm,
+            patch.object(manager, "_schedule_temp_based_off") as mock_temp,
+        ):
+            mock_db = AsyncMock()
+            mock_result = MagicMock()
+            mock_result.scalars.return_value.all.return_value = [mock_plug]
+            mock_db.execute = AsyncMock(return_value=mock_result)
+            mock_session_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+            mock_session_ctx.return_value.__aexit__ = AsyncMock()
+
+            mock_tasmota.turn_off = AsyncMock(return_value=True)
+            mock_pm.is_print_active.return_value = True  # printer printing again on restart
+            mock_pm.get_status.return_value = MagicMock(state="RUNNING")
+
+            await manager.resume_pending_auto_offs()
+
+            mock_tasmota.turn_off.assert_not_called()  # never cut power on the live print
+            mock_temp.assert_not_called()
+            assert mock_plug.auto_off_pending is False  # stale pending cleared
+
+
+class TestActivePrintGuard:
+    """#1890 — auto-off must never cut power while a print is loaded/running.
+
+    Covers the two off-executors (`_delayed_off`, `_temp_based_off`), the new
+    queue-override scheduler that honours per-plug settings, and the
+    on_print_start cancellation gap.
+    """
+
+    @pytest.fixture
+    def manager(self):
+        return SmartPlugManager()
 
     @pytest.fixture
     def mock_plug(self):
@@ -634,16 +893,19 @@ class TestDryingAutoOffGuard:
         plug.enabled = True
         plug.auto_on = True
         plug.auto_off = True
+        plug.off_delay_mode = "time"
+        plug.off_delay_minutes = 5
+        plug.off_temp_threshold = 70
         plug.printer_id = 1
         plug.plug_type = "tasmota"
         plug.ha_entity_id = None
         return plug
 
-    # ---- Delayed AMS drying shutdown -------------------------------------
+    # ---- _delayed_off (time mode) ----------------------------------------
 
     @pytest.mark.asyncio
     async def test_delayed_off_skips_when_printer_printing_again(self, manager):
-        """If a print starts during the drying cooldown, skip the off."""
+        """Time-delay fires after N min; if a reprint is running, skip the off."""
         with (
             patch("backend.app.services.smart_plug_manager.printer_manager") as mock_pm,
             patch.object(manager, "get_service_for_plug", new_callable=AsyncMock) as mock_get_svc,
@@ -660,7 +922,7 @@ class TestDryingAutoOffGuard:
             mock_mark_pending.assert_awaited_with(1, False)  # pending flag cleared
 
     @pytest.mark.asyncio
-    async def test_delayed_off_powers_off_when_idle(self, manager, queue_sessions):
+    async def test_delayed_off_powers_off_when_idle(self, manager):
         """When the printer is genuinely idle, the delayed off still fires."""
         mock_service = AsyncMock()
         mock_service.turn_off = AsyncMock(return_value=True)
@@ -675,6 +937,95 @@ class TestDryingAutoOffGuard:
 
             mock_service.turn_off.assert_awaited_once()
             mock_pm.mark_printer_offline.assert_called_once_with(1)
+
+    # ---- _temp_based_off (temperature mode) ------------------------------
+
+    @pytest.mark.asyncio
+    async def test_temp_based_off_defers_while_printing_even_if_cool(self, manager):
+        """Nozzle can dip below threshold during a reprint's PREPARE/heat phase;
+        the guard must defer rather than cut power on the loaded print."""
+        with (
+            patch("backend.app.services.smart_plug_manager.printer_manager") as mock_pm,
+            patch("backend.app.services.smart_plug_manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch.object(manager, "get_service_for_plug", new_callable=AsyncMock) as mock_get_svc,
+        ):
+            # Cool enough to trip the threshold, but a print is active.
+            mock_pm.get_status.return_value = MagicMock(state="PREPARE", temperatures={"nozzle": 30})
+            mock_pm.is_print_active.return_value = True
+            # Break the poll loop after the first deferral so the test terminates.
+            mock_sleep.side_effect = asyncio.CancelledError()
+
+            await manager._temp_based_off(1, "tasmota", "1.2.3.4", None, None, None, printer_id=1, temp_threshold=70)
+
+            mock_get_svc.assert_not_called()  # never turned off despite temp < threshold
+
+    @pytest.mark.asyncio
+    async def test_temp_based_off_powers_off_when_cool_and_idle(self, manager):
+        """Cool nozzle + idle printer → turn off using the plug's threshold."""
+        mock_service = AsyncMock()
+        mock_service.turn_off = AsyncMock(return_value=True)
+        with (
+            patch("backend.app.services.smart_plug_manager.printer_manager") as mock_pm,
+            patch("backend.app.services.smart_plug_manager.asyncio.sleep", new_callable=AsyncMock),
+            patch.object(manager, "get_service_for_plug", new_callable=AsyncMock, return_value=mock_service),
+            patch.object(manager, "_mark_auto_off_executed", new_callable=AsyncMock),
+        ):
+            mock_pm.get_status.return_value = MagicMock(state="FINISH", temperatures={"nozzle": 40})
+            mock_pm.is_print_active.return_value = False
+
+            await manager._temp_based_off(1, "tasmota", "1.2.3.4", None, None, None, printer_id=1, temp_threshold=55)
+
+            mock_service.turn_off.assert_awaited_once()
+
+    # ---- schedule_off_after_queue_job (uses plug settings, not hardcoded 50/600)
+
+    @pytest.mark.asyncio
+    async def test_queue_off_uses_time_mode_regardless_of_global_auto_off(self, manager, mock_plug):
+        """Queue 'auto off after this job' is a per-job override — it schedules
+        even when the plug's global auto_off is disabled, and honours the plug's
+        configured time-delay mode."""
+        mock_plug.auto_off = False
+        mock_plug.off_delay_mode = "time"
+        mock_plug.off_delay_minutes = 8
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock, return_value=[mock_plug]),
+            patch.object(manager, "_schedule_delayed_off") as mock_delayed,
+            patch.object(manager, "_schedule_temp_based_off") as mock_temp,
+        ):
+            await manager.schedule_off_after_queue_job(printer_id=1, db=AsyncMock())
+
+            mock_delayed.assert_called_once_with(mock_plug, 1, 8 * 60)  # plug's minutes, not hardcoded
+            mock_temp.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_queue_off_uses_configured_temp_threshold(self, manager, mock_plug):
+        """Temperature mode passes the plug's off_temp_threshold, not a hardcoded 50."""
+        mock_plug.off_delay_mode = "temperature"
+        mock_plug.off_temp_threshold = 65
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock, return_value=[mock_plug]),
+            patch.object(manager, "_schedule_delayed_off") as mock_delayed,
+            patch.object(manager, "_schedule_temp_based_off") as mock_temp,
+        ):
+            await manager.schedule_off_after_queue_job(printer_id=1, db=AsyncMock())
+
+            mock_temp.assert_called_once_with(mock_plug, 1, 65)
+            mock_delayed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_queue_off_skips_disabled_and_ha_script_plugs(self, manager, mock_plug):
+        """Disabled plugs and HA-script entities are never scheduled."""
+        disabled = MagicMock(id=2, name="disabled", enabled=False, plug_type="tasmota", ha_entity_id=None)
+        ha_script = MagicMock(
+            id=3, name="ha", enabled=True, plug_type="homeassistant", ha_entity_id="script.printer_off"
+        )
+        with (
+            patch.object(manager, "_get_plugs_for_printer", new_callable=AsyncMock, return_value=[disabled, ha_script]),
+            patch.object(manager, "_schedule_off_per_mode") as mock_sched,
+        ):
+            await manager.schedule_off_after_queue_job(printer_id=1, db=AsyncMock())
+
+            mock_sched.assert_not_called()
 
     # ---- on_print_start cancellation gap ---------------------------------
 
@@ -717,101 +1068,6 @@ class TestDryingAutoOffGuard:
         assert mock_plug.id not in manager._pending_off
 
 
-class TestImmediateQueueAutoOff:
-    @pytest.fixture
-    def manager(self):
-        return SmartPlugManager()
-
-    async def test_job_flag_turns_off_immediately_when_queue_is_empty(
-        self, manager, queue_sessions, db_session, printer_factory, smart_plug_factory, monkeypatch
-    ):
-        from backend.app.services.printer_manager import printer_manager
-
-        printer = await printer_factory()
-        job = PrintQueueItem(
-            printer_id=printer.id,
-            status="successful",
-            physical_outcome="completed",
-            auto_off_after=True,
-        )
-        db_session.add(job)
-        await db_session.commit()
-        plug = await smart_plug_factory(printer_id=printer.id, auto_off=False)
-        state = SimpleNamespace(connected=True, job_telemetry_ready=True, state="IDLE")
-        service = SimpleNamespace(turn_off=AsyncMock(return_value=True))
-        monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)
-        monkeypatch.setattr(printer_manager, "mark_printer_offline", MagicMock())
-        monkeypatch.setattr(manager, "get_service_for_plug", AsyncMock(return_value=service))
-        monkeypatch.setattr(manager, "_mark_auto_off_executed", AsyncMock())
-
-        await manager.turn_off_after_queue_job(printer.id, job.id, db_session)
-
-        service.turn_off.assert_awaited_once()
-        assert service.turn_off.await_args.args[0].id == plug.id
-        manager._mark_auto_off_executed.assert_awaited_once_with(plug.id)
-
-    @pytest.mark.parametrize(
-        "state",
-        [
-            None,
-            SimpleNamespace(connected=False, job_telemetry_ready=True, state="IDLE"),
-            SimpleNamespace(connected=True, job_telemetry_ready=False, state="IDLE"),
-            SimpleNamespace(connected=True, job_telemetry_ready=True, state="RUNNING"),
-            SimpleNamespace(connected=True, job_telemetry_ready=True, state="UNKNOWN"),
-        ],
-    )
-    async def test_job_flag_keeps_power_on_without_fresh_idle_telemetry(
-        self, manager, queue_sessions, db_session, printer_factory, smart_plug_factory, monkeypatch, state
-    ):
-        from backend.app.services.printer_manager import printer_manager
-
-        printer = await printer_factory()
-        job = PrintQueueItem(
-            printer_id=printer.id,
-            status="finished",
-            physical_outcome="completed",
-            auto_off_after=True,
-        )
-        db_session.add(job)
-        await db_session.commit()
-        await smart_plug_factory(printer_id=printer.id)
-        service = SimpleNamespace(turn_off=AsyncMock(return_value=True))
-        monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)
-        monkeypatch.setattr(manager, "get_service_for_plug", AsyncMock(return_value=service))
-
-        await manager.turn_off_after_queue_job(printer.id, job.id, db_session)
-
-        service.turn_off.assert_not_awaited()
-
-    async def test_job_flag_keeps_power_on_when_queue_has_work(
-        self, manager, queue_sessions, db_session, printer_factory, smart_plug_factory, monkeypatch
-    ):
-        from backend.app.services.printer_manager import printer_manager
-
-        printer = await printer_factory()
-        job = PrintQueueItem(
-            printer_id=printer.id,
-            status="successful",
-            physical_outcome="completed",
-            auto_off_after=True,
-        )
-        waiting = PrintQueueItem(status="queued", assigned_printer_id=printer.id)
-        db_session.add_all([job, waiting])
-        await db_session.commit()
-        await smart_plug_factory(printer_id=printer.id)
-        service = SimpleNamespace(turn_off=AsyncMock(return_value=True))
-        monkeypatch.setattr(
-            printer_manager,
-            "get_status",
-            lambda _id: SimpleNamespace(connected=True, job_telemetry_ready=True, state="IDLE"),
-        )
-        monkeypatch.setattr(manager, "get_service_for_plug", AsyncMock(return_value=service))
-
-        await manager.turn_off_after_queue_job(printer.id, job.id, db_session)
-
-        service.turn_off.assert_not_awaited()
-
-
 class TestAccessoryPlugDoesNotMarkPrinterOffline:
     """#2629 — a plug linked to a printer is not necessarily its power supply.
 
@@ -834,6 +1090,9 @@ class TestAccessoryPlugDoesNotMarkPrinterOffline:
         plug.password = None
         plug.enabled = True
         plug.auto_off = True
+        plug.off_delay_mode = "time"
+        plug.off_delay_minutes = 1
+        plug.off_temp_threshold = 70
         plug.printer_id = 1
         plug.plug_type = "tasmota"
         plug.ha_entity_id = None
@@ -841,7 +1100,7 @@ class TestAccessoryPlugDoesNotMarkPrinterOffline:
         return plug
 
     @pytest.mark.asyncio
-    async def test_delayed_off_skips_offline_mark_for_accessory(self, manager, queue_sessions):
+    async def test_delayed_off_skips_offline_mark_for_accessory(self, manager):
         mock_service = AsyncMock()
         mock_service.turn_off = AsyncMock(return_value=True)
         with (
@@ -859,15 +1118,47 @@ class TestAccessoryPlugDoesNotMarkPrinterOffline:
             mock_pm.mark_printer_offline.assert_not_called()  # but the printer is untouched
 
     @pytest.mark.asyncio
-    async def test_drying_scheduler_forwards_printer_power_flag(self, manager, accessory_plug):
-        """The drying delay forwards whether the plug controls printer power."""
+    async def test_temp_based_off_skips_offline_mark_for_accessory(self, manager):
+        mock_service = AsyncMock()
+        mock_service.turn_off = AsyncMock(return_value=True)
+        with (
+            patch("backend.app.services.smart_plug_manager.printer_manager") as mock_pm,
+            patch("backend.app.services.smart_plug_manager.asyncio.sleep", new_callable=AsyncMock),
+            patch.object(manager, "get_service_for_plug", new_callable=AsyncMock, return_value=mock_service),
+            patch.object(manager, "_mark_auto_off_executed", new_callable=AsyncMock),
+        ):
+            mock_pm.get_status.return_value = MagicMock(state="FINISH", temperatures={"nozzle": 40})
+            mock_pm.is_print_active.return_value = False
+
+            await manager._temp_based_off(
+                1,
+                "tasmota",
+                "1.2.3.4",
+                None,
+                None,
+                None,
+                printer_id=1,
+                temp_threshold=55,
+                controls_printer_power=False,
+            )
+
+            mock_service.turn_off.assert_awaited_once()
+            mock_pm.mark_printer_offline.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_schedulers_forward_the_flag(self, manager, accessory_plug):
+        """The flag lives on the plug row; both schedulers must pass it into the
+        detached task, which only receives primitives."""
         with (
             patch.object(manager, "_mark_auto_off_pending", new_callable=AsyncMock),
             patch.object(manager, "_delayed_off", new_callable=AsyncMock) as mock_delayed,
+            patch.object(manager, "_temp_based_off", new_callable=AsyncMock) as mock_temp,
         ):
             manager._schedule_delayed_off(accessory_plug, 1, 60)
+            manager._schedule_temp_based_off(accessory_plug, 1, 70)
 
             assert mock_delayed.call_args.kwargs["controls_printer_power"] is False
+            assert mock_temp.call_args.kwargs["controls_printer_power"] is False
 
     @pytest.mark.asyncio
     async def test_scheduled_off_skips_offline_mark_for_accessory(self, manager, accessory_plug):

@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'El modo desarrollador LAN no está activado en: {{names}}. Es posible que algunas funciones no funcionen.',
     howToEnable: 'Cómo activarlo',
     incompatibleFile: 'Este archivo se laminó para {{slicedFor}}, pero esta impresora es una {{printerModel}}',
-    directUploadLibraryNote: 'El archivo se agrega a la cola y no se guarda en el Administrador de archivos.',
+    directUploadLibraryNote: 'El archivo subido se guarda en el Administrador de archivos antes de ponerlo en cola.',
     dropNotPrintable: 'Solo se pueden imprimir archivos .gcode y .gcode.3mf',
     dropToPrint: 'Suelte para imprimir',
     cannotPrint: 'Impresora ocupada',
@@ -835,8 +835,6 @@ export default {
       failedUpdateFavorites: 'Error al actualizar los favoritos',
       exportDownloaded: 'Exportación descargada',
       exportFailed: 'Error en la exportación',
-      savedToFiles: '{{filename}} se guardó en Archivos',
-      failedSaveToFiles: 'No se pudo guardar el archivo de impresión en Archivos',
     },
     menu: {
       print: 'Imprimir',
@@ -876,7 +874,6 @@ export default {
       select: 'Seleccionar',
       deselect: 'Deseleccionar',
       delete: 'Eliminar',
-      saveToFiles: 'Guardar en Archivos',
     },
     permission: {
       noReprint: 'No tiene permiso para reimprimir este archivo',
@@ -974,7 +971,7 @@ export default {
       deleteButton: 'Eliminar',
       deletePurgeStats: 'Eliminar también esta impresión de las estadísticas rápidas (filamento, tiempo, coste, energía)',
       deleteQueueItemsWarning: 'También se eliminarán {{count}} elemento(s) de la cola vinculado(s) a este archivo.',
-      deleteBlockedByPrinting: 'No se puede eliminar — {{count}} trabajo(s) aún reservan una impresora. Detén los trabajos activos y libera sus placas primero.',
+      deleteBlockedByPrinting: 'No se puede eliminar — {{count}} elemento(s) de la cola se están enviando o imprimiendo. Detén el trabajo activo y vuelve a intentarlo.',
       removeSource3mf: 'Eliminar 3MF de origen',
       removeSource3mfConfirm: '¿Está seguro de que desea eliminar el archivo 3MF de origen de "{{name}}"? Esto eliminará el archivo de proyecto original del laminador.',
       removeButton: 'Eliminar',
@@ -1064,12 +1061,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: 'Pendiente de limpiar la placa',
-    resolveDispatch: {
-      prompt: "La impresora no ha confirmado este trabajo. Compruebe la impresora antes de elegir:",
-      printing: "Está imprimiendo",
-      failed: "No ha empezado",
-    },
     filamentShort: {
       rowBadge: 'Filamento insuficiente para la bobina asignada',
       rowTooltip: 'El planificador marco este elemento. Pulsa Reproducir para ver el deficit por slot y decidir si imprimir de todos modos.',
@@ -1150,10 +1141,6 @@ export default {
     },
     // Status
     status: {
-      queued: 'En cola',
-      finished: 'Finalizado',
-      successful: 'Correcto',
-      unsuccessful: 'Sin éxito',
       pending: 'Pendiente',
       scheduled: 'Programada',
       waiting: 'En espera',
@@ -1193,7 +1180,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: 'Inicio manual',
+      staged: 'Preparado',
+      requiresPrevious: 'Requiere éxito previo',
       autoPowerOff: 'Apagado automático',
       gcodeInjection: 'G-code',
     },
@@ -1213,8 +1201,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: 'Limpiar placa',
-      retry: 'Reintentar',
       startPrint: 'Iniciar impresión',
       stopPrint: 'Detener impresión',
       requeue: 'Volver a encolar',
@@ -1856,6 +1842,12 @@ export default {
     saveThumbnails: 'Guardar miniaturas',
     captureFinishPhoto: 'Capturar foto de finalización',
     noPrintersConfigured: 'No hay impresoras configuradas',
+    // Archive settings
+    archiveMode: {
+      always: 'Crear siempre una entrada de archivo',
+      never: 'No crear nunca una entrada de archivo',
+      ask: 'Preguntar cada vez',
+    },
     // Updates
     checkForUpdatesLabel: 'Buscar actualizaciones',
     checkPrinterFirmware: 'Comprobar el firmware de la impresora',
@@ -2364,6 +2356,8 @@ export default {
     energyModeTotalDescription: 'El panel muestra la energía total de los enchufes inteligentes',
     // File Manager
     fileManager: 'Gestor de archivos',
+    createArchiveEntry: 'Crear una entrada de archivo al imprimir',
+    createArchiveEntryDescription: 'Al imprimir desde el gestor de archivos, crear opcionalmente una entrada de archivo',
     lowDiskSpaceWarning: 'Advertencia de poco espacio en disco',
     lowDiskSpaceDescription: 'Mostrar una advertencia cuando el espacio libre en disco caiga por debajo de este umbral',
     // Updates
@@ -3836,7 +3830,6 @@ export default {
     runningWithProgress: '{{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     runningWithProgressMultiPlate: 'Bandeja {{plateIndex}} de {{plateCount}} • {{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     completedToast: '{{name}} laminado',
-    completedToFilesToast: '{{name}} laminado y guardado en Archivos',
     failedTitle: 'Error al laminar',
     failedToast: 'Error al laminar {{name}}: {{detail}}',
     tier: {
@@ -4927,12 +4920,12 @@ export default {
     },
     mode: {
       title: 'Modo',
-      archive: 'Archivos',
-      archiveDesc: 'Guardar cargas en Archivos',
+      archive: 'Archivar',
+      archiveDesc: 'Archivar los archivos inmediatamente',
       review: 'Revisar',
-      reviewDesc: 'Revisar las cargas antes de guardarlas en Archivos',
+      reviewDesc: 'Revisar antes de archivar',
       queue: 'Encolar',
-      queueDesc: 'Añadir cargas a la cola de impresión',
+      queueDesc: 'Archivar y añadir a la cola',
       proxy: 'Proxy',
       proxyDesc: 'Retransmitir a una impresora real',
     },
@@ -4958,8 +4951,8 @@ export default {
       readGuide: 'Lea la guía de configuración antes de activarla',
     },
     archiveNameSource: {
-      title: 'Nombre visible de la carga',
-      description: 'Elija cómo se muestran las cargas en la lista de revisión. «Metadatos» usa el título integrado en el 3MF; «Nombre de archivo» usa el nombre recibido por FTP.',
+      title: 'Origen del nombre del archivo',
+      description: 'Elija cómo se nombran los archivos nuevos cuando llegan a través de la impresora virtual. «Metadatos» usa el título incrustado por el laminador del 3MF (predeterminado). «Nombre de archivo» usa el nombre de archivo que Bambu Studio envió por FTP. Nota: Bambu Studio sobrescribe el nombre que escribe en el diálogo «enviar a la impresora» con el campo Título del 3MF cuando existe, por lo que ambos modos suelen producir la misma cadena.',
       metadata: 'Metadatos',
       filename: 'Nombre de archivo',
     },
@@ -4974,7 +4967,7 @@ export default {
     howItWorks: {
       title: 'Cómo funciona',
       step1: 'En la misma LAN, las impresoras virtuales aparecen automáticamente en su laminador (Bambu Studio / OrcaSlicer) mediante detección. Desde otras redes, añádalas manualmente por dirección IP y código de acceso.',
-      step2: 'En los modos Archivos, Revisar y Encolar, use el botón «Enviar» del laminador para subir archivos 3MF a Grove Control. Archivos los guarda en Archivos, Revisar permite guardarlos o descartarlos y Encolar añade trabajos de impresión. «Impresión correcta» significa que la carga terminó.',
+      step2: 'En los modos Archivar, Revisar y Encolar, use el botón «Enviar» de su laminador para subir archivos 3MF a Grove Control. El laminador mostrará «Impresión correcta» — el archivo se almacena, no se imprime.',
       step3: 'En el modo Proxy, la impresora virtual retransmite todo el tráfico a una impresora real — las impresiones comienzan inmediatamente como si estuviera conectada directamente.',
     },
     status: {
@@ -5257,6 +5250,12 @@ export default {
     autoOffAfterDrying: 'Apagado automático tras el secado',
     autoOffAfterDryingDescription: 'Apagar cuando se completa el secado del AMS',
     delayAfterDryingMinutes: 'Retardo de secado (minutos)',
+    turnOffDelayMode: 'Modo de retardo de apagado',
+    time: 'Tiempo',
+    temp: 'Temp.',
+    delayMinutes: 'Retardo (minutos)',
+    tempThreshold: 'Umbral de temperatura (°C)',
+    tempThresholdDescription: 'Se apaga cuando la boquilla se enfría por debajo de esta temperatura',
     edit: 'Editar',
     deleteConfirm: '¿Está seguro de que desea eliminar "{{name}}"? Esto no se puede deshacer.',
     turnOnConfirm: '¿Está seguro de que desea encender "{{name}}"?',

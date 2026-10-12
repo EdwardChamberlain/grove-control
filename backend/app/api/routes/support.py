@@ -465,12 +465,12 @@ async def _collect_queue_info(db: AsyncSession) -> dict:
 
     info: dict = {}
     info["pending_total"] = (
-        await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "queued"))
+        await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "pending"))
     ).scalar() or 0
     info["manual_start_pending"] = (
         await db.execute(
             select(func.count(PrintQueueItem.id)).where(
-                PrintQueueItem.status == "queued",
+                PrintQueueItem.status == "pending",
                 PrintQueueItem.manual_start.is_(True),
             )
         )
@@ -480,7 +480,7 @@ async def _collect_queue_info(db: AsyncSession) -> dict:
     oldest_row = (
         await db.execute(
             select(PrintQueueItem.created_at)
-            .where(PrintQueueItem.status == "queued")
+            .where(PrintQueueItem.status == "pending")
             .order_by(PrintQueueItem.created_at)
             .limit(1)
         )
@@ -783,6 +783,7 @@ async def _collect_support_info() -> dict:
                     "ams_tray_count": ams_tray_count,
                     "has_vt_tray": has_vt_tray,
                     "external_camera_configured": bool(printer.external_camera_url),
+                    "plate_detection_enabled": printer.plate_detection_enabled,
                     "obico_enabled": printer.id in obico_enabled_set,
                     "hms_error_count": len(state.hms_errors) if state else 0,
                     "developer_mode": state.developer_mode if state else None,

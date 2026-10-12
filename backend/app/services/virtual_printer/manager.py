@@ -9,11 +9,8 @@ import logging
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-from fastapi import UploadFile
 
 from backend.app.core.config import settings as app_settings
 from backend.app.models.virtual_printer import (
@@ -29,7 +26,6 @@ from backend.app.services.virtual_printer.mqtt_bridge import MQTTBridge
 from backend.app.services.virtual_printer.mqtt_server import SimpleMQTTServer
 from backend.app.services.virtual_printer.ssdp_server import SSDPProxy, VirtualPrinterSSDPServer
 from backend.app.services.virtual_printer.tcp_proxy import SlicerProxyManager, TCPProxy
-from backend.app.utils.safe_path import safe_join_under
 
 if TYPE_CHECKING:
     from backend.app.services.printer_manager import PrinterManager
@@ -312,7 +308,7 @@ class VirtualPrinterInstance:
         # `core/database.py` rewrites existing rows once at boot.
         mode = normalize_vp_mode(self.mode)
         if mode == VP_MODE_ARCHIVE:
-            await self._save_file_to_library(file_path, source_ip)
+            await self._archive_file(file_path, source_ip)
         elif mode == VP_MODE_QUEUE:
             await self._add_to_print_queue(file_path, source_ip)
         else:
@@ -478,7 +474,7 @@ class VirtualPrinterInstance:
                 result = await db.execute(
                     select(PrintQueueItem.id).where(
                         PrintQueueItem.id.in_(queue_item_ids),
-                        PrintQueueItem.status == "queued",
+                        PrintQueueItem.status == "pending",
                     )
                 )
                 eligible_ids = [row[0] for row in result.all()]
@@ -547,39 +543,66 @@ class VirtualPrinterInstance:
         self._mqtt.set_gcode_state("FINISH", filename=filename, prepare_percent="100")
         logger.debug("[VP %s] Re-set gcode_state=FINISH after project_file ack (%s)", self.name, filename)
 
-    async def _save_file_to_library(self, file_path: Path, source_ip: str) -> None:
-        """Save a virtual-printer upload to Files."""
+    async def _archive_file(self, file_path: Path, source_ip: str) -> None:
+        """Archive file immediately."""
         if not self._session_factory:
-            logger.error("Cannot save to Files: no database session factory configured")
+            logger.error("Cannot archive: no database session factory configured")
             return
 
-        try:
-            from backend.app.api.routes.library import upload_file
-
-            async with self._session_factory() as db:
-                response = await upload_file(
-                    file=UploadFile(file=BytesIO(file_path.read_bytes()), filename=file_path.name),
-                    folder_id=None,
-                    generate_stl_thumbnails=True,
-                    db=db,
-                    current_user=None,
-                    api_key_owner=None,
-                )
-                logger.info(
-                    "[VP %s] Saved upload to Files: %s (%s) from %s",
-                    self.name,
-                    response.id,
-                    response.filename,
-                    source_ip,
-                )
-        except Exception as e:
-            logger.error("Error saving virtual-printer upload to Files: %s", e)
-        finally:
+        if file_path.suffix.lower() != ".3mf":
+            logger.debug("Skipping non-3MF file: %s", file_path.name)
             self._pending_files.pop(file_path.name, None)
             try:
-                file_path.unlink(missing_ok=True)
+                file_path.unlink()
             except OSError:
                 pass
+            return
+
+        archived = False
+        try:
+            from backend.app.api.routes.settings import get_setting
+            from backend.app.services.archive import ArchiveService
+
+            async with self._session_factory() as db:
+                name_source = await get_setting(db, "virtual_printer_archive_name_source")
+                prefer_filename = name_source == "filename"
+                service = ArchiveService(db)
+                archive = await service.archive_print(
+                    printer_id=None,
+                    source_file=file_path,
+                    print_data={
+                        "status": "archived",
+                        "source": "virtual_printer",
+                        "source_ip": source_ip,
+                    },
+                    prefer_filename_for_name=prefer_filename,
+                )
+                if archive:
+                    logger.info("[VP %s] Archived: %s - %s", self.name, archive.id, archive.print_name)
+                    await self._broadcast_archive_created(archive)
+                    archived = True
+                else:
+                    logger.error("Failed to archive file: %s", file_path.name)
+        except Exception as e:
+            logger.error("Error archiving file: %s", e)
+        finally:
+            # Always release the in-flight marker and delete the temp file —
+            # previously the failure paths only logged and the next upload of
+            # the same name was silently rejected with "already uploading",
+            # the upload_dir filled up indefinitely, and the slicer received
+            # a clean 226 even though no archive existed (#audit-R2-1).
+            self._pending_files.pop(file_path.name, None)
+            if archived:
+                try:
+                    file_path.unlink()
+                except OSError:
+                    pass
+            else:
+                # Drop the failed temp file so it doesn't accumulate.
+                try:
+                    file_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     async def _queue_file(self, file_path: Path, source_ip: str) -> None:
         """Queue file for user review."""
@@ -597,8 +620,8 @@ class VirtualPrinterInstance:
 
         # Peek at the 3MF for the embedded title BEFORE we hand it off to the
         # DB. Storing it now means the /pending-uploads/ list doesn't have to
-        # reopen every 3MF on every render to keep the review card name stable.
-        # Failure to parse is
+        # reopen every 3MF on every render to keep the review card and the
+        # eventual archive name in sync (#1152 follow-up). Failure to parse is
         # not fatal — the response model falls back to the filename stem.
         metadata_print_name: str | None = None
         try:
@@ -642,7 +665,7 @@ class VirtualPrinterInstance:
             self._pending_files.pop(file_path.name, None)
 
     async def _add_to_print_queue(self, file_path: Path, source_ip: str) -> None:
-        """Save a hidden Queue-only source and queue it for dispatch."""
+        """Archive file and add to print queue, assigned to target printer or model."""
         if not self._session_factory:
             logger.error("Cannot add to print queue: no database session factory configured")
             return
@@ -692,16 +715,21 @@ class VirtualPrinterInstance:
                 sorted(self._slicer_print_options.keys()),
             )
 
-        queue_file_committed = False
-        library_file_ids_to_cleanup: list[int] = []
         try:
             import json
 
-            from backend.app.api.routes.library import upload_file
             from backend.app.api.routes.settings import get_setting
-            from backend.app.services.lifecycle.queued import create_job, filament_contract
+            from backend.app.models.print_queue import PrintQueueItem
+            from backend.app.services.archive import ArchiveService
+            from backend.app.services.filament_requirements import (
+                build_queue_filament_overrides,
+                extract_filament_requirements,
+            )
 
             async with self._session_factory() as db:
+                name_source = await get_setting(db, "virtual_printer_archive_name_source")
+                prefer_filename = name_source == "filename"
+
                 # Read workflow defaults from settings. Without this the
                 # PrintQueueItem below would fall back to the column-level
                 # defaults and ignore the user's workflow preferences (#1235).
@@ -782,18 +810,19 @@ class VirtualPrinterInstance:
                         if raw is not None:
                             nozzle_mapping_json = json.dumps(raw)
 
-                uploaded_file = await upload_file(
-                    file=UploadFile(file=BytesIO(file_path.read_bytes()), filename=file_path.name),
-                    folder_id=None,
-                    generate_stl_thumbnails=True,
-                    db=db,
-                    current_user=None,
-                    api_key_owner=None,
-                    queue_only=True,
-                    queue_source_sealed=True,
+                service = ArchiveService(db)
+                archive = await service.archive_print(
+                    printer_id=None,
+                    source_file=file_path,
+                    print_data={
+                        "status": "archived",
+                        "source": "virtual_printer",
+                        "source_ip": source_ip,
+                    },
+                    prefer_filename_for_name=prefer_filename,
                 )
-                if uploaded_file:
-                    logger.info("[VP %s] Prepared queue-only source: %s", self.name, uploaded_file.id)
+                if archive:
+                    logger.info("[VP %s] Archived: %s - %s", self.name, archive.id, archive.print_name)
                     # Assign to specific printer if configured, otherwise use model for "Any X" scheduling
                     target_model = None
                     if not self.target_printer_id and self.model:
@@ -805,51 +834,88 @@ class VirtualPrinterInstance:
                     # comes through as `[N]` (one plate index) so the loop
                     # below runs once and the existing behaviour is preserved.
                     plate_ids = self._extract_plate_ids(file_path)
-                    library_file_ids_to_cleanup.append(uploaded_file.id)
 
-                    # Per-plate filament requirements (#1188): each plate has
-                    # its own filament set in `slice_info.config`, so each job
-                    # records that plate's materials and overrides. The
-                    # scheduler rejects material mismatches even when exact
-                    # colour matching is off; each override's flag says whether
-                    # its colour is required or preferred.
-                    jobs = []
-                    for plate_id in plate_ids:
-                        required_types, overrides = filament_contract(
-                            file_path, plate_id, force_color_match=self.queue_force_color_match
+                    # Pick a base position the same way the manual /print-queue/
+                    # POST does, then hand consecutive positions to each plate
+                    # so a Send All keeps plate-order execution inside the
+                    # queue (#1733). Previously hardcoded to 1, which created
+                    # duplicate position=1 rows on every VP upload and made
+                    # queue execution order non-deterministic for any non-
+                    # empty queue.
+                    from sqlalchemy import func, select as _sql_select
+
+                    queue_scope = _sql_select(func.max(PrintQueueItem.position)).where(
+                        PrintQueueItem.status == "pending"
+                    )
+                    if self.target_printer_id is not None:
+                        queue_scope = queue_scope.where(PrintQueueItem.printer_id == self.target_printer_id)
+                    else:
+                        queue_scope = queue_scope.where(PrintQueueItem.printer_id.is_(None))
+                    try:
+                        max_pos_raw = (await db.execute(queue_scope)).scalar()
+                        max_pos = int(max_pos_raw) if max_pos_raw is not None else 0
+                    except (TypeError, ValueError):
+                        max_pos = 0
+
+                    # Parse per-plate filament requirements (#1188). Each plate
+                    # has its own filament set in `slice_info.config`, so the
+                    # `required_filament_types` / `filament_overrides` columns
+                    # on each queue item reflect THAT plate, not the file's
+                    # first plate. Scoping was already plate-aware via #1697 —
+                    # the `extract_filament_requirements(path, plate_id)` filter
+                    # returns just the plate's filaments. required_filament_types
+                    # is populated unconditionally — it's cheap, lets the
+                    # scheduler reject material mismatches even when exact
+                    # colour matching is disabled. filament_overrides always
+                    # carries requirements; its per-slot flag controls whether
+                    # colour is mandatory or only preferred.
+                    queue_item_ids: list[int] = []
+                    for offset, plate_id in enumerate(plate_ids, start=1):
+                        required_filament_types_json: str | None = None
+                        filament_overrides_json: str | None = None
+                        requirements = extract_filament_requirements(file_path, plate_id)
+                        if requirements:
+                            types = sorted({r["type"] for r in requirements if r.get("type")})
+                            if types:
+                                required_filament_types_json = json.dumps(types)
+                            overrides = build_queue_filament_overrides(
+                                requirements,
+                                force_color_match=self.queue_force_color_match,
+                            )
+                            if overrides:
+                                filament_overrides_json = json.dumps(overrides)
+
+                        queue_item = PrintQueueItem(
+                            printer_id=self.target_printer_id,
+                            target_model=target_model,
+                            archive_id=archive.id,
+                            plate_id=plate_id,
+                            position=max_pos + offset,
+                            status="pending",
+                            manual_start=not self.auto_dispatch,
+                            required_filament_types=required_filament_types_json,
+                            filament_overrides=filament_overrides_json,
+                            force_color_match=self.queue_force_color_match,
+                            bed_levelling=bed_levelling,
+                            flow_cali=flow_cali,
+                            vibration_cali=vibration_cali,
+                            layer_inspect=layer_inspect,
+                            timelapse=timelapse,
+                            # Per-VP opt-in for auto-print G-code injection (#1516).
+                            # Default off; when on, the scheduler still no-ops unless
+                            # gcode_snippets are configured for the target model, so it's
+                            # effectively "inject when enabled AND snippets exist".
+                            gcode_injection=self.gcode_injection,
+                            # H2C rack-swap slicer pick (#1780). Captured above;
+                            # stamped on every plate so a multi-plate Send All keeps
+                            # the same nozzle pick across plates rather than only the
+                            # first one (mirrors the #1697 / #1188 per-plate loop fix).
+                            nozzle_mapping=nozzle_mapping_json,
                         )
-                        jobs.append(
-                            {
-                                "printer_id": self.target_printer_id,
-                                "target_model": target_model,
-                                "library_file_id": uploaded_file.id,
-                                "plate_id": plate_id,
-                                "manual_start": not self.auto_dispatch,
-                                "required_filament_types": required_types,
-                                "filament_overrides": overrides,
-                                "force_color_match": self.queue_force_color_match,
-                                "bed_levelling": bed_levelling,
-                                "flow_cali": flow_cali,
-                                "vibration_cali": vibration_cali,
-                                "layer_inspect": layer_inspect,
-                                "timelapse": timelapse,
-                                # Per-VP opt-in for auto-print G-code injection (#1516).
-                                # Default off; when on, the scheduler still no-ops unless
-                                # gcode_snippets are configured for the target model, so it's
-                                # effectively "inject when enabled AND snippets exist".
-                                "gcode_injection": self.gcode_injection,
-                                # H2C rack-swap slicer pick (#1780). Captured above;
-                                # stamped on every plate so a multi-plate Send All keeps
-                                # the same nozzle pick across plates rather than only the
-                                # first one (mirrors the #1697 / #1188 per-plate loop fix).
-                                "nozzle_mapping": nozzle_mapping_json,
-                                "cleanup_library_after_dispatch": True,
-                            }
-                        )
-                    # A Send All's plates join the queue together, in plate order (#1733).
-                    queue_item_ids = [job.id for job in await create_job(db, jobs)]
+                        db.add(queue_item)
+                        await db.flush()  # populate queue_item.id before logging
+                        queue_item_ids.append(queue_item.id)
                     await db.commit()
-                    queue_file_committed = True
                     from backend.app.core.websocket import ws_manager
 
                     await ws_manager.send_queue_work_changed()
@@ -866,7 +932,7 @@ class VirtualPrinterInstance:
                     self._recent_queue_items[file_path.name] = (list(queue_item_ids), now)
                     # Last-chance check: MQTT for this filename could have
                     # arrived during ANY await between the initial pop and
-                    # now — wait_for itself, upload_file, db.flush,
+                    # now — wait_for itself, archive_print, db.flush,
                     # db.commit. In all those cases `on_print_command`
                     # stashed its data but neither the event-signal path nor
                     # the retroactive `_recent_queue_items` path was in
@@ -876,7 +942,7 @@ class VirtualPrinterInstance:
                     if late_opts is not None:
                         logger.info(
                             "[VP %s] Late slicer MQTT detected for %s during queue-add — "
-                            "applying inline (race vs commit/upload/flush yield)",
+                            "applying inline (race vs commit/archive/flush yield)",
                             self.name,
                             file_path.name,
                         )
@@ -891,35 +957,11 @@ class VirtualPrinterInstance:
                             plate_ids,
                             queue_item_ids,
                         )
-                    # The queue view polls independently. Archive history is
-                    # created later by the scheduler at the dispatch boundary.
+                    await self._broadcast_archive_created(archive)
                 else:
-                    logger.error("Failed to prepare queue-only upload: %s", file_path.name)
+                    logger.error("Failed to archive file: %s", file_path.name)
         except Exception as e:
             logger.error("Error adding to print queue: %s", e)
-            if library_file_ids_to_cleanup and not queue_file_committed:
-                try:
-                    from backend.app.models.library import LibraryFile
-
-                    async with self._session_factory() as cleanup_db:
-                        for library_file_id in library_file_ids_to_cleanup:
-                            library_file = await cleanup_db.get(LibraryFile, library_file_id)
-                            if library_file is None:
-                                continue
-                            for stored_path in (library_file.file_path, library_file.thumbnail_path):
-                                if stored_path:
-                                    stored = Path(stored_path)
-                                    path = (
-                                        stored
-                                        if stored.is_absolute()
-                                        else safe_join_under(Path(app_settings.base_dir), stored_path, http=False)
-                                    )
-                                    path.unlink(missing_ok=True)
-                            await cleanup_db.delete(library_file)
-                        if library_file_ids_to_cleanup:
-                            await cleanup_db.commit()
-                except Exception:
-                    logger.exception("Failed to clean unused virtual-printer queue upload")
         finally:
             # Always release the marker and clean the temp file. Without this
             # the same-name STOR guard would block the next upload and the
@@ -930,6 +972,28 @@ class VirtualPrinterInstance:
                 file_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    async def _broadcast_archive_created(self, archive) -> None:
+        """Notify connected clients that a new archive exists.
+
+        Real-printer prints get this from main.py's MQTT print_start handler;
+        VP-uploaded prints need their own broadcast or the Archives page stays
+        stale until the user switches tabs (#1282).
+        """
+        try:
+            from backend.app.core.websocket import ws_manager
+
+            await ws_manager.send_archive_created(
+                {
+                    "id": archive.id,
+                    "printer_id": archive.printer_id,
+                    "filename": archive.filename,
+                    "print_name": archive.print_name,
+                    "status": archive.status,
+                }
+            )
+        except Exception as e:
+            logger.debug("[VP %s] archive_created broadcast failed: %s", self.name, e)
 
     @staticmethod
     def _extract_plate_ids(file_path: Path) -> list[int]:
@@ -942,7 +1006,7 @@ class VirtualPrinterInstance:
         inside the same zip. Returning the full ordered list lets the VP
         queue path create one queue item per plate (`_add_to_print_queue`
         loops over the result), so "Send All" of a 3-plate file produces
-        3 queue items with a separate transient File copy per plate to print.
+        3 queue items sharing the same archive — one per plate to print.
 
         Single-plate "Send" hits the same code path and returns ``[N]``
         for whichever plate the user selected; the loop runs once and the

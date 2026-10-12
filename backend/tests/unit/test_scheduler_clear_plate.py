@@ -66,77 +66,177 @@ class TestPrinterManagerPlateCleared:
         assert manager.get_awaiting_plate_clear_archive_id(1) is None
 
 
-class TestAwaitingPlateClearProjection:
-    """Restart reads durable jobs; view setters cannot create database holds."""
+class TestAwaitingPlateClearPersistence:
+    """Verify the awaiting-plate-clear flag round-trips through the DB (#961)."""
 
-    @pytest.fixture
-    async def projection_db(self):
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    @pytest.mark.asyncio
+    async def test_load_rehydrates_in_memory_set_from_db(self):
+        """Printers flagged in DB must re-appear in the in-memory set on startup."""
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+        # Ensure all models are imported so Base.metadata includes them
         import backend.app.models  # noqa: F401
         from backend.app.core.database import Base
         from backend.app.models.printer import Printer
 
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        sessions = async_sessionmaker(engine, expire_on_commit=False)
-        async with sessions() as db:
+        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        # Seed: two printers, one flagged awaiting, one not
+        async with session_maker() as db:
             db.add_all(
                 [
-                    Printer(id=1, name="P1", serial_number="S1", ip_address="1.1.1.1", access_code="x"),
+                    Printer(
+                        id=1,
+                        name="P1",
+                        serial_number="S1",
+                        ip_address="1.1.1.1",
+                        access_code="x",
+                        awaiting_plate_clear=True,
+                        awaiting_plate_clear_archive_id=17,
+                    ),
                     Printer(
                         id=2,
                         name="P2",
                         serial_number="S2",
                         ip_address="2.2.2.2",
                         access_code="y",
-                        awaiting_plate_clear=True,
+                        awaiting_plate_clear=False,
                     ),
                 ]
             )
             await db.commit()
-        yield sessions
+
+        # Point the manager's session factory at our in-memory DB and load
+        manager = PrinterManager()
+        with patch("backend.app.core.database.async_session", session_maker):
+            await manager.load_awaiting_plate_clear_from_db()
+
+        assert manager.is_awaiting_plate_clear(1) is True
+        assert manager.is_awaiting_plate_clear(2) is False
+        assert manager.get_awaiting_plate_clear_archive_id(1) == 17
+        assert manager.get_awaiting_plate_clear_archive_id(2) is None
         await engine.dispose()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("status", ["finished", "failed", "cancelled"])
-    async def test_restart_projects_exact_holding_job(self, projection_db, status):
-        from backend.app.models.archive import PrintArchive
-        from backend.app.models.print_queue import PrintQueueItem
+    async def test_persist_writes_flag_to_db(self):
+        """set_awaiting_plate_clear + _persist writes the flag to the DB row."""
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-        async with projection_db() as db:
-            archive = PrintArchive(printer_id=1, filename="job.3mf", file_path="job.3mf", file_size=1)
-            db.add(archive)
-            await db.flush()
-            archive_id = archive.id
+        import backend.app.models  # noqa: F401
+        from backend.app.core.database import Base
+        from backend.app.models.printer import Printer
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with session_maker() as db:
             db.add(
-                PrintQueueItem(
-                    printer_id=1,
-                    archive_id=archive_id,
-                    status=status,
-                    physical_outcome="failed" if status == "failed" else None,
+                Printer(
+                    id=1,
+                    name="P1",
+                    serial_number="S1",
+                    ip_address="1.1.1.1",
+                    access_code="x",
+                    awaiting_plate_clear=False,
+                    awaiting_plate_clear_archive_id=99,
                 )
             )
             await db.commit()
-        manager = PrinterManager()
-        with patch("backend.app.core.database.async_session", projection_db):
-            await manager.load_awaiting_plate_clear_from_db()
-        assert manager.is_awaiting_plate_clear(1)
-        assert manager.get_awaiting_plate_clear_archive_id(1) == archive_id
-        assert not manager.is_awaiting_plate_clear(2)  # Legacy flag alone has no authority.
-
-    @pytest.mark.asyncio
-    async def test_view_setters_do_not_persist_independent_flags(self, projection_db):
-        from backend.app.models.printer import Printer
 
         manager = PrinterManager()
         manager.set_awaiting_plate_clear(1, True)
-        manager.set_awaiting_plate_clear_archive_id(1, 99)
-        async with projection_db() as db:
-            printer = await db.get(Printer, 1)
-            assert not printer.awaiting_plate_clear
-            assert printer.awaiting_plate_clear_archive_id is None
+        with patch("backend.app.core.database.async_session", session_maker):
+            await manager._persist_awaiting_plate_clear(1, True)
+
+        async with session_maker() as db:
+            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
+            assert row.awaiting_plate_clear is True
+            assert row.awaiting_plate_clear_archive_id is None
+
+        manager.set_awaiting_plate_clear(1, False)
+        with patch("backend.app.core.database.async_session", session_maker):
+            await manager._persist_awaiting_plate_clear(1, False)
+
+        async with session_maker() as db:
+            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
+            assert row.awaiting_plate_clear is False
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_persist_missing_printer_does_not_raise(self):
+        """Persisting for a non-existent printer should be a silent no-op."""
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        import backend.app.models  # noqa: F401
+        from backend.app.core.database import Base
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        manager = PrinterManager()
+        manager.set_awaiting_plate_clear(999, True)
+        with patch("backend.app.core.database.async_session", session_maker):
+            # Should not raise even though printer 999 does not exist
+            await manager._persist_awaiting_plate_clear(999, True)
+
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_persist_archive_id_writes_to_db(self):
+        """The exact archive identity must survive a backend restart."""
+        from sqlalchemy import select
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        import backend.app.models  # noqa: F401
+        from backend.app.core.database import Base
+        from backend.app.models.printer import Printer
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        async with session_maker() as db:
+            db.add(
+                Printer(
+                    id=1,
+                    name="P1",
+                    serial_number="S1",
+                    ip_address="1.1.1.1",
+                    access_code="x",
+                    awaiting_plate_clear=True,
+                )
+            )
+            await db.commit()
+
+        manager = PrinterManager()
+        manager.set_awaiting_plate_clear(1, True)
+        manager.set_awaiting_plate_clear_archive_id(1, 17)
+        with patch("backend.app.core.database.async_session", session_maker):
+            await manager._persist_awaiting_plate_clear_archive_id(1, 17)
+
+        async with session_maker() as db:
+            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
+            assert row.awaiting_plate_clear_archive_id == 17
+
+        manager.set_awaiting_plate_clear_archive_id(1, None)
+        with patch("backend.app.core.database.async_session", session_maker):
+            await manager._persist_awaiting_plate_clear_archive_id(1, None)
+
+        async with session_maker() as db:
+            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
+            assert row.awaiting_plate_clear_archive_id is None
+
+        await engine.dispose()
 
 
 class TestSchedulerIdleCheckWithPlateCleared:
@@ -146,65 +246,55 @@ class TestSchedulerIdleCheckWithPlateCleared:
     def scheduler(self):
         return PrintScheduler()
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_idle_state_is_idle(self, mock_pm, scheduler):
         """IDLE state with no awaiting flag → idle."""
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="IDLE")
         mock_pm.is_awaiting_plate_clear.return_value = False
-        assert scheduler.selection._is_printer_idle(1) is True
+        assert scheduler._is_printer_idle(1) is True
 
-    @patch("backend.app.services.printer_selection.printer_manager")
-    def test_reconnected_cached_idle_waits_for_fresh_job_telemetry(self, mock_pm, scheduler):
-        mock_pm.is_connected.return_value = True
-        mock_pm.is_awaiting_plate_clear.return_value = False
-        state = MagicMock(state="IDLE", connected=True, job_telemetry_ready=False)
-        mock_pm.get_status.return_value = state
-        assert scheduler.selection._is_printer_idle(1) is False
-        state.job_telemetry_ready = True
-        assert scheduler.selection._is_printer_idle(1) is True
-
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_running_state_not_idle(self, mock_pm, scheduler):
         """RUNNING state is never idle."""
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="RUNNING")
         mock_pm.is_awaiting_plate_clear.return_value = False
-        assert scheduler.selection._is_printer_idle(1) is False
+        assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_finish_state_not_idle_when_awaiting(self, mock_pm, scheduler):
         """FINISH + awaiting plate-clear ack → NOT idle."""
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="FINISH")
         mock_pm.is_awaiting_plate_clear.return_value = True
-        assert scheduler.selection._is_printer_idle(1) is False
+        assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_finish_state_idle_when_acknowledged(self, mock_pm, scheduler):
         """FINISH with flag cleared → idle."""
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="FINISH")
         mock_pm.is_awaiting_plate_clear.return_value = False
-        assert scheduler.selection._is_printer_idle(1) is True
+        assert scheduler._is_printer_idle(1) is True
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_failed_state_not_idle_when_awaiting(self, mock_pm, scheduler):
         """FAILED + awaiting → NOT idle."""
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="FAILED")
         mock_pm.is_awaiting_plate_clear.return_value = True
-        assert scheduler.selection._is_printer_idle(1) is False
+        assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_failed_state_idle_when_acknowledged(self, mock_pm, scheduler):
         """FAILED with flag cleared → idle."""
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="FAILED")
         mock_pm.is_awaiting_plate_clear.return_value = False
-        assert scheduler.selection._is_printer_idle(1) is True
+        assert scheduler._is_printer_idle(1) is True
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_idle_state_not_idle_when_awaiting_survives_power_cycle(self, mock_pm, scheduler):
         """Regression for #961: after Auto Off power-cycles the printer it boots into IDLE
         with no memory of the previous finish. The persisted awaiting flag must still gate
@@ -213,47 +303,47 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="IDLE")
         mock_pm.is_awaiting_plate_clear.return_value = True
-        assert scheduler.selection._is_printer_idle(1) is False
+        assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_disconnected_printer_not_idle(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = False
-        assert scheduler.selection._is_printer_idle(1) is False
+        assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_no_status_not_idle(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = None
-        assert scheduler.selection._is_printer_idle(1) is False
+        assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_finish_state_idle_when_require_plate_clear_disabled(self, mock_pm, scheduler):
         """FINISH is idle when require_plate_clear=False, regardless of awaiting flag."""
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="FINISH")
         mock_pm.is_awaiting_plate_clear.return_value = True
-        assert scheduler.selection._is_printer_idle(1, require_plate_clear=False) is True
+        assert scheduler._is_printer_idle(1, require_plate_clear=False) is True
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_failed_state_idle_when_require_plate_clear_disabled(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="FAILED")
         mock_pm.is_awaiting_plate_clear.return_value = True
-        assert scheduler.selection._is_printer_idle(1, require_plate_clear=False) is True
+        assert scheduler._is_printer_idle(1, require_plate_clear=False) is True
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_running_state_not_idle_even_when_require_plate_clear_disabled(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="RUNNING")
         mock_pm.is_awaiting_plate_clear.return_value = False
-        assert scheduler.selection._is_printer_idle(1, require_plate_clear=False) is False
+        assert scheduler._is_printer_idle(1, require_plate_clear=False) is False
 
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_idle_state_unaffected_by_require_plate_clear(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="IDLE")
         mock_pm.is_awaiting_plate_clear.return_value = False
-        assert scheduler.selection._is_printer_idle(1, require_plate_clear=False) is True
+        assert scheduler._is_printer_idle(1, require_plate_clear=False) is True
 
 
 class TestSchedulerQueueCheckLogging:
@@ -264,16 +354,13 @@ class TestSchedulerQueueCheckLogging:
         return PrintScheduler()
 
     @pytest.mark.asyncio
-    @patch("backend.app.services.printer_selection.printer_manager")
+    @patch("backend.app.services.print_scheduler.printer_manager")
     async def test_check_queue_logs_pending_items(self, mock_pm, scheduler, caplog):
         """Verify pending items are logged when found in check_queue."""
         mock_item = MagicMock()
         mock_item.id = 42
         mock_item.printer_id = 1
-        mock_item.assigned_printer_id = 1
         mock_item.archive_id = 100
-        mock_item.archive = None
-        mock_item.library_file = None
         mock_item.library_file_id = None
         mock_item.scheduled_time = None
         mock_item.manual_start = False
@@ -298,6 +385,8 @@ class TestSchedulerQueueCheckLogging:
 
         with (
             patch("backend.app.services.print_scheduler.async_session") as mock_session_ctx,
+            patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+            patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             caplog.at_level(logging.INFO, logger="backend.app.services.print_scheduler"),
         ):
             mock_db = AsyncMock()
@@ -320,6 +409,8 @@ class TestSchedulerQueueCheckLogging:
 
         with (
             patch("backend.app.services.print_scheduler.async_session") as mock_session_ctx,
+            patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+            patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             caplog.at_level(logging.INFO, logger="backend.app.services.print_scheduler"),
         ):
             mock_db = AsyncMock()

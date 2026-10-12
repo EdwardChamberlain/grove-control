@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'La modalità sviluppatore LAN non è attivata su: {{names}}. Alcune funzionalità potrebbero non funzionare.',
     howToEnable: 'Come attivare',
     incompatibleFile: 'Questo file è stato preparato per {{slicedFor}}, ma questa stampante è una {{printerModel}}',
-    directUploadLibraryNote: 'Il file viene aggiunto alla coda e non viene salvato in Gestione file.',
+    directUploadLibraryNote: 'Il file caricato viene aggiunto a Gestione file prima di essere messo in coda.',
     dropNotPrintable: 'Solo i file .gcode e .gcode.3mf possono essere stampati',
     dropToPrint: 'Rilascia per stampare',
     cannotPrint: 'Stampante occupata',
@@ -835,8 +835,6 @@ export default {
       failedUpdateFavorites: 'Aggiornamento preferiti non riuscito',
       exportDownloaded: 'Export scaricato',
       exportFailed: 'Export non riuscito',
-      savedToFiles: '{{filename}} salvato in File',
-      failedSaveToFiles: 'Impossibile salvare il file di stampa in File',
     },
     menu: {
       print: 'Stampa',
@@ -876,7 +874,6 @@ export default {
       select: 'Seleziona',
       deselect: 'Deseleziona',
       delete: 'Elimina',
-      saveToFiles: 'Salva in File',
     },
     permission: {
       noReprint: 'Non hai il permesso di ristampare questo archivio',
@@ -974,7 +971,7 @@ export default {
       deleteButton: 'Elimina',
       deletePurgeStats: 'Rimuovi anche questa stampa dalle Quick Stats (filamento, tempo, costo, energia)',
       deleteQueueItemsWarning: '{{count}} elemento/i in coda collegato/i a questo archivio verrà/verranno rimosso/i.',
-      deleteBlockedByPrinting: 'Impossibile eliminare — {{count}} lavori occupano ancora una stampante. Interrompi i lavori attivi e libera i loro piatti prima di procedere.',
+      deleteBlockedByPrinting: 'Impossibile eliminare — {{count}} elemento/i in coda sono in fase di invio o stampa. Interrompi il lavoro attivo, poi riprova.',
       removeSource3mf: 'Rimuovi Sorgente 3MF',
       removeSource3mfConfirm: 'Sei sicuro di rimuovere il file sorgente 3MF da "{{name}}"? Questo eliminerà il progetto slicer originale.',
       removeButton: 'Rimuovi',
@@ -1064,12 +1061,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: 'In attesa della pulizia del piatto',
-    resolveDispatch: {
-      prompt: "La stampante non ha confermato questo lavoro. Controlla la stampante prima di scegliere:",
-      printing: "Sta stampando",
-      failed: "La stampa non è iniziata",
-    },
     filamentShort: {
       rowBadge: 'Filamento insufficiente per la bobina assegnata',
       rowTooltip: 'Lo scheduler ha segnalato questo elemento. Premi Play per vedere il deficit per slot e decidere se stampare comunque.',
@@ -1150,10 +1141,6 @@ export default {
     },
     // Status
     status: {
-      queued: 'In coda',
-      finished: 'Terminato',
-      successful: 'Riuscito',
-      unsuccessful: 'Non riuscito',
       pending: 'In attesa',
       scheduled: 'Pianificata',
       waiting: 'In attesa',
@@ -1193,7 +1180,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: 'Avvio manuale',
+      staged: 'In staging',
+      requiresPrevious: 'Richiede successo precedente',
       autoPowerOff: 'Spegnimento automatico',
       gcodeInjection: 'G-code',
     },
@@ -1213,8 +1201,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: 'Pulisci piatto',
-      retry: 'Riprova',
       startPrint: 'Avvia Stampa',
       stopPrint: 'Ferma Stampa',
       requeue: 'Rimetti in coda',
@@ -1854,6 +1840,12 @@ export default {
     saveThumbnails: 'Salva miniature',
     captureFinishPhoto: 'Acquisisci foto finale',
     noPrintersConfigured: 'Nessuna stampante configurata',
+    // Archive settings
+    archiveMode: {
+      always: 'Crea sempre voce archivio',
+      never: 'Non creare mai voce archivio',
+      ask: 'Chiedi ogni volta',
+    },
     // Updates
     checkForUpdatesLabel: 'Controlla aggiornamenti',
     checkPrinterFirmware: 'Controlla firmware stampante',
@@ -2356,6 +2348,8 @@ export default {
     energyModePrintDescription: 'La dashboard mostra la somma dell\'energia usata durante le stampe',
     energyModeTotalDescription: 'La dashboard mostra l\'energia totale dalle prese smart',
     fileManager: 'Gestore file',
+    createArchiveEntry: 'Crea voce archivio durante la stampa',
+    createArchiveEntryDescription: 'Quando si stampa dal gestore file, crea opzionalmente una voce di archivio',
     lowDiskSpaceWarning: 'Avviso spazio disco insufficiente',
     lowDiskSpaceDescription: 'Mostra avviso quando lo spazio disco scende sotto questa soglia',
     printerFirmware: 'Firmware stampante',
@@ -3822,7 +3816,6 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Piatto {{plateIndex}} di {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} sezionato',
-    completedToFilesToast: '{{name}} sezionato e salvato in File',
     failedTitle: 'Slicing fallito',
     failedToast: 'Slicing di {{name}} fallito: {{detail}}',
     tier: {
@@ -4908,12 +4901,12 @@ export default {
     },
     mode: {
       title: 'Modalita',
-      archive: 'File',
-      archiveDesc: 'Salva i caricamenti in File',
+      archive: 'Archivio',
+      archiveDesc: 'Archivia subito i file',
       review: 'Revisione',
-      reviewDesc: 'Rivedi i caricamenti prima di salvarli in File',
+      reviewDesc: 'Rivedi prima di archiviare',
       queue: 'Coda',
-      queueDesc: 'Aggiungi i caricamenti alla coda di stampa',
+      queueDesc: 'Archivia e aggiungi alla coda',
       proxy: 'Proxy',
       proxyDesc: 'Inoltra a stampante reale',
     },
@@ -4941,7 +4934,7 @@ export default {
     howItWorks: {
       title: 'Come funziona',
       step1: 'Sulla stessa LAN, le stampanti virtuali appaiono automaticamente nel tuo slicer (Bambu Studio / OrcaSlicer). Da altre reti, aggiungile manualmente tramite indirizzo IP e codice di accesso.',
-      step2: 'Nei modi File, Revisione e Coda, usa il pulsante «Invia» dello slicer per caricare file 3MF in Grove Control. File li salva in File, Revisione permette di salvarli o scartarli e Coda aggiunge lavori di stampa. «Stampa riuscita» significa che il caricamento è terminato.',
+      step2: 'In modalità Archivio, Revisione e Coda, usa il pulsante "Invia" nel tuo slicer per caricare file 3MF su Grove Control. Lo slicer mostrerà "Stampa riuscita" — il file viene salvato, non stampato.',
       step3: 'In modalità Proxy, la stampante virtuale inoltra tutto il traffico a una stampante reale — le stampe partono immediatamente come con una connessione diretta.',
     },
     status: {
@@ -4997,8 +4990,8 @@ export default {
       message: 'Sei sicuro di voler eliminare "{{name}}"? Tutti i servizi di questa stampante verranno interrotti.',
     },
     archiveNameSource: {
-      title: 'Nome visualizzato del caricamento',
-      description: 'Scegli come mostrare i caricamenti nell’elenco di revisione. «Metadati» usa il titolo incorporato nel 3MF; «Nome file» usa il nome ricevuto via FTP.',
+      title: 'Origine nome archivio',
+      description: 'Scegli come vengono nominati i nuovi archivi quando i file arrivano tramite la stampante virtuale. "Metadati" utilizza il titolo incorporato nello slicer dal 3MF (default). "Nome file" utilizza il nome che Bambu Studio ha inviato via FTP. Nota: Bambu Studio sovrascrive il nome digitato nella finestra "invia a stampante" con il campo Titolo del 3MF quando presente, quindi entrambe le modalità producono spesso la stessa stringa.',
       metadata: 'Metadati',
       filename: 'Nome file',
     },
@@ -5238,6 +5231,12 @@ export default {
     autoOffAfterDrying: 'Spegni dopo asciugatura',
     autoOffAfterDryingDescription: 'Spegni al termine dell\'asciugatura AMS',
     delayAfterDryingMinutes: 'Ritardo dopo asciugatura (minuti)',
+    turnOffDelayMode: 'Modalità ritardo spegnimento',
+    time: 'Tempo',
+    temp: 'Temp.',
+    delayMinutes: 'Ritardo (minuti)',
+    tempThreshold: 'Soglia temperatura (°C)',
+    tempThresholdDescription: 'Si spegne quando l\'ugello si raffredda sotto questa temperatura',
     edit: 'Modifica',
     deleteConfirm: 'Sei sicuro di voler eliminare "{{name}}"? Questa azione non può essere annullata.',
     turnOnConfirm: 'Sei sicuro di voler accendere "{{name}}"?',

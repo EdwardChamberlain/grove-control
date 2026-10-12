@@ -256,6 +256,7 @@ export function useWebSocket() {
         break;
 
       case 'print_start':
+        queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
         // Refetch printer status immediately when print starts to get printable_objects_count
         if (message.printer_id !== undefined) {
           queryClient.invalidateQueries({ queryKey: ['printerStatus', message.printer_id] });
@@ -298,6 +299,7 @@ export function useWebSocket() {
       }
 
       case 'print_complete':
+        queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
         // Don't invalidate printerStatus here - it causes re-render cascade and browser freeze
         // The printer_status websocket messages will naturally update the status
         debouncedInvalidate('archives');
@@ -315,6 +317,18 @@ export function useWebSocket() {
 
       case 'pong':
         // Keepalive response, ignore
+        break;
+
+      case 'plate_not_empty':
+        // Plate detection found objects - print was paused
+        // Dispatch event for toast notification
+        window.dispatchEvent(new CustomEvent('plate-not-empty', {
+          detail: {
+            printer_id: message.printer_id,
+            printer_name: (message as unknown as { printer_name?: string }).printer_name,
+            message: (message as unknown as { message?: string }).message,
+          }
+        }));
         break;
 
       case 'inventory_changed':

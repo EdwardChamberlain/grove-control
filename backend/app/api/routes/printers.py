@@ -5,7 +5,7 @@ import zipfile
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy import func, literal, select
+from sqlalchemy import and_, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,12 +22,7 @@ from backend.app.core.tasks import spawn_background_task
 from backend.app.core.websocket import ws_manager
 from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import (
-    ACTIVE_STATUSES,
-    HOLDING_STATUSES,
-    PrintQueueItem,
-    awaiting_plate_clear_clause,
-)
+from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
 from backend.app.models.user import User
@@ -60,9 +55,6 @@ from backend.app.services.bambu_ftp import (
     get_storage_info_async,
     list_files_async,
 )
-from backend.app.services.job_identity import find_job, telemetry_identity
-from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, release_printer, transition_queue_item
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -337,9 +329,9 @@ async def get_printer_queue_work(
     _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
     db: AsyncSession = Depends(get_db),
 ):
-    """One authoritative queue-work summary for the printer action labels."""
-    result = await db.execute(select(Printer.id, has_queue_work(Printer.id, Printer.model, Printer.location)))
-    return dict(result.all())
+    """Shared matching for the live Print/Queue action labels."""
+    rows = await db.execute(select(Printer.id, has_queue_work(Printer.id, Printer.model, Printer.location)))
+    return dict(rows.all())
 
 
 @router.get("/{printer_id}")
@@ -377,12 +369,26 @@ async def update_printer(
 
     update_data = printer_data.model_dump(exclude_unset=True)
 
+    # Handle nested ROI object - flatten to individual columns
+    if "plate_detection_roi" in update_data:
+        roi = update_data.pop("plate_detection_roi")
+        if roi:
+            update_data["plate_detection_roi_x"] = roi.get("x")
+            update_data["plate_detection_roi_y"] = roi.get("y")
+            update_data["plate_detection_roi_w"] = roi.get("w")
+            update_data["plate_detection_roi_h"] = roi.get("h")
+        else:
+            # Clear ROI if set to null
+            update_data["plate_detection_roi_x"] = None
+            update_data["plate_detection_roi_y"] = None
+            update_data["plate_detection_roi_w"] = None
+            update_data["plate_detection_roi_h"] = None
+
     for field, value in update_data.items():
         setattr(printer, field, value)
 
     await db.commit()
-    if update_data.keys() & {"model", "location"}:
-        await ws_manager.send_queue_work_changed()
+    await ws_manager.send_queue_work_changed()
     await db.refresh(printer)
 
     # Reconnect if connection settings changed
@@ -408,107 +414,73 @@ async def delete_printer(
         delete_archives: If True (default), delete all print archives for this printer.
                         If False, keep archives but remove their printer association.
     """
-    from sqlalchemy import delete as sql_delete, update
+    from sqlalchemy import delete as sql_delete
 
     from backend.app.models.archive import PrintArchive
     from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, PrinterMaintenance
     from backend.app.models.scheduled_drying import ScheduledDrying
     from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
-    from backend.app.services.lifecycle import engine as lifecycle_engine
-    from backend.app.services.lifecycle.queued import PRINTER_DELETED_WAITING_REASON
 
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    try:
-        # Hold the printer lifecycle lock through commit so queue selection
-        # cannot bind a waiting job after the deletion checks it.
-        async with lifecycle_engine.writer(printer_id):
-            await release_printer(db, printer)
-            waiting_jobs = list(
-                (
-                    await db.scalars(
-                        select(PrintQueueItem)
-                        .where(
-                            PrintQueueItem.assigned_printer_id == printer_id,
-                            PrintQueueItem.status == "queued",
-                        )
-                        .order_by(PrintQueueItem.id)
-                        .with_for_update()
-                    )
-                ).all()
-            )
-            for item in waiting_jobs:
-                await transition_queue_item(
-                    db,
-                    item,
-                    "queued",
-                    "queued",
-                    values={
-                        "assigned_printer_id": None,
-                        "waiting_reason": PRINTER_DELETED_WAITING_REASON,
-                    },
-                )
-
-            await db.execute(
-                update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None)
-            )
-            await db.execute(
-                update(PrintQueueItem)
-                .where(PrintQueueItem.assigned_printer_id == printer_id)
-                .values(assigned_printer_id=None)
-            )
-            if delete_archives:
-                # Preserve jobs when the Archive FK would otherwise cascade-delete them.
-                await db.execute(
-                    update(PrintQueueItem)
-                    .where(
-                        PrintQueueItem.archive_id.in_(
-                            select(PrintArchive.id).where(PrintArchive.printer_id == printer_id)
-                        )
-                    )
-                    .values(archive_id=None)
-                )
-
-            if delete_archives:
-                # Delete all archives for this printer
-                await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
-            else:
-                # Orphan the archives instead of deleting them
-                await db.execute(
-                    update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None)
-                )
-
-            # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
-            await db.execute(sql_delete(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == printer_id))
-
-            # Delete scheduled drying rows explicitly because SQLite does not enforce
-            # the ScheduledDrying printer foreign-key cascade.
-            await db.execute(sql_delete(ScheduledDrying).where(ScheduledDrying.printer_id == printer_id))
-
-            # Delete durable maintenance logs plus legacy task history/items for this
-            # printer. SQLite does not enforce these foreign-key cascades.
-            await db.execute(sql_delete(MaintenanceLogEntry).where(MaintenanceLogEntry.printer_id == printer_id))
-            maintenance_ids = (
-                (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
-                .scalars()
-                .all()
-            )
-            if maintenance_ids:
-                await db.execute(
-                    sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
-                )
-                await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
-
-            await db.delete(printer)
-            await db.commit()
-    except InvalidQueueTransition as exc:
-        raise HTTPException(409, str(exc)) from exc
-    await ws_manager.send_queue_work_changed()
+    active_preheat = await db.scalar(
+        select(PrintQueueItem.id)
+        .where(
+            PrintQueueItem.printer_id == printer_id,
+            or_(
+                PrintQueueItem.status == "preheating",
+                and_(
+                    PrintQueueItem.status == "dispatching",
+                    PrintQueueItem.chamber_heat_soak.is_(True),
+                    PrintQueueItem.dispatch_subtask_id.is_(None),
+                ),
+            ),
+        )
+        .limit(1)
+    )
+    if active_preheat or printer.heat_soak_shutdown_pending:
+        raise HTTPException(409, "Stop chamber heat soak and wait for heater shutdown before deleting this printer")
 
     printer_manager.disconnect_printer(printer_id)
+
+    if delete_archives:
+        # Delete all archives for this printer
+        await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
+    else:
+        # Orphan the archives instead of deleting them
+        from sqlalchemy import update
+
+        await db.execute(update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None))
+
+    # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
+    await db.execute(sql_delete(SpoolmanSlotAssignment).where(SpoolmanSlotAssignment.printer_id == printer_id))
+
+    # Delete scheduled drying rows explicitly because SQLite does not enforce
+    # the ScheduledDrying printer foreign-key cascade.
+    await db.execute(sql_delete(ScheduledDrying).where(ScheduledDrying.printer_id == printer_id))
+
+    # Delete durable maintenance logs plus legacy task history/items for this
+    # printer. SQLite does not enforce these foreign-key cascades.
+    # (SQLite doesn't enforce FK cascades, so do it explicitly)
+    await db.execute(sql_delete(MaintenanceLogEntry).where(MaintenanceLogEntry.printer_id == printer_id))
+    maintenance_ids = (
+        (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
+        .scalars()
+        .all()
+    )
+    if maintenance_ids:
+        await db.execute(
+            sql_delete(MaintenanceHistory).where(MaintenanceHistory.printer_maintenance_id.in_(maintenance_ids))
+        )
+        await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
+
+    await db.delete(printer)
+    await db.commit()
+    await ws_manager.send_queue_work_changed()
+
     return {"status": "deleted", "archives_deleted": delete_archives}
 
 
@@ -525,23 +497,15 @@ async def get_printer_status(
         raise HTTPException(404, "Printer not found")
 
     state = printer_manager.get_status(printer_id)
-    awaiting_job = await db.scalar(
-        select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id,
-            awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
-        )
-    )
-    awaiting = awaiting_job is not None
-
     has_queued_work = bool(
-        await db.scalar(select(has_queue_work(literal(printer_id), literal(printer.model), literal(printer.location))))
+        await db.scalar(select(has_queue_work(literal(printer.id), literal(printer.model), literal(printer.location))))
     )
+
     if not state:
         return PrinterStatus(
             id=printer_id,
             name=printer.name,
             connected=False,
-            awaiting_plate_clear=awaiting,
             has_queued_work=has_queued_work,
         )
 
@@ -805,11 +769,13 @@ async def get_printer_status(
     current_plate_id: int | None = None
     if state.state in ("RUNNING", "PAUSE"):
         current_plate_id = resolve_plate_id(state)
-        current_print_identity = telemetry_identity(state)
-        if current_print_identity:
+        if state.subtask_id:
+            normalized_subtask_id = str(state.subtask_id).strip()
+            if normalized_subtask_id not in ("", "0"):
+                current_print_identity = normalized_subtask_id
             archive_row = await db.execute(
                 select(PrintArchive.id)
-                .where(PrintArchive.subtask_id == current_print_identity)
+                .where(PrintArchive.subtask_id == state.subtask_id)
                 .where(PrintArchive.printer_id == printer_id)
                 .order_by(PrintArchive.created_at.desc())
                 .limit(1)
@@ -824,7 +790,7 @@ async def get_printer_status(
         select(User.username)
         .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
         .where(PrintQueueItem.printer_id == printer_id)
-        .where(PrintQueueItem.status.in_(ACTIVE_STATUSES))
+        .where(PrintQueueItem.status.in_(["preheating", "dispatching", "printing"]))
         .order_by(PrintQueueItem.position, PrintQueueItem.id)
         .limit(1)
     )
@@ -843,8 +809,8 @@ async def get_printer_status(
     # to the current user's ownership permissions, while printer viewers still
     # need the card to describe the physical plate that must be cleared (#43).
     awaiting_plate_clear_print: PlateClearPrintSummary | None = None
-    if awaiting:
-        awaiting_archive_id = awaiting_job.archive_id
+    if printer_manager.is_awaiting_plate_clear(printer_id):
+        awaiting_archive_id = printer_manager.get_awaiting_plate_clear_archive_id(printer_id)
         archive = None
         if awaiting_archive_id is not None:
             archive_result = await db.execute(
@@ -860,10 +826,19 @@ async def get_printer_status(
         # older visible archive is worse than omitting the completion details.
         if archive is not None:
             # The archive owner is the uploader, not necessarily the user who
-            # queued this particular print. Prefer the awaiting job's owner so
+            # queued this particular print. Prefer the terminal queue item so
             # the kiosk identifies the owner of the print run (#163). The
             # archive owner remains a fallback for legacy/non-queue prints.
-            queue_owner = await db.scalar(select(User.username).where(User.id == awaiting_job.created_by_id))
+            queue_owner_result = await db.execute(
+                select(User.username)
+                .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
+                .where(PrintQueueItem.archive_id == archive.id)
+                .where(PrintQueueItem.printer_id == printer_id)
+                .where(PrintQueueItem.status.in_(("completed", "failed", "cancelled", "aborted")))
+                .order_by(PrintQueueItem.completed_at.desc().nullslast(), PrintQueueItem.id.desc())
+                .limit(1)
+            )
+            queue_owner = queue_owner_result.scalar_one_or_none()
             awaiting_plate_clear_print = PlateClearPrintSummary(
                 archive_id=archive.id,
                 print_name=archive.print_name,
@@ -927,7 +902,7 @@ async def get_printer_status(
         firmware_version=state.firmware_version,
         developer_mode=state.developer_mode if state else None,
         ams_filament_backup=state.ams_filament_backup if state else None,
-        awaiting_plate_clear=awaiting,
+        awaiting_plate_clear=printer_manager.is_awaiting_plate_clear(printer_id),
         awaiting_plate_clear_print=awaiting_plate_clear_print,
         supports_drying=supports_drying(printer.model, state.firmware_version),
         supports_drying_while_printing=supports_drying_while_printing(printer.model, state.firmware_version),
@@ -956,20 +931,19 @@ async def get_current_print_user(
     _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
     db: AsyncSession = Depends(get_db),
 ):
-    """The owner of the printer's active job, or an empty object for an ownerless or idle printer."""
+    """Get the user who started the current print (for reprint tracking).
+
+    Returns user info if available, empty object otherwise.
+    This tracks users for reprints (which bypass the queue).
+    For queue-based prints, use the queue item's created_by field instead.
+    """
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    owner = await db.execute(
-        select(User.id, User.username)
-        .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
-        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES))
-        .limit(1)
-    )
-    row = owner.first()
-    return {"user_id": row.id, "username": row.username} if row else {}
+    user_info = printer_manager.get_current_print_user(printer_id)
+    return user_info or {}
 
 
 @router.post("/{printer_id}/refresh-status")
@@ -1101,18 +1075,6 @@ def clear_cover_cache(printer_id: int) -> None:
     _cover_404_cache.pop(printer_id, None)
 
 
-async def _queue_upload_filename(db: AsyncSession, printer_id: int, state) -> str | None:
-    """Resolve an attempt's SD path without treating its display name as identity."""
-    job = await find_job(db, printer_id, telemetry_identity(state), HOLDING_STATUSES)
-    if job is None or job.archive_id is None:
-        return None
-    archive = await db.get(PrintArchive, job.archive_id)
-    if archive is None or archive.dispatched_queue_item_id != job.id:
-        return None
-    filename = (archive.extra_data or {}).get("remote_filename")
-    return filename if isinstance(filename, str) else None
-
-
 @router.get("/{printer_id}/cover")
 async def get_printer_cover(
     printer_id: int,
@@ -1170,16 +1132,11 @@ async def get_printer_cover(
     if printer_id in _cover_404_cache and cache_key in _cover_404_cache[printer_id]:
         raise HTTPException(404, f"No cover available for '{subtask_name}' (cached)")
 
-    # Queue uploads use a durable attempt path; names remain a fallback for
-    # legacy/external prints. This also finds the upload after a restart.
-    remote_filename = await _queue_upload_filename(db, printer_id, state)
     # Build possible 3MF filenames from subtask_name
     # Bambu printers may store files as "name.gcode.3mf" (sliced via Bambu Studio)
     # or just "name.3mf" (uploaded directly)
     possible_filenames = []
-    if remote_filename:
-        possible_filenames.append(remote_filename)
-    elif subtask_name.endswith(".3mf"):
+    if subtask_name.endswith(".3mf"):
         possible_filenames.append(subtask_name)
     else:
         # Try both naming patterns
@@ -1187,7 +1144,7 @@ async def get_printer_cover(
         possible_filenames.append(f"{subtask_name}.3mf")
 
     # Also try with spaces converted to underscores (Bambu Studio may normalize filenames)
-    if not remote_filename and " " in subtask_name:
+    if " " in subtask_name:
         normalized = subtask_name.replace(" ", "_")
         if normalized.endswith(".3mf"):
             possible_filenames.append(normalized)
@@ -1196,17 +1153,16 @@ async def get_printer_cover(
             possible_filenames.append(f"{normalized}.3mf")
 
     # Build list of all remote paths to try
-    remote_paths = [f"/{remote_filename}"] if remote_filename else []
-    if not remote_filename:
-        for filename in possible_filenames:
-            remote_paths.extend(
-                [
-                    f"/{filename}",  # Root directory (most common)
-                    f"/cache/{filename}",
-                    f"/model/{filename}",
-                    f"/data/{filename}",
-                ]
-            )
+    remote_paths = []
+    for filename in possible_filenames:
+        remote_paths.extend(
+            [
+                f"/{filename}",  # Root directory (most common)
+                f"/cache/{filename}",
+                f"/model/{filename}",
+                f"/data/{filename}",
+            ]
+        )
 
     # Use first filename for temp path (will be reused)
     temp_filename = possible_filenames[0]
@@ -1294,7 +1250,7 @@ async def get_printer_cover(
             raise HTTPException(500, "Failed to open 3MF file. Check server logs for details.")
 
         try:
-            # 3MF-scan fallback for usage tracking (#1166). Per-plate archives
+            # 3MF-scan fallback for plate detection (#1166). Per-plate archives
             # sliced separately in Bambu Studio contain a single
             # Metadata/plate_N.gcode for the active plate, even though
             # thumbnails for all plates are bundled. Using that gcode's plate
@@ -2094,15 +2050,15 @@ async def get_inventory_remain(
     Spoolman; unbound slots are absent from the map (client falls back to the
     printer's MQTT `remain` for those).
     """
-    from backend.app.services.ams_mapping import AmsMapping
+    from backend.app.services.print_scheduler import PrintScheduler
 
     state = printer_manager.get_status(printer_id)
     if not state:
         return {"inventory_remain_g": {}}
 
-    mapping = AmsMapping()
-    loaded = mapping._build_loaded_filaments(state)
-    overrides = await mapping._build_inventory_remain_overrides(db, printer_id, loaded)
+    scheduler = PrintScheduler()
+    loaded = scheduler._build_loaded_filaments(state)
+    overrides = await scheduler._build_inventory_remain_overrides(db, printer_id, loaded)
     return {"inventory_remain_g": {str(k): v for k, v in overrides.items()}}
 
 
@@ -2972,33 +2928,30 @@ async def debug_simulate_print_complete(
     This triggers the same code path as a real print completion,
     without needing to wait for an actual print to finish.
     """
+    from backend.app.main import _active_prints, on_print_complete
     from backend.app.models.archive import PrintArchive
-    from backend.app.services.lifecycle.intake import print_completed
 
-    # Simulate the identified active attempt, never unrelated historical work.
+    # Get the most recent archive for this printer
     result = await db.execute(
         select(PrintArchive)
-        .join(PrintQueueItem, PrintQueueItem.id == PrintArchive.dispatched_queue_item_id)
         .where(PrintArchive.printer_id == printer_id)
-        .where(PrintArchive.status == "printing")
-        .where(PrintQueueItem.status.in_(("printing", "paused")))
-        .where(PrintQueueItem.dispatch_subtask_id == PrintArchive.subtask_id)
-        .where(PrintArchive.subtask_id.is_not(None))
         .order_by(PrintArchive.created_at.desc())
         .limit(1)
     )
     archive = result.scalar_one_or_none()
 
     if not archive:
-        raise HTTPException(status_code=404, detail="No identified active Archive found for this printer")
+        raise HTTPException(status_code=404, detail="No archives found for this printer")
 
+    # Register this archive as "active" so on_print_complete can find it
     filename = archive.file_path.split("/")[-1] if archive.file_path else "test.3mf"
     subtask_name = archive.print_name or "Test Print"
+    _active_prints[(printer_id, filename)] = archive.id
+    _active_prints[(printer_id, subtask_name)] = archive.id
 
     # Simulate print completion data
     data = {
         "status": "completed",
-        "submission_id": archive.subtask_id,
         "filename": filename,
         "subtask_name": subtask_name,
         "timelapse_was_active": False,
@@ -3006,8 +2959,8 @@ async def debug_simulate_print_complete(
 
     logger.info("Simulating print complete for printer %s, archive %s", printer_id, archive.id)
 
-    # Call the actual print-complete handler
-    await print_completed(printer_id, data)
+    # Call the actual on_print_complete handler
+    await on_print_complete(printer_id, data)
 
     return {"success": True, "archive_id": archive.id, "message": "Print completion simulated"}
 
@@ -3028,23 +2981,27 @@ async def stop_print(
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
-    # Do not carry this lookup transaction while waiting for the lifecycle
-    # writer; the writer must precede the transaction that owns the Stop.
-    await db.rollback()
 
-    from backend.app.services.queue_actions import stop_current_job
+    client = printer_manager.get_client(printer_id)
+    if not client:
+        raise HTTPException(400, "Printer not connected")
 
+    success = client.stop_print()
+    if not success:
+        raise HTTPException(500, "Failed to stop print")
+
+    # Mark this printer as user-stopped so on_print_complete reclassifies
+    # the resulting "failed"/"aborted" MQTT status as "cancelled" — otherwise
+    # the HMS heuristic in _dispatch_archive_update mislabels user-cancels
+    # (e.g. the H2D's cancel-sequence module-0x0C HMS) as "Layer shift".
     try:
-        _item, physical_attempt, command_sent = await stop_current_job(db, printer_id)
-    except InvalidQueueTransition as error:
-        raise HTTPException(409, str(error)) from error
-    if not physical_attempt:
-        message = "Unsent job cancelled"
-    elif command_sent:
-        message = "Stop command sent; clear the plate before the next print"
-    else:
-        message = "Stop intent recorded; inspect the printer before clearing the plate"
-    return {"success": True, "message": message}
+        from backend.app.main import mark_printer_stopped_by_user
+
+        mark_printer_stopped_by_user(printer_id)
+    except Exception as _mark_err:
+        logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
+
+    return {"success": True, "message": "Print stop command sent"}
 
 
 @router.post("/{printer_id}/clear-plate")
@@ -3055,7 +3012,7 @@ async def clear_plate(
 ):
     """Acknowledge that the build plate has been cleared after a finished/failed print.
 
-    Finalizes the holding job so the scheduler can start the next queued print.
+    Sets a plate-cleared flag so the scheduler can start the next queued print.
     No MQTT command is sent to the printer — the scheduler's start_print command
     will override the FINISH/FAILED state when it sends the next job.
     """
@@ -3064,19 +3021,21 @@ async def clear_plate(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    item = await db.scalar(
-        select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id,
-            awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
+    if not printer_manager.is_connected(printer_id):
+        raise HTTPException(400, "Printer not connected")
+
+    # Accept the acknowledgment whenever the printer is awaiting it — not only when the
+    # reported state is FINISH/FAILED. After a power cycle the printer boots into IDLE
+    # but the awaiting flag persists, and the user still needs a way to ack it (#961).
+    state = printer_manager.get_status(printer_id)
+    awaiting = printer_manager.is_awaiting_plate_clear(printer_id)
+    if not awaiting and (not state or state.state not in ("FINISH", "FAILED")):
+        raise HTTPException(
+            400,
+            f"Printer is not awaiting plate-clear acknowledgment (state={state.state if state else 'unknown'})",
         )
-    )
-    if item is None:
-        raise HTTPException(409, "No job is awaiting plate clear")
-    try:
-        await clear_job_plate(db, item.id)
-    except InvalidQueueTransition as exc:
-        raise HTTPException(409, str(exc)) from exc
-    await db.commit()
+
+    printer_manager.set_awaiting_plate_clear(printer_id, False)
 
     return {"success": True, "message": "Plate cleared, next print will start shortly"}
 
@@ -3572,23 +3531,20 @@ async def get_printable_objects(
     # Reload objects from 3MF if requested or no objects loaded
     if reload or not client.state.printable_objects:
         subtask_name = client.state.subtask_name
-        remote_filename = await _queue_upload_filename(db, printer_id, client.state)
-        if subtask_name or remote_filename:
+        if subtask_name:
             from backend.app.services.archive import extract_printable_objects_from_3mf
             from backend.app.services.bambu_ftp import download_file_try_paths_async
 
             # Build possible 3MF filenames (try both .gcode.3mf and .3mf)
             possible_filenames = []
-            if remote_filename:
-                possible_filenames.append(remote_filename)
-            elif subtask_name.endswith(".3mf"):
+            if subtask_name.endswith(".3mf"):
                 possible_filenames.append(subtask_name)
             else:
                 possible_filenames.append(f"{subtask_name}.gcode.3mf")
                 possible_filenames.append(f"{subtask_name}.3mf")
 
             # Also try with spaces converted to underscores (Bambu Studio may normalize filenames)
-            if not remote_filename and " " in subtask_name:
+            if " " in subtask_name:
                 normalized = subtask_name.replace(" ", "_")
                 if normalized.endswith(".3mf"):
                     possible_filenames.append(normalized)
@@ -3601,10 +3557,9 @@ async def get_printable_objects(
             temp_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Build list of all remote paths to try
-            remote_paths = [f"/{remote_filename}"] if remote_filename else []
-            if not remote_filename:
-                for filename in possible_filenames:
-                    remote_paths.extend([f"/{filename}", f"/cache/{filename}", f"/model/{filename}"])
+            remote_paths = []
+            for filename in possible_filenames:
+                remote_paths.extend([f"/{filename}", f"/cache/{filename}", f"/model/{filename}"])
 
             try:
                 downloaded = await download_file_try_paths_async(

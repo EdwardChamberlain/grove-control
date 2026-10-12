@@ -121,8 +121,9 @@ async def test_webhook_queue_status_includes_dispatching(async_client: AsyncClie
     api_key, printer, _archive = webhook_queue_setup
     db_session.add_all(
         [
-            PrintQueueItem(assigned_printer_id=printer.id, position=1, status="queued"),
+            PrintQueueItem(printer_id=printer.id, position=1, status="pending"),
             PrintQueueItem(printer_id=printer.id, position=2, status="dispatching"),
+            PrintQueueItem(printer_id=printer.id, position=3, status="printing"),
         ]
     )
     await db_session.commit()
@@ -136,21 +137,5 @@ async def test_webhook_queue_status_includes_dispatching(async_client: AsyncClie
     queue = response.json()[0]
     assert queue["pending"] == 1
     assert queue["dispatching"] == 1
-    assert queue["printing"] == 0
-    # Integrations keep the pre-#194 name for waiting jobs.
-    assert [item["status"] for item in queue["items"]] == ["pending", "dispatching"]
-
-
-async def test_webhook_queue_keeps_paused_work_in_its_printing_contract(
-    async_client: AsyncClient, db_session, webhook_queue_setup
-):
-    from backend.app.models.print_queue import PrintQueueItem
-
-    api_key, printer, _archive = webhook_queue_setup
-    db_session.add(PrintQueueItem(printer_id=printer.id, position=1, status="paused"))
-    await db_session.commit()
-    response = await async_client.get(f"/api/v1/webhook/queue?printer_id={printer.id}", headers={"X-API-Key": api_key})
-    assert response.status_code == 200, response.text
-    queue = response.json()[0]
     assert queue["printing"] == 1
-    assert [item["status"] for item in queue["items"]] == ["printing"]
+    assert [item["status"] for item in queue["items"]] == ["pending", "dispatching", "printing"]

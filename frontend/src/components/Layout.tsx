@@ -94,6 +94,11 @@ export function Layout() {
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() =>
     sessionStorage.getItem('dismissedUpdateVersion')
   );
+  const [plateDetectionAlert, setPlateDetectionAlert] = useState<{
+    printer_id: number;
+    printer_name: string;
+    message: string;
+  } | null>(null);
 
   // Check for updates
   const { data: versionInfo } = useQuery({
@@ -199,15 +204,15 @@ export function Layout() {
     refetchOnWindowFocus: true,
   });
 
-  // Fetch queued jobs for the sidebar badge
+  // Fetch pending queue items count for badge
   const { data: queueItems } = useQuery({
-    queryKey: ['queue', 'queued'],
-    queryFn: () => api.getQueue(undefined, 'queued'),
+    queryKey: ['queue', 'pending'],
+    queryFn: () => api.getQueue(undefined, 'pending'),
     staleTime: 5 * 1000, // 5 seconds
     refetchInterval: 5 * 1000, // Refresh every 5 seconds
     refetchOnWindowFocus: true,
   });
-  const queuedJobCount = queueItems?.length ?? 0;
+  const pendingQueueCount = queueItems?.length ?? 0;
 
   // Fetch pending uploads count for archive badge (virtual printer review items)
   const { data: pendingUploadsData } = useQuery({
@@ -409,6 +414,25 @@ export function Layout() {
     }
   }, [location.pathname, isSidebarCompact]);
 
+  // Listen for plate detection warnings (objects on plate, print paused)
+  // Only show to users with printers:control permission
+  useEffect(() => {
+    const handlePlateNotEmpty = (event: Event) => {
+      // Only show alert to users who can control printers
+      if (!hasPermission('printers:control')) {
+        return;
+      }
+      const detail = (event as CustomEvent).detail;
+      setPlateDetectionAlert({
+        printer_id: detail.printer_id,
+        printer_name: detail.printer_name,
+        message: detail.message,
+      });
+    };
+    window.addEventListener('plate-not-empty', handlePlateNotEmpty);
+    return () => window.removeEventListener('plate-not-empty', handlePlateNotEmpty);
+  }, [hasPermission]);
+
   // Global keyboard shortcuts for navigation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
@@ -586,9 +610,9 @@ export function Layout() {
                 if (!navItem) return null;
 
                 const { to, icon: Icon, labelKey } = navItem;
-                const showQueueBadge = id === 'queue' && queuedJobCount > 0;
+                const showQueueBadge = id === 'queue' && pendingQueueCount > 0;
                 const showArchiveBadge = id === 'archives' && pendingUploadsCount > 0;
-                const badgeCount = showQueueBadge ? queuedJobCount : showArchiveBadge ? pendingUploadsCount : 0;
+                const badgeCount = showQueueBadge ? pendingQueueCount : showArchiveBadge ? pendingUploadsCount : 0;
                 const showBadge = showQueueBadge || showArchiveBadge;
                 const showClearPlateDot = id === 'printers' && needsClearPlate;
 
@@ -897,6 +921,36 @@ export function Layout() {
             }
           }).filter(Boolean) as { type: 'nav' | 'external'; label: string; labelKey?: string }[]}
         />
+      )}
+
+      {/* Plate Detection Alert Modal */}
+      {plateDetectionAlert && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4">
+          <div className="bg-bambu-dark-secondary border-2 border-yellow-500 rounded-xl shadow-2xl max-w-md w-full animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                <svg className="w-10 h-10 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h2 className="text-xl font-bold text-yellow-400 mb-2">
+                {t('plateAlert.title')}
+              </h2>
+              <p className="text-lg text-white mb-2">
+                {plateDetectionAlert.printer_name}
+              </p>
+              <p className="text-bambu-gray mb-6">
+                {t('plateAlert.message')}
+              </p>
+              <button
+                onClick={() => setPlateDetectionAlert(null)}
+                className="w-full py-3 px-6 bg-yellow-500 hover:bg-yellow-600 text-black font-semibold rounded-lg transition-colors"
+              >
+                {t('plateAlert.understand')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Change Password Modal */}

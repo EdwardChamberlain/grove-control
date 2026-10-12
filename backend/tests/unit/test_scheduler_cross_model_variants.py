@@ -25,9 +25,8 @@ from backend.app.core.database import Base
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
-from backend.app.services.print_scheduler import PrintScheduler
-from backend.app.services.printer_selection import (
-    PrinterSelection,
+from backend.app.services.print_scheduler import (
+    PrintScheduler,
     _candidate_model_label,
     _candidates_for,
     _collapse_waiting_reasons,
@@ -38,11 +37,12 @@ from backend.app.services.printer_selection import (
 # ---------------------------------------------------------------------------
 
 
-def _fake_variant(*, vid, position, model, trashed=False, file_missing=False):
+def _fake_variant(*, vid, position, model, attempts=0, trashed=False, file_missing=False):
     return SimpleNamespace(
         id=vid,
         position=position,
         target_model=model,
+        attempt_count=attempts,
         library_file=None
         if file_missing
         else SimpleNamespace(
@@ -98,15 +98,16 @@ def test_variants_come_back_in_user_priority_order():
     assert [c.target_model for c in _candidates_for(item)] == ["H2S", "H2C"]
 
 
-def test_failed_candidate_does_not_change_user_priority():
-    """Retrying creates a fresh job; this job keeps the original candidate order."""
+def test_least_attempted_candidate_is_tried_first():
+    """A printer that accepts the file and never starts must not eat the item's
+    whole retry budget — the alternative gets the next lap."""
     item = _fake_item(
         [
-            _fake_variant(vid=1, position=0, model="H2S"),
-            _fake_variant(vid=2, position=1, model="H2C"),
+            _fake_variant(vid=1, position=0, model="H2S", attempts=1),
+            _fake_variant(vid=2, position=1, model="H2C", attempts=0),
         ]
     )
-    assert [c.target_model for c in _candidates_for(item)] == ["H2S", "H2C"]
+    assert [c.target_model for c in _candidates_for(item)] == ["H2C", "H2S"]
 
 
 def test_trashed_candidate_is_skipped():
@@ -139,6 +140,18 @@ def test_item_with_no_usable_candidates_yields_none():
     assert _candidates_for(item) == []
 
 
+def test_equal_attempts_fall_back_to_priority():
+    """Once every candidate has failed equally often they cycle in the user's
+    order, so the item still reaches its DISPATCH_MAX_ATTEMPTS ceiling."""
+    item = _fake_item(
+        [
+            _fake_variant(vid=1, position=0, model="H2S", attempts=2),
+            _fake_variant(vid=2, position=1, model="H2C", attempts=2),
+        ]
+    )
+    assert [c.target_model for c in _candidates_for(item)] == ["H2S", "H2C"]
+
+
 # ---------------------------------------------------------------------------
 # Waiting reasons — pure
 # ---------------------------------------------------------------------------
@@ -162,13 +175,13 @@ def test_all_busy_stays_busy_only_so_no_notification_fires():
     scheduler = PrintScheduler()
     collapsed = _collapse_waiting_reasons([("H2S", "Busy: H2S-1 (Printing)"), ("H2C", "Busy: H2C-1 (Printing)")])
     assert collapsed == "Busy: H2S-1 (Printing) | Busy: H2C-1 (Printing)"
-    assert scheduler.selection._is_busy_only(collapsed)
+    assert scheduler._is_busy_only(collapsed)
 
 
 def test_differing_reasons_are_labelled_by_model():
     collapsed = _collapse_waiting_reasons([("H2S", "No PETG loaded"), ("H2C", "Busy: H2C-1 (Printing)")])
     assert collapsed == "H2S: No PETG loaded; H2C: Busy: H2C-1 (Printing)"
-    assert not PrinterSelection._is_busy_only(collapsed), "a real blocker must still notify"
+    assert not PrintScheduler._is_busy_only(collapsed), "a real blocker must still notify"
 
 
 def test_empty_reasons_are_dropped():
@@ -234,7 +247,7 @@ async def _add_variant_item(ctx, specs):
     """Seed one pending queue item with a variant per (model, overrides) spec."""
     async with ctx.session_maker() as db:
         item = PrintQueueItem(
-            status="queued",
+            status="pending",
             position=1,
             target_model=specs[0]["model"],
             # These tests isolate candidate selection. The real queue API keeps
@@ -264,22 +277,19 @@ async def _add_variant_item(ctx, specs):
                     ams_mapping=spec.get("ams_mapping"),
                     nozzle_mapping=spec.get("nozzle_mapping"),
                     print_time_seconds=spec.get("print_time_seconds"),
+                    attempt_count=spec.get("attempts", 0),
                 )
             )
         await db.commit()
         return item.id
 
 
-async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, printer_states=None):
-    scheduler.launch_uploads = MagicMock()
+async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None):
     patches = [
         patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
-        patch(
-            "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
-            MagicMock(side_effect=lambda printer_id: (printer_states or {}).get(printer_id)),
-        ),
+        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=None)),
         patch(
             "backend.app.services.notification_service.notification_service.on_queue_job_waiting",
             waiting_notification or AsyncMock(),
@@ -288,29 +298,18 @@ async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, pr
             "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
             AsyncMock(),
         ),
-        patch.object(scheduler.selection, "_find_idle_printer_for_model", finder),
-        patch.object(scheduler.drying, "_check_auto_drying", AsyncMock()),
-        # Selection is what's under test — keep the filament-deficit probe
-        # out of the way, and never actually dispatch.
-        patch.object(scheduler.selection, "_block_on_filament_deficit", AsyncMock(return_value=False)),
-        patch.object(scheduler.workers, "launch", scheduler.launch_uploads),
+        patch.object(scheduler, "_find_idle_printer_for_model", finder),
+        patch.object(scheduler, "_check_auto_drying", AsyncMock()),
+        # Selection is what's under test — keep AMS recomputation and the
+        # filament-deficit probe out of the way, and never actually dispatch.
+        patch.object(scheduler, "_ensure_ams_mapping", AsyncMock()),
+        patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
+        patch.object(scheduler, "_launch_uploads", MagicMock()),
     ]
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
         return await scheduler.check_queue()
-
-
-def _selected_printer(scheduler, item_id):
-    """The printer an "Any machine" job was handed to its worker for.
-
-    Selection does not write it: a waiting pool job holds no printer until its
-    dispatch worker's hold transition binds it.
-    """
-    if not scheduler.launch_uploads.called:
-        return None
-    bindings, _limit = scheduler.launch_uploads.call_args.args
-    return bindings[item_id].printer_id if item_id in bindings else None
 
 
 async def _get_item(ctx, item_id):
@@ -351,8 +350,7 @@ async def test_first_matching_variant_wins_and_is_folded_onto_the_row(queue_db):
     await _run_check_queue(queue_db, scheduler, _finder_for({"H2C": 2}))
 
     item = await _get_item(queue_db, item_id)
-    assert _selected_printer(scheduler, item_id) == 2, "sent to the H2C"
-    assert item.printer_id is None, "the waiting job is not bound to a printer"
+    assert item.printer_id == 2, "assigned to the H2C"
     assert item.target_model == "H2C"
     assert item.plate_id == 3
     assert item.ams_mapping == "[4, 5]"
@@ -378,8 +376,7 @@ async def test_priority_order_decides_when_both_are_free(queue_db):
     await _run_check_queue(queue_db, scheduler, _finder_for({"H2S": 1, "H2C": 2}))
 
     item = await _get_item(queue_db, item_id)
-    assert _selected_printer(scheduler, item_id) == 1
-    assert item.printer_id is None
+    assert item.printer_id == 1
     assert item.target_model == "H2S"
 
 
@@ -401,8 +398,7 @@ async def test_cross_model_gate_is_applied_per_candidate(queue_db):
 
     assert [c.args[1] for c in finder.await_args_list] == ["H2C"], "the mismatched variant never reaches the matcher"
     item = await _get_item(queue_db, item_id)
-    assert _selected_printer(scheduler, item_id) == 2
-    assert item.printer_id is None
+    assert item.printer_id == 2
     assert item.target_model == "H2C"
 
 
@@ -418,7 +414,7 @@ async def test_no_match_reports_every_model_it_tried(queue_db):
 
     item = await _get_item(queue_db, item_id)
     assert item.printer_id is None
-    assert item.status == "queued"
+    assert item.status == "pending"
     assert "H2S: No idle H2S printer" in item.waiting_reason
     assert "H2C: No idle H2C printer" in item.waiting_reason
     assert waiting.await_args.kwargs["target_model"] == "H2S or H2C"
@@ -432,7 +428,7 @@ async def test_item_with_no_files_left_is_held_with_an_actionable_reason(queue_d
     every candidate used to sail into dispatch and die there on "No archive_id
     or library_file_id"; hold it where the user can see why."""
     async with queue_db.session_maker() as db:
-        db.add(PrintQueueItem(status="queued", position=1, target_model="H2S", force_color_match=False))
+        db.add(PrintQueueItem(status="pending", position=1, target_model="H2S", force_color_match=False))
         await db.commit()
     scheduler = PrintScheduler()
     finder = _finder_for({"H2S": 1})
@@ -442,7 +438,7 @@ async def test_item_with_no_files_left_is_held_with_an_actionable_reason(queue_d
     finder.assert_not_awaited()
     async with queue_db.session_maker() as db:
         item = (await db.execute(select(PrintQueueItem))).scalar_one()
-    assert item.status == "queued"
+    assert item.status == "pending"
     assert item.printer_id is None
     assert "has been deleted" in item.waiting_reason
 
@@ -463,7 +459,7 @@ async def test_plain_model_based_item_is_untouched(queue_db):
         await db.flush()
         db.add(
             PrintQueueItem(
-                status="queued",
+                status="pending",
                 position=1,
                 target_model="H2S",
                 library_file_id=lib.id,
@@ -478,20 +474,20 @@ async def test_plain_model_based_item_is_untouched(queue_db):
 
     async with queue_db.session_maker() as db:
         item = (await db.execute(select(PrintQueueItem))).scalar_one()
-    assert _selected_printer(scheduler, item.id) == 1
-    assert item.printer_id is None
+    assert item.printer_id == 1
     assert item.target_model == "H2S"
     assert item.plate_id == 2, "nothing overwrote the item's own settings"
 
 
 @pytest.mark.asyncio
-async def test_failed_candidate_keeps_user_priority(queue_db):
-    """Attempt history does not rotate the user's candidate order."""
+async def test_failed_candidate_steps_aside_for_the_alternative(queue_db):
+    """The H2S burned an attempt on the last lap. Both are free now — the H2C
+    goes first, which is the entire point of queueing an alternative."""
     item_id = await _add_variant_item(
         queue_db,
         [
-            {"model": "H2S"},
-            {"model": "H2C"},
+            {"model": "H2S", "attempts": 1},
+            {"model": "H2C", "attempts": 0},
         ],
     )
     scheduler = PrintScheduler()
@@ -499,44 +495,5 @@ async def test_failed_candidate_keeps_user_priority(queue_db):
     await _run_check_queue(queue_db, scheduler, _finder_for({"H2S": 1, "H2C": 2}))
 
     item = await _get_item(queue_db, item_id)
-    assert _selected_printer(scheduler, item_id) == 1
-    assert item.printer_id is None
-    assert item.target_model == "H2S"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("compatible_available", [True, False])
-async def test_model_assignment_checks_nozzle_before_reserving_and_tries_other_printers(queue_db, compatible_available):
-    item_id = await _add_variant_item(queue_db, [{"model": "H2S"}])
-    async with queue_db.session_maker() as db:
-        db.add(
-            Printer(id=3, name="H2S-2", serial_number="H2S0003", ip_address="10.0.0.3", access_code="x", model="H2S")
-        )
-        variant = await db.scalar(select(PrintQueueVariant).where(PrintQueueVariant.queue_item_id == item_id))
-        library = await db.get(LibraryFile, variant.library_file_id)
-        library.file_metadata = {"sliced_for_model": "H2S", "nozzle_diameter": "0.6"}
-        await db.commit()
-    states = {
-        1: SimpleNamespace(
-            state="IDLE", connected=True, nozzles=[SimpleNamespace(nozzle_diameter="0.4")], nozzle_rack=[]
-        ),
-        3: SimpleNamespace(
-            state="IDLE", connected=True, nozzles=[SimpleNamespace(nozzle_diameter="0.6")], nozzle_rack=[]
-        ),
-    }
-
-    async def find(db, model, excluded, *args, **kwargs):
-        if 1 not in excluded:
-            return 1, None
-        return (3, None) if compatible_available else (None, "No idle printer")
-
-    finder = AsyncMock(side_effect=find)
-    scheduler = PrintScheduler()
-    await _run_check_queue(queue_db, scheduler, finder, printer_states=states)
-    item = await _get_item(queue_db, item_id)
-    assert item.status == "queued"
-    assert item.printer_id is None
-    assert _selected_printer(scheduler, item_id) == (3 if compatible_available else None)
-    if not compatible_available:
-        assert "0.6mm" in item.waiting_reason and "0.4mm" in item.waiting_reason
-    assert finder.await_count == 2
+    assert item.printer_id == 2
+    assert item.target_model == "H2C"

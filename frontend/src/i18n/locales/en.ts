@@ -642,7 +642,7 @@ export default {
       noPermission: 'You do not have permission to update printers',
       enabledClick: 'Plate check enabled - Click to disable',
       disabledClick: 'Plate check disabled - Click to enable',
-      manageCalibration: 'Manage calibration',
+      manageCalibration: 'Manage plate detection calibration',
       calibrationRequired: 'Calibration Required',
       calibrationInstructions: 'Please ensure the build plate is <strong>completely empty</strong>, then click Calibrate.',
       calibrationDescription: 'Calibration captures a reference image of the empty plate. Future checks will compare against this reference to detect objects.',
@@ -751,7 +751,7 @@ export default {
     developerModeWarning: 'Developer LAN mode is not enabled on: {{names}}. Some features may not work.',
     howToEnable: 'How to enable',
     incompatibleFile: 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}',
-    directUploadLibraryNote: 'This upload is added to Queue and is not saved in Files.',
+    directUploadLibraryNote: 'The uploaded file is added to File Manager before you queue it.',
     dropNotPrintable: 'Only .gcode and .gcode.3mf files can be printed',
     dropToPrint: 'Drop to print',
     cannotPrint: 'Printer busy',
@@ -837,8 +837,6 @@ export default {
       failedUploadTimelapse: 'Failed to upload timelapse',
       archiveDeleted: 'Archive deleted',
       failedDeleteArchive: 'Failed to delete archive',
-      savedToFiles: 'Saved {{filename}} to Files',
-      failedSaveToFiles: 'Failed to save print artifact to Files',
       addedToFavorites: 'Added to favorites',
       removedFromFavorites: 'Removed from favorites',
       projectUpdated: 'Project updated',
@@ -872,7 +870,6 @@ export default {
       downloadF3d: 'Download F3D',
       removeF3d: 'Remove F3D',
       download: 'Download',
-      saveToFiles: 'Save to Files',
       copyDownloadLink: 'Copy Download Link',
       qrCode: 'QR Code',
       viewPhotos: 'View Photos',
@@ -988,7 +985,7 @@ export default {
       deleteButton: 'Delete',
       deletePurgeStats: 'Also remove this print from Quick Stats (filament, time, cost, energy)',
       deleteQueueItemsWarning: '{{count}} queue item(s) linked to this archive will also be removed.',
-      deleteBlockedByPrinting: 'Cannot delete — {{count}} job(s) still hold a printer. Stop active jobs and clear their plates first.',
+      deleteBlockedByPrinting: 'Cannot delete — {{count}} queue item(s) are being dispatched or printed. Stop the active job first, then retry.',
       removeSource3mf: 'Remove Source 3MF',
       removeSource3mfConfirm: 'Are you sure you want to remove the source 3MF file from "{{name}}"? This will delete the original slicer project file.',
       removeButton: 'Remove',
@@ -1078,12 +1075,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: 'Awaiting plate clear',
-    resolveDispatch: {
-      prompt: 'The printer has not confirmed this job. Check the printer before choosing:',
-      printing: "It's printing",
-      failed: "It didn't start",
-    },
     title: 'Print Queue',
     subtitle: 'Schedule and manage your print jobs',
     filamentShort: {
@@ -1170,10 +1161,6 @@ export default {
     },
     // Status
     status: {
-      queued: 'Queued',
-      finished: 'Finished',
-      successful: 'Successful',
-      unsuccessful: 'Unsuccessful',
       pending: 'Pending',
       scheduled: 'Scheduled',
       waiting: 'Waiting',
@@ -1213,7 +1200,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: 'Manual start',
+      staged: 'Staged',
+      requiresPrevious: 'Requires previous success',
       autoPowerOff: 'Auto power off',
       gcodeInjection: 'G-code',
     },
@@ -1233,8 +1221,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: 'Clear plate',
-      retry: 'Retry',
       startPrint: 'Start Print',
       stopPrint: 'Stop Print',
       requeue: 'Re-queue',
@@ -1877,6 +1863,12 @@ export default {
     saveThumbnails: 'Save thumbnails',
     captureFinishPhoto: 'Capture finish photo',
     noPrintersConfigured: 'No printers configured',
+    // Archive settings
+    archiveMode: {
+      always: 'Always create archive entry',
+      never: 'Never create archive entry',
+      ask: 'Ask each time',
+    },
     // Updates
     checkForUpdatesLabel: 'Check for updates',
     checkPrinterFirmware: 'Check printer firmware',
@@ -2371,7 +2363,7 @@ export default {
     cameraTypeUsb: 'USB Camera (V4L2)',
     cameraSnapshotUrl: 'Snapshot URL (optional)',
     cameraSnapshotUrlPlaceholder: 'http://192.168.1.61:1984/api/frame.jpeg?src=printer',
-    cameraSnapshotUrlHelp: 'Single-frame URL used for notification thumbnails, finish photos, layer-timelapse frames. This URL is just the image source used for snapshots and timelapse frames. Leave blank to capture from the live stream above. Useful for go2rtc (/api/frame.jpeg) and IP cameras with a dedicated snapshot endpoint.',
+    cameraSnapshotUrlHelp: 'Single-frame URL used for notification thumbnails, finish photos, layer-timelapse frames, and plate detection. Timelapse and plate detection each require their own per-printer toggle — this URL is just the image source they pull from when active. Leave blank to capture from the live stream above. Useful for go2rtc (/api/frame.jpeg) and IP cameras with a dedicated snapshot endpoint.',
     cameraRotation: 'Rotation',
     test: 'Test',
     connected: 'Connected',
@@ -2385,6 +2377,8 @@ export default {
     energyModeTotalDescription: 'Dashboard shows lifetime energy from smart plugs',
     // File Manager
     fileManager: 'File Manager',
+    createArchiveEntry: 'Create Archive Entry When Printing',
+    createArchiveEntryDescription: 'When printing from File Manager, optionally create an archive entry',
     lowDiskSpaceWarning: 'Low Disk Space Warning',
     lowDiskSpaceDescription: 'Show warning when free disk space falls below this threshold',
     // Updates
@@ -3858,7 +3852,6 @@ export default {
     runningWithProgress: '{{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     runningWithProgressMultiPlate: 'Plate {{plateIndex}} of {{plateCount}} • {{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     completedToast: 'Sliced {{name}}',
-    completedToFilesToast: 'Sliced {{name}} and saved to Files',
     failedTitle: 'Slicing failed',
     failedToast: 'Slicing {{name}} failed: {{detail}}',
     tier: {
@@ -4909,7 +4902,7 @@ export default {
     running: 'Running',
     stopped: 'Stopped',
     description: {
-      default: 'Enable a virtual printer that appears in Bambu Studio and OrcaSlicer. Files sent to this printer can be saved to Files, reviewed, or added to the print queue.',
+      default: 'Enable a virtual printer that appears in Bambu Studio and OrcaSlicer. Files sent to this printer will be archived directly without printing.',
       proxy: 'Enable a proxy that relays slicer traffic to a real printer, allowing remote printing over any network.',
     },
     enable: {
@@ -4953,12 +4946,12 @@ export default {
     },
     mode: {
       title: 'Mode',
-      archive: 'Files',
-      archiveDesc: 'Save uploads to Files',
+      archive: 'Archive',
+      archiveDesc: 'Archive files immediately',
       review: 'Review',
-      reviewDesc: 'Review uploads before saving to Files',
+      reviewDesc: 'Review before archiving',
       queue: 'Queue',
-      queueDesc: 'Add uploads to the print queue',
+      queueDesc: 'Archive and add to queue',
       proxy: 'Proxy',
       proxyDesc: 'Relay to real printer',
     },
@@ -4984,8 +4977,8 @@ export default {
       readGuide: 'Read the setup guide before enabling',
     },
     archiveNameSource: {
-      title: 'Upload display name',
-      description: 'Choose how virtual-printer uploads are named in the review list. "Metadata" uses the slicer-embedded Title from the 3MF (default). "Filename" uses the filename Bambu Studio sent over FTP.',
+      title: 'Archive name source',
+      description: 'Choose how new archives are named when files arrive via the virtual printer. "Metadata" uses the slicer-embedded Title from the 3MF (default). "Filename" uses the filename Bambu Studio sent over FTP. Note: Bambu Studio overwrites the name you type in the "send to printer" dialog with the 3MF\'s Title field whenever one is present, so both modes often produce the same string.',
       metadata: 'Metadata',
       filename: 'Filename',
     },
@@ -5000,7 +4993,7 @@ export default {
     howItWorks: {
       title: 'How it works',
       step1: 'On the same LAN, virtual printers appear in your slicer (Bambu Studio / OrcaSlicer) automatically via discovery. From other networks, add them manually by IP address and access code.',
-      step2: 'In Files, Review, and Queue modes, use the "Send" button in your slicer to upload 3MF files to Grove Control. Files mode saves to Files, Review holds uploads for you to save or discard, and Queue adds print jobs. The slicer will show "Print success" because upload has finished.',
+      step2: 'In Archive, Review, and Queue modes, use the "Send" button in your slicer to upload 3MF files to Grove Control. The slicer will show "Print success" — the file is stored, not printed.',
       step3: 'In Proxy mode, the virtual printer relays all traffic to a real printer — prints start immediately as if connected directly.',
     },
     status: {
@@ -5283,6 +5276,12 @@ export default {
     autoOffAfterDrying: 'Auto Off After Drying',
     autoOffAfterDryingDescription: 'Turn off when AMS drying completes',
     delayAfterDryingMinutes: 'Drying delay (minutes)',
+    turnOffDelayMode: 'Turn Off Delay Mode',
+    time: 'Time',
+    temp: 'Temp',
+    delayMinutes: 'Delay (minutes)',
+    tempThreshold: 'Temperature threshold (°C)',
+    tempThresholdDescription: 'Turns off when nozzle cools below this temperature',
     edit: 'Edit',
     deleteConfirm: 'Are you sure you want to delete "{{name}}"? This cannot be undone.',
     turnOnConfirm: 'Are you sure you want to turn on "{{name}}"?',

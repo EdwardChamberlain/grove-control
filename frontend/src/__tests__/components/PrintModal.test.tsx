@@ -6,7 +6,7 @@
  * - 'edit-queue-item': Edit an existing queue item
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type React from 'react';
 import { fireEvent, screen, waitFor, within, render as rtlRender } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -34,6 +34,7 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   archive_id: 1,
   position: 1,
   scheduled_time: null,
+  require_previous_success: false,
   wait_for_drying_complete: false,
   auto_off_after: false,
   gcode_injection: false,
@@ -47,7 +48,7 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   layer_inspect: false,
   timelapse: false,
   use_ams: true,
-  status: 'queued',
+  status: 'pending',
   started_at: null,
   completed_at: null,
   error_message: null,
@@ -62,8 +63,6 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
 describe('PrintModal', () => {
   const mockOnClose = vi.fn();
   const mockOnSuccess = vi.fn();
-
-  afterEach(() => vi.useRealTimers());
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -81,10 +80,10 @@ describe('PrintModal', () => {
         return HttpResponse.json({ connected: true, state: 'IDLE', ams: [], vt_tray: [] });
       }),
       http.post('/api/v1/queue/', () => {
-        return HttpResponse.json({ id: 1, status: 'queued' });
+        return HttpResponse.json({ id: 1, status: 'pending' });
       }),
       http.patch('/api/v1/queue/:id', () => {
-        return HttpResponse.json({ id: 1, status: 'queued' });
+        return HttpResponse.json({ id: 1, status: 'pending' });
       })
     );
   });
@@ -167,7 +166,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
 
@@ -203,7 +202,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
 
@@ -245,7 +244,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
 
@@ -276,7 +275,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
 
@@ -303,7 +302,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
 
@@ -329,7 +328,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
 
@@ -356,7 +355,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
 
@@ -539,7 +538,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -574,7 +573,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -602,7 +601,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -634,7 +633,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -671,7 +670,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -729,7 +728,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -769,7 +768,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -826,7 +825,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -893,7 +892,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -1008,7 +1007,7 @@ describe('PrintModal', () => {
       let body: Record<string, unknown> | undefined;
       server.use(http.post('/api/v1/queue/', async ({ request }) => {
         body = await request.json() as Record<string, unknown>;
-        return HttpResponse.json({ id: 1, status: 'queued' });
+        return HttpResponse.json({ id: 1, status: 'pending' });
       }));
       const user = userEvent.setup();
       render(<PrintModal mode="create" archiveId={1} initialSelectedPrinterIds={[1]} onClose={mockOnClose} />);
@@ -1071,7 +1070,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -1166,7 +1165,6 @@ describe('PrintModal', () => {
     });
 
     it('prevents a postponed print from using a past start time', async () => {
-      vi.setSystemTime(new Date(2026, 9, 4, 23, 58));
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1180,10 +1178,6 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByRole('button', { name: /queue options/i }));
       await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
-      // The next scheduling slot can be tomorrow near midnight.
-      fireEvent.change(screen.getByLabelText('Do not start before'), {
-        target: { value: formatDateInput(new Date(), 'system') },
-      });
       fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '00:00' } });
 
       expect(screen.getByText('Choose a future date and time')).toBeInTheDocument();
@@ -1341,7 +1335,7 @@ describe('PrintModal', () => {
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -1364,7 +1358,7 @@ describe('PrintModal', () => {
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -1383,7 +1377,7 @@ describe('PrintModal', () => {
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -1513,7 +1507,7 @@ describe('PrintModal', () => {
         server.use(
           http.patch('/api/v1/queue/:id', async ({ request }) => {
             captured.body = (await request.json()) as Record<string, unknown>;
-            return HttpResponse.json({ id: 1, status: 'queued' });
+            return HttpResponse.json({ id: 1, status: 'pending' });
           }),
         );
         return captured;
@@ -1649,7 +1643,7 @@ describe('PrintModal', () => {
         server.use(
           http.post('/api/v1/queue/', () => {
             created += 1;
-            return HttpResponse.json({ id: 2, status: 'queued' });
+            return HttpResponse.json({ id: 2, status: 'pending' });
           }),
         );
         const user = userEvent.setup();
@@ -1827,7 +1821,7 @@ describe('PrintModal', () => {
         }),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBodies.push((await request.json()) as Record<string, unknown>);
-          return HttpResponse.json({ id: capturedBodies.length, status: 'queued' });
+          return HttpResponse.json({ id: capturedBodies.length, status: 'pending' });
         }),
       );
       const user = userEvent.setup();
@@ -2293,7 +2287,7 @@ describe('PrintModal', () => {
         http.post('/api/v1/queue/', async ({ request }) => {
           const body = await request.json();
           queueRequests.push(body);
-          return HttpResponse.json({ id: queueRequests.length, status: 'queued' });
+          return HttpResponse.json({ id: queueRequests.length, status: 'pending' });
         }),
       );
 
@@ -2339,7 +2333,7 @@ describe('PrintModal', () => {
         http.post('/api/v1/queue/', async ({ request }) => {
           const body = await request.json();
           queueRequests.push(body);
-          return HttpResponse.json({ id: queueRequests.length, status: 'queued' });
+          return HttpResponse.json({ id: queueRequests.length, status: 'pending' });
         }),
       );
 
@@ -2480,7 +2474,7 @@ describe('PrintModal', () => {
         withSnippets(),
         http.post('/api/v1/queue/', async ({ request }) => {
           queueCalls.push((await request.json()) as Record<string, unknown>);
-          return HttpResponse.json({ id: queueCalls.length, status: 'queued' });
+          return HttpResponse.json({ id: queueCalls.length, status: 'pending' });
         }),
       );
 
@@ -2519,7 +2513,7 @@ describe('PrintModal', () => {
         withSnippets(),
         http.post('/api/v1/queue/', async ({ request }) => {
           queueCalls.push((await request.json()) as Record<string, unknown>);
-          return HttpResponse.json({ id: queueCalls.length, status: 'queued' });
+          return HttpResponse.json({ id: queueCalls.length, status: 'pending' });
         }),
       );
 
@@ -2584,7 +2578,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         })
       );
       const user = userEvent.setup();
@@ -2620,7 +2614,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         })
       );
       const user = userEvent.setup();
@@ -2655,7 +2649,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         })
       );
       const user = userEvent.setup();
@@ -2693,7 +2687,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'queued' });
+          return HttpResponse.json({ id: 1, status: 'pending' });
         })
       );
       const user = userEvent.setup();
@@ -2723,6 +2717,107 @@ describe('PrintModal', () => {
     });
   });
 
+  describe('cleanup_library_after_dispatch forwarding (#730)', () => {
+    // The Printers-page Direct-Print flow passes cleanupLibraryAfterDispatch so the
+    // transient LibraryFile created by FileUploadModal is deleted once the archive
+    // owns its own copy. File Manager / Project Detail flows leave the prop unset so
+    // their deliberately-added library entries survive the print.
+    beforeEach(() => {
+      server.use(
+        http.get('/api/v1/library/files/:id', () => {
+          return HttpResponse.json({
+            id: 5,
+            filename: 'benchy.gcode.3mf',
+            file_type: '3mf',
+            folder_id: null,
+            project_id: null,
+            file_hash: null,
+            file_size_bytes: 1024,
+            thumbnail_path: null,
+            created_at: '2024-01-01T00:00:00Z',
+            updated_at: '2024-01-01T00:00:00Z',
+          });
+        }),
+        http.get('/api/v1/library/files/:id/plates', () => {
+          return HttpResponse.json({ is_multi_plate: false, plates: [] });
+        }),
+        http.get('/api/v1/library/files/:id/filament-requirements', () => {
+          return HttpResponse.json({ file_id: 5, filename: 'benchy.gcode.3mf', filaments: [] });
+        }),
+        http.get('/api/v1/printers/:id/status', () => {
+          return HttpResponse.json({ connected: true, state: 'IDLE', ams: [], vt_tray: [] });
+        }),
+      );
+    });
+
+    it('forwards cleanup_library_after_dispatch=true when the Direct-Print prop is set', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        })
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          libraryFileId={5}
+          archiveName="Benchy"
+          cleanupLibraryAfterDispatch
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => {
+        expect(capturedBody).not.toBeNull();
+        expect(capturedBody?.cleanup_library_after_dispatch).toBe(true);
+      });
+    });
+
+    it('defaults to omitting cleanup_library_after_dispatch (File Manager / Project flows survive)', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        })
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          libraryFileId={5}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => {
+        expect(capturedBody).not.toBeNull();
+      });
+      // Either omitted entirely or explicitly undefined — both interpret as "keep file"
+      expect(capturedBody?.cleanup_library_after_dispatch).toBeUndefined();
+    });
+  });
 });
 describe('PrintModal — per-plate quantity (#342)', () => {
   const mockOnClose = vi.fn();
@@ -2763,7 +2858,7 @@ describe('PrintModal — per-plate quantity (#342)', () => {
         HttpResponse.json({ filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', tray_info_idx: '', used_grams: 50 }] }),
       ),
       http.get('/api/v1/printers/available-filaments', () => HttpResponse.json([])),
-      http.post('/api/v1/queue/', () => HttpResponse.json({ id: 1, status: 'queued' })),
+      http.post('/api/v1/queue/', () => HttpResponse.json({ id: 1, status: 'pending' })),
     );
   });
 
@@ -2814,7 +2909,7 @@ describe('PrintModal — per-plate quantity (#342)', () => {
     server.use(
       http.post('/api/v1/queue/', async ({ request }) => {
         queued.push((await request.json()) as Queued);
-        return HttpResponse.json({ id: queued.length, status: 'queued' });
+        return HttpResponse.json({ id: queued.length, status: 'pending' });
       }),
     );
 
@@ -2851,7 +2946,7 @@ describe('PrintModal — per-plate quantity (#342)', () => {
     server.use(
       http.post('/api/v1/queue/', async ({ request }) => {
         queued.push((await request.json()) as Queued);
-        return HttpResponse.json({ id: queued.length, status: 'queued' });
+        return HttpResponse.json({ id: queued.length, status: 'pending' });
       }),
     );
 

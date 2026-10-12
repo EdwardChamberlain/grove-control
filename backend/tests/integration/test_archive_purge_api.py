@@ -5,124 +5,126 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import AsyncClient
 
-from backend.app.models.print_queue import HOLDING_STATUSES
 
-
-@pytest.mark.parametrize("status", HOLDING_STATUSES)
+@pytest.mark.parametrize("hold", ["pending", "preheating", "dispatching", "printing", "plate"])
 @pytest.mark.parametrize("purge_stats", [False, True])
-@pytest.mark.parametrize("linked", [True, False])
-async def test_purge_retains_held_archives_and_excludes_them_from_preview(
-    async_client, archive_factory, printer_factory, db_session, tmp_path, monkeypatch, status, purge_stats, linked
+async def test_count_retention_preserves_legacy_queue_sources_and_plate_holds(
+    async_client, archive_factory, printer_factory, db_session, hold, purge_stats
 ):
-    from sqlalchemy import select
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.print_queue import PrintQueueItem
 
+    printer = await printer_factory()
+    old = await archive_factory(
+        printer.id, filename="held.3mf", created_at=datetime.now(timezone.utc) - timedelta(days=5)
+    )
+    old_id = old.id
+    await archive_factory(printer.id, filename="new.3mf")
+    if hold == "plate":
+        printer.awaiting_plate_clear = True
+        printer.awaiting_plate_clear_archive_id = old_id
+    else:
+        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=old_id, status=hold))
+    await db_session.commit()
+
+    preview = await async_client.get("/api/v1/archives/purge/preview?keep_count=1")
+    assert preview.status_code == 200
+    assert preview.json()["count"] == 0
+    purge = await async_client.post("/api/v1/archives/purge", json={"keep_count": 1, "purge_stats": purge_stats})
+    assert purge.status_code == 200
+    assert purge.json()["deleted"] == 0
+    db_session.expire_all()
+    kept = await db_session.get(PrintArchive, old_id)
+    assert kept is not None and kept.deleted_at is None
+
+
+async def test_retention_rechecks_a_queue_source_after_preview(
+    async_client, archive_factory, printer_factory, db_session
+):
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.archive_purge import archive_purge_service
+
+    printer = await printer_factory()
+    old = await archive_factory(printer.id, created_at=datetime.now(timezone.utc) - timedelta(days=5))
+    old_id = old.id
+    await archive_factory(printer.id)
+    await db_session.commit()
+    preview = await async_client.get("/api/v1/archives/purge/preview?keep_count=1")
+    assert preview.json()["count"] == 1
+    db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=old_id, status="pending"))
+    await db_session.commit()
+    assert await archive_purge_service._delete_archive_ids([old_id], purge_stats=True) == 0
+
+
+@pytest.mark.parametrize("mode", ["age", "count"])
+@pytest.mark.parametrize("trigger", ["manual", "scheduled"])
+@pytest.mark.parametrize("purge_stats", [False, True])
+async def test_retention_preserves_resumable_skipped_jobs(
+    async_client, archive_factory, printer_factory, db_session, tmp_path, monkeypatch, mode, trigger, purge_stats
+):
+    """Retention must leave failed-gate jobs and their source files resumable."""
     from backend.app.core.config import settings
     from backend.app.models.archive import PrintArchive
-    from backend.app.models.print_log import PrintLogEntry
     from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.archive_purge import archive_purge_service
 
+    printer = await printer_factory()
+    printer_id = printer.id
     monkeypatch.setattr(settings, "base_dir", tmp_path)
     monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
-    source = tmp_path / "archives/test/test_print.gcode.3mf"
+    source = settings.archive_dir / "held" / "held.3mf"
     source.parent.mkdir(parents=True)
-    source.write_bytes(b"held attempt")
-    printer = await printer_factory()
-    archive = await archive_factory(printer.id)
-    archive.created_at = datetime.now(timezone.utc) - timedelta(days=400)
-    item = PrintQueueItem(
-        printer_id=printer.id,
-        archive_id=archive.id if linked else None,
-        status=status,
-        physical_outcome="failed" if status == "failed" else None,
+    source.write_bytes(b"resumable print source")
+    now = datetime.now(timezone.utc)
+    archive = await archive_factory(
+        printer_id,
+        filename=source.name,
+        file_path=str(source.relative_to(tmp_path)),
+        created_at=now - timedelta(days=400),
     )
-    db_session.add(item)
-    await db_session.flush()
-    archive.dispatched_queue_item_id = item.id
+    archive_id = archive.id
+    await archive_factory(printer_id, filename="eligible.3mf", created_at=now - timedelta(days=500))
+    await archive_factory(printer_id, filename="recent.3mf")
+    job = PrintQueueItem(
+        printer_id=printer_id,
+        archive_id=archive_id,
+        status="skipped",
+        require_previous_success=True,
+        error_message="Previous print failed or was aborted",
+        completed_at=now,
+    )
+    db_session.add(job)
     await db_session.commit()
-    item_id, archive_id = item.id, archive.id
+    job_id = job.id
 
-    preview = await async_client.get(
-        "/api/v1/archives/purge/preview",
-        params={
-            "older_than_days": 365,
-            "purge_stats": purge_stats,
-        },
-    )
-    assert preview.status_code == 200 and preview.json()["count"] == 0
-    response = await async_client.post(
-        "/api/v1/archives/purge",
-        json={
-            "older_than_days": 365,
-            "purge_stats": purge_stats,
-        },
-    )
-    assert response.status_code == 200 and response.json()["deleted"] == 0
-    db_session.expire_all()
-    assert (await db_session.get(PrintArchive, archive_id)).deleted_at is None
-    assert (await db_session.get(PrintQueueItem, item_id)).status == status
-    assert await db_session.scalar(select(PrintLogEntry.id).where(PrintLogEntry.archive_id == archive_id))
-    assert source.read_bytes() == b"held attempt"
-
-    if status in ("finished", "failed", "cancelled"):
-        assert (await async_client.post(f"/api/v1/queue/{item_id}/clear-plate")).status_code == 200
-        response = await async_client.post(
-            "/api/v1/archives/purge",
-            json={
-                "older_than_days": 365,
-                "purge_stats": purge_stats,
-            },
+    policy = {"keep_count": 1} if mode == "count" else {"older_than_days": 365}
+    preview = await async_client.get("/api/v1/archives/purge/preview", params={**policy, "purge_stats": purge_stats})
+    assert preview.status_code == 200
+    assert preview.json()["count"] == 1
+    assert preview.json()["sample_filenames"] == ["eligible.3mf"]
+    if trigger == "manual":
+        purge = await async_client.post("/api/v1/archives/purge", json={**policy, "purge_stats": purge_stats})
+        assert purge.status_code == 200
+        deleted = purge.json()["deleted"]
+    else:
+        await archive_purge_service.set_settings(
+            db_session, enabled=True, days=365, mode=mode, max_count=1, purge_stats=purge_stats
         )
-        assert response.json()["deleted"] == 1
-        assert not source.exists()
+        deleted = await archive_purge_service._maybe_run_auto_purge(db_session)
+    assert deleted == 1
 
-
-@pytest.mark.parametrize("purge_stats", [False, True])
-@pytest.mark.parametrize("linked", [True, False])
-async def test_purge_rechecks_a_hold_acquired_after_selection(
-    async_client, archive_factory, printer_factory, db_session, monkeypatch, purge_stats, linked
-):
-    from sqlalchemy import select
-
-    from backend.app.models.archive import PrintArchive
-    from backend.app.models.print_log import PrintLogEntry
-    from backend.app.models.print_queue import PrintQueueItem
-    from backend.app.services.archive import ArchiveService
-
-    printer = await printer_factory()
-    archive = await archive_factory(printer.id)
-    archive.created_at = datetime.now(timezone.utc) - timedelta(days=400)
-    await db_session.commit()
-    archive_id, printer_id = archive.id, printer.id
-    method_name = "delete_archive" if purge_stats else "soft_delete_archive"
-    original = getattr(ArchiveService, method_name)
-
-    async def acquire_hold_then_delete(service, selected_id, **kwargs):
-        assert selected_id == archive_id
-        item = PrintQueueItem(printer_id=printer_id, archive_id=selected_id if linked else None, status="finished")
-        service.db.add(item)
-        await service.db.flush()
-        (await service.db.get(PrintArchive, selected_id)).dispatched_queue_item_id = item.id
-        await service.db.commit()
-        return await original(service, selected_id, **kwargs)
-
-    monkeypatch.setattr(ArchiveService, method_name, acquire_hold_then_delete)
-    response = await async_client.post(
-        "/api/v1/archives/purge",
-        json={
-            "older_than_days": 365,
-            "purge_stats": purge_stats,
-        },
-    )
-    assert response.status_code == 200 and response.json()["deleted"] == 0
+    resumed = await async_client.post(f"/api/v1/queue/printer/{printer_id}/resume")
+    assert resumed.status_code == 200
+    assert resumed.json()["restored"] == 1
     db_session.expire_all()
-    assert (await db_session.get(PrintArchive, archive_id)).deleted_at is None
-    assert await db_session.scalar(select(PrintLogEntry.id).where(PrintLogEntry.archive_id == archive_id))
-    assert await db_session.scalar(
-        select(PrintQueueItem.id).where(
-            PrintQueueItem.id == (await db_session.get(PrintArchive, archive_id)).dispatched_queue_item_id,
-            PrintQueueItem.status == "finished",
-        )
-    )
+    kept = await db_session.get(PrintArchive, archive_id)
+    restored = await db_session.get(PrintQueueItem, job_id)
+    assert kept is not None and kept.deleted_at is None
+    assert restored is not None and restored.status == "pending"
+    assert restored.archive_id == archive_id
+    assert restored.error_message is None
+    assert restored.completed_at is None
+    assert source.read_bytes() == b"resumable print source"
 
 
 @pytest.mark.asyncio

@@ -407,16 +407,14 @@ async def get_metrics(
     lines.append("")
     lines.append("# HELP bambuddy_queue_pending Number of pending queue items")
     lines.append("# TYPE bambuddy_queue_pending gauge")
-    result = await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "queued"))
+    result = await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "pending"))
     pending_count = result.scalar() or 0
     lines.append(f"bambuddy_queue_pending {pending_count}")
 
     lines.append("")
-    lines.append("# HELP bambuddy_queue_printing Number of currently printing or paused queue items")
+    lines.append("# HELP bambuddy_queue_printing Number of currently printing queue items")
     lines.append("# TYPE bambuddy_queue_printing gauge")
-    result = await db.execute(
-        select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status.in_(("printing", "paused")))
-    )
+    result = await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "printing"))
     printing_count = result.scalar() or 0
     lines.append(f"bambuddy_queue_printing {printing_count}")
 

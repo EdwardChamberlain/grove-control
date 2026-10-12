@@ -6,35 +6,6 @@ import pytest
 from httpx import AsyncClient
 
 
-async def test_retention_sweep_detaches_source_without_cancelling_waiting_job(db_session, tmp_path):
-    from backend.app.models.library import LibraryFile
-    from backend.app.models.print_queue import PrintQueueItem
-    from backend.app.services.library_trash import LibraryTrashService
-
-    path = tmp_path / "expired.3mf"
-    path.write_bytes(b"queued file")
-    source = LibraryFile(
-        filename=path.name,
-        file_path=str(path),
-        file_size=path.stat().st_size,
-        file_type="3mf",
-        deleted_at=datetime.now(timezone.utc) - timedelta(days=60),
-    )
-    db_session.add(source)
-    await db_session.flush()
-    job = PrintQueueItem(library_file_id=source.id, status="queued", manual_start=False)
-    db_session.add(job)
-    await db_session.commit()
-    job_id, source_id = job.id, source.id
-    assert await LibraryTrashService()._sweep(db_session) == 1
-    db_session.expire_all()
-    job = await db_session.get(PrintQueueItem, job_id)
-    assert job.status == "queued" and job.completed_at is None and job.library_file_id is None
-    assert job.manual_start is False and "expired.3mf" in job.error_message
-    assert await db_session.get(LibraryFile, source_id) is None
-    assert not path.exists()
-
-
 @pytest.fixture
 async def file_factory(db_session):
     """Factory for LibraryFile rows with sensible defaults."""
@@ -273,64 +244,6 @@ async def test_purge_skips_external_files(async_client: AsyncClient, file_factor
         params={"older_than_days": 90, "include_never_printed": True},
     )
     assert resp.json()["count"] == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_purge_skips_queue_only_source_needed_for_retry(
-    async_client: AsyncClient,
-    file_factory,
-    db_session,
-    printer_factory,
-):
-    """Queue-only sources stay hidden from Files and available to failed jobs."""
-    from backend.app.models.print_queue import PrintQueueItem
-
-    long_ago = datetime.now(timezone.utc) - timedelta(days=300)
-    source = await file_factory(
-        queue_only=True,
-        queue_source_sealed=True,
-        created_at=long_ago,
-    )
-    printer = await printer_factory()
-    failed_item = PrintQueueItem(
-        printer_id=printer.id,
-        library_file_id=source.id,
-        position=1,
-        status="failed",
-        error_message="FTP upload failed",
-        cleanup_library_after_dispatch=True,
-    )
-    db_session.add(failed_item)
-    await db_session.commit()
-
-    files = await async_client.get("/api/v1/library/files")
-    assert files.status_code == 200
-    assert source.id not in {item["id"] for item in files.json()}
-
-    preview = await async_client.get(
-        "/api/v1/library/purge/preview",
-        params={"older_than_days": 90, "include_never_printed": True},
-    )
-    assert preview.status_code == 200
-    assert preview.json()["count"] == 0
-
-    purge = await async_client.post(
-        "/api/v1/library/purge",
-        json={"older_than_days": 90, "include_never_printed": True},
-    )
-    assert purge.status_code == 200
-    assert purge.json()["moved_to_trash"] == 0
-
-    await db_session.refresh(source)
-    assert source.deleted_at is None
-
-    requeued = await async_client.post(
-        "/api/v1/queue/",
-        json={"printer_id": printer.id, "library_file_id": source.id},
-    )
-    assert requeued.status_code == 200, requeued.text
-    assert requeued.json()["library_file_id"] == source.id
 
 
 @pytest.mark.asyncio

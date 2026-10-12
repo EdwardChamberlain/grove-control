@@ -18,13 +18,13 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
+import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lifecycle import dispatching as lifecycle_dispatching, dispatching as scheduler_module
-from backend.app.services.print_scheduler import PrintScheduler, scheduler
-from backend.app.services.printer_selection import (
+from backend.app.services.print_scheduler import (
+    PrintScheduler,
     _installed_nozzle_diameters,
     _nozzle_mismatch_message,
     _rack_nozzle_diameters,
@@ -161,14 +161,14 @@ def test_nozzle_rack_ignores_non_rack_and_unparseable_entries():
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: the guard fires in the queued exit BEFORE upload
+# End-to-end: the guard fires inside _start_print BEFORE upload
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 async def archive_case(tmp_path):
     """Build an archive-based queue item on a real in-memory DB + on-disk 3MF."""
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'nozzle.db'}", echo=False)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -202,9 +202,9 @@ async def archive_case(tmp_path):
             db.add(archive)
             await db.flush()
             item = PrintQueueItem(
-                assigned_printer_id=printer.id,
+                printer_id=printer.id,
                 archive_id=archive.id,
-                status="queued",
+                status="pending",
                 bed_levelling="on",
                 flow_cali="off",
                 vibration_cali=True,
@@ -234,10 +234,6 @@ async def archive_case(tmp_path):
 async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
     scheduler = PrintScheduler()
     status = SimpleNamespace(
-        state="IDLE",
-        connected=True,
-        job_telemetry_ready=True,
-        raw_data={},
         nozzles=[SimpleNamespace(nozzle_diameter=d) for d in installed_nozzles],
         nozzle_rack=nozzle_rack or [],
     )
@@ -247,33 +243,29 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
     # DB session, not our in-memory one, so they must be stubbed).
     patches = [
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
-        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=status)),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_awaiting_plate_clear", return_value=False),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.start_print", ctx.start_print),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.set_awaiting_plate_clear", MagicMock()),
-        patch("backend.app.services.lifecycle.dispatching.upload_file_async", ctx.upload),
-        patch("backend.app.services.lifecycle.dispatching.delete_file_async", AsyncMock(return_value=True)),
-        patch("backend.app.services.lifecycle.dispatching.cache_3mf_download", MagicMock()),
+        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=status)),
+        patch("backend.app.services.print_scheduler.printer_manager.start_print", ctx.start_print),
+        patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear", MagicMock()),
+        patch("backend.app.services.print_scheduler.upload_file_async", ctx.upload),
+        patch("backend.app.services.print_scheduler.delete_file_async", AsyncMock(return_value=True)),
+        patch("backend.app.services.print_scheduler.cache_3mf_download", MagicMock()),
+        patch("backend.app.services.print_scheduler.spawn_background_task", MagicMock()),
         patch(
-            "backend.app.services.lifecycle.dispatching.get_ftp_retry_settings",
-            AsyncMock(return_value=(False, 0, 0, 1.0)),
+            "backend.app.services.print_scheduler.get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0))
         ),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_started", AsyncMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
+        patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
+        patch.object(scheduler, "_power_off_if_needed", AsyncMock()),
     ]
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            await scheduler.workers.leave(db, item)
-        from backend.tests.unit.test_scheduler_cleanup_library import _wait_for_dispatch
-
-        await _wait_for_dispatch(ctx)
+            await scheduler._start_print(db, item)
 
 
 @pytest.mark.asyncio
@@ -285,8 +277,8 @@ async def test_start_print_blocks_on_nozzle_mismatch_before_upload(archive_case)
 
     async with ctx.session_maker() as db:
         item = await db.get(PrintQueueItem, ctx.queue_item_id)
-    assert item.status == "queued"
-    assert "0.6mm" in item.waiting_reason and "0.4mm" in item.waiting_reason
+    assert item.status == "failed"
+    assert "0.6mm" in item.error_message and "0.4mm" in item.error_message
     ctx.upload.assert_not_called()
     ctx.start_print.assert_not_called()
 
@@ -294,7 +286,7 @@ async def test_start_print_blocks_on_nozzle_mismatch_before_upload(archive_case)
 @pytest.mark.asyncio
 async def test_start_print_proceeds_when_nozzle_matches(archive_case):
     """0.6 slice on a 0.6 printer: the guard is a no-op and dispatch proceeds
-    (item leaves 'queued', start_print is reached)."""
+    (item leaves 'pending', start_print is reached)."""
     ctx = await archive_case(sliced_nozzle=0.6)
     await _run_start_print(ctx, installed_nozzles=["0.6"])
 

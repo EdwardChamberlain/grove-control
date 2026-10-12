@@ -96,7 +96,6 @@ def _purge_filter(cutoff: datetime, include_never_printed: bool):
     return and_(
         LibraryFile.deleted_at.is_(None),
         LibraryFile.is_external.is_(False),
-        LibraryFile.queue_only.is_(False),
         age_clause,
     )
 
@@ -394,7 +393,7 @@ class LibraryTrashService:
 
 
 async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int:
-    """Detach deleted sources, leaving waiting jobs queued for the operator.
+    """Cancel source-owned jobs and detach queue rows before deletion.
 
     A ``preheating`` row owns a durable printer reservation and may already
     have turned the heaters on, so it must go through the heat-soak abort path
@@ -402,48 +401,68 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     """
     if not file_ids:
         return 0
-    # A live heat-soak must be aborted through its service so its reservation
-    # and queue status are updated, then its heaters are switched off once.
-    from backend.app.services.lifecycle.engine import lock_queue_items, writer
-    from backend.app.services.lifecycle.preheating import abort_heat_soak, holds_heat_soak_printer
-
-    references = await db.execute(
-        select(
-            PrintQueueItem.id,
-            func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id),
-        ).where(PrintQueueItem.library_file_id.in_(file_ids))
-    )
-    expected_printers = dict(references.all())
+    rows = (
+        await db.execute(
+            select(
+                PrintQueueItem.id,
+                PrintQueueItem.library_file_id,
+                PrintQueueItem.status,
+                PrintQueueItem.chamber_heat_soak,
+                PrintQueueItem.dispatch_subtask_id,
+            )
+            .where(PrintQueueItem.library_file_id.in_(file_ids))
+            .where(PrintQueueItem.archive_id.is_(None))
+            .where(
+                or_(
+                    PrintQueueItem.status.in_(("pending", "skipped", "preheating")),
+                    and_(
+                        PrintQueueItem.status == "dispatching",
+                        PrintQueueItem.chamber_heat_soak.is_(True),
+                        PrintQueueItem.dispatch_subtask_id.is_(None),
+                    ),
+                )
+            )
+        )
+    ).all()
     names = dict(
         (await db.execute(select(LibraryFile.id, LibraryFile.filename).where(LibraryFile.id.in_(file_ids)))).all()
     )
-    released = 0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cancelled = 0
     reason_by_file = {
         file_id: f"'{names.get(file_id, 'The library file')}' was deleted from the library" for file_id in file_ids
     }
 
-    async with writer(expected_printers.values()):
-        items = await lock_queue_items(db, expected_printers)
-        for item_id in sorted(items):
-            item = items[item_id]
-            if item is None or item.library_file_id not in file_ids:
-                continue
-            soaking = holds_heat_soak_printer(item)
-            if item.archive_id is None and (item.status == "queued" or soaking):
-                if soaking:
-                    await abort_heat_soak(
-                        db,
-                        item,
-                        reason_by_file.get(item.library_file_id, "The library file was deleted"),
-                        status="cancelled",
-                        commit=False,
-                    )
-                else:
-                    item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
-                released += 1
-            item.library_file_id = None
+    # A live heat-soak must be aborted through its service so heater shutdown,
+    # reservation cleanup, and queue status are persisted together.
+    from backend.app.services.chamber_heat_soak import abort_heat_soak, lock_queue_item
 
-    return released
+    for item_id, _library_file_id, _status, _chamber_heat_soak, _dispatch_subtask_id in rows:
+        item = await lock_queue_item(db, item_id)
+        if not item or item.library_file_id not in file_ids or item.archive_id is not None:
+            continue
+        if item.status == "preheating" or (
+            item.status == "dispatching" and item.chamber_heat_soak and item.dispatch_subtask_id is None
+        ):
+            await abort_heat_soak(
+                db,
+                item,
+                reason_by_file.get(item.library_file_id, "The library file was deleted"),
+                status="cancelled",
+            )
+            cancelled += 1
+        elif item.status in ("pending", "skipped"):
+            item.status = "cancelled"
+            item.completed_at = now
+            item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
+            cancelled += 1
+
+    await db.execute(
+        PrintQueueItem.__table__.update()
+        .where(PrintQueueItem.library_file_id.in_(file_ids))
+        .values(library_file_id=None)
+    )
+    return cancelled
 
 
 async def delete_dependent_variants(db: AsyncSession, file_ids: list[int]) -> None:

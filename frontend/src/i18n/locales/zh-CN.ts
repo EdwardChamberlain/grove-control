@@ -737,7 +737,7 @@ export default {
     developerModeWarning: '以下打印机未启用开发者局域网模式：{{names}}。某些功能可能无法使用。',
     howToEnable: '如何启用',
     incompatibleFile: '此文件是为 {{slicedFor}} 切片的，但该打印机是 {{printerModel}}',
-    directUploadLibraryNote: '此上传会添加到队列，不会保存到文件管理器。',
+    directUploadLibraryNote: '上传的文件会先保存到文件管理器，再加入队列。',
     dropNotPrintable: '只能打印 .gcode 和 .gcode.3mf 文件',
     dropToPrint: '拖放以打印',
     cannotPrint: '打印机忙碌',
@@ -835,8 +835,6 @@ export default {
       failedUpdateFavorites: '更新收藏失败',
       exportDownloaded: '导出已下载',
       exportFailed: '导出失败',
-      savedToFiles: '已将 {{filename}} 保存到文件',
-      failedSaveToFiles: '无法将打印文件保存到文件',
     },
     menu: {
       print: '打印',
@@ -876,7 +874,6 @@ export default {
       select: '选择',
       deselect: '取消选择',
       delete: '删除',
-      saveToFiles: '保存到文件',
     },
     permission: {
       noReprint: '您没有重新打印此归档的权限',
@@ -974,7 +971,7 @@ export default {
       deleteButton: '删除',
       deletePurgeStats: '同时从快速统计中删除此打印（耗材、时间、成本、能耗）',
       deleteQueueItemsWarning: '与此归档关联的 {{count}} 个队列项也将被移除。',
-      deleteBlockedByPrinting: '无法删除 — {{count}} 个作业仍占用打印机。请先停止活动作业并清理其打印板。',
+      deleteBlockedByPrinting: '无法删除 — {{count}} 个队列项正在发送或打印。请先停止活动作业再重试。',
       removeSource3mf: '移除源 3MF',
       removeSource3mfConfirm: '确定要从"{{name}}"中移除源 3MF 文件吗？这将删除原始切片项目文件。',
       removeButton: '移除',
@@ -1064,12 +1061,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: '等待清理打印板',
-    resolveDispatch: {
-      prompt: "打印机尚未确认此任务。选择前请检查打印机：",
-      printing: "正在打印",
-      failed: "未开始打印",
-    },
     filamentShort: {
       rowBadge: '所分配料盘的耀丝不足',
       rowTooltip: '调度程序已标记该项。点击播放查看各插槽的赤字并决定是否仍要打印。',
@@ -1150,10 +1141,6 @@ export default {
     },
     // Status
     status: {
-      queued: '排队中',
-      finished: '已完成',
-      successful: '成功',
-      unsuccessful: '未成功',
       pending: '等待中',
       scheduled: '已排期',
       waiting: '等待中',
@@ -1193,7 +1180,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: '手动开始',
+      staged: '已暂存',
+      requiresPrevious: '需要前一个成功',
       autoPowerOff: '自动关机',
       gcodeInjection: 'G-code',
     },
@@ -1213,8 +1201,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: '清理打印板',
-      retry: '重试',
       startPrint: '开始打印',
       stopPrint: '停止打印',
       requeue: '重新排队',
@@ -1854,6 +1840,12 @@ export default {
     saveThumbnails: '保存缩略图',
     captureFinishPhoto: '拍摄完成照片',
     noPrintersConfigured: '未配置打印机',
+    // Archive settings
+    archiveMode: {
+      always: '始终创建归档条目',
+      never: '从不创建归档条目',
+      ask: '每次询问',
+    },
     // Updates
     checkForUpdatesLabel: '检查更新',
     checkPrinterFirmware: '检查打印机固件',
@@ -2356,6 +2348,8 @@ export default {
     energyModePrintDescription: '仪表板显示打印期间使用的能源总和',
     energyModeTotalDescription: '仪表板显示智能插座的累计能源',
     fileManager: '文件管理器',
+    createArchiveEntry: '打印时创建归档条目',
+    createArchiveEntryDescription: '从文件管理器打印时，可选择创建归档条目',
     lowDiskSpaceWarning: '磁盘空间不足警告',
     lowDiskSpaceDescription: '当可用磁盘空间低于此阈值时显示警告',
     printerFirmware: '打印机固件',
@@ -3821,7 +3815,6 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: '盘面 {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '已切片 {{name}}',
-    completedToFilesToast: '已切片 {{name}} 并保存到文件',
     failedTitle: '切片失败',
     failedToast: '切片 {{name}} 失败：{{detail}}',
     tier: {
@@ -4907,12 +4900,12 @@ export default {
     },
     mode: {
       title: '模式',
-      archive: '文件',
-      archiveDesc: '将上传保存到文件',
+      archive: '归档',
+      archiveDesc: '立即归档文件',
       review: '审核',
-      reviewDesc: '保存到文件前审核上传',
+      reviewDesc: '归档前审核',
       queue: '队列',
-      queueDesc: '将上传添加到打印队列',
+      queueDesc: '归档并添加到队列',
       proxy: '代理',
       proxyDesc: '中继到真实打印机',
     },
@@ -4938,8 +4931,8 @@ export default {
       readGuide: '启用前请阅读设置指南',
     },
     archiveNameSource: {
-      title: '上传显示名称',
-      description: '选择上传内容在审核列表中的显示方式。“元数据”使用3MF中嵌入的标题；“文件名”使用通过FTP接收的文件名。',
+      title: '存档名称来源',
+      description: '选择通过虚拟打印机接收文件时新存档的命名方式。"元数据"使用 3MF 中嵌入的切片标题（默认）。"文件名"使用 Bambu Studio 通过 FTP 发送的文件名。注意：当 3MF 包含标题字段时，Bambu Studio 会用该字段覆盖您在"发送到打印机"对话框中输入的名称，因此两种模式通常会产生相同的字符串。',
       metadata: '元数据',
       filename: '文件名',
     },
@@ -4954,7 +4947,7 @@ export default {
     howItWorks: {
       title: '工作原理',
       step1: '在同一局域网中，虚拟打印机会通过发现机制自动出现在您的切片软件（Bambu Studio / OrcaSlicer）中。从其他网络，通过 IP 地址和访问码手动添加。',
-      step2: '在文件、审核和队列模式下，使用切片软件中的“发送”按钮将3MF文件上传到Grove Control。文件模式会保存到文件，审核模式可选择保存或丢弃，队列模式会添加打印任务。“打印成功”表示上传已完成。',
+      step2: '在归档、审核和队列模式下，使用切片软件中的"发送"按钮将 3MF 文件上传到 Grove Control。切片软件会显示"打印成功"— 文件已存储，未打印。',
       step3: '在代理模式下，虚拟打印机将所有流量中继到真实打印机 — 打印会立即开始，就像直接连接一样。',
     },
     status: {
@@ -5236,6 +5229,12 @@ export default {
     autoOffAfterDrying: '干燥完成后自动关闭',
     autoOffAfterDryingDescription: 'AMS 干燥完成后关闭',
     delayAfterDryingMinutes: '干燥后延迟（分钟）',
+    turnOffDelayMode: '关闭延迟模式',
+    time: '时间',
+    temp: '温度',
+    delayMinutes: '延迟（分钟）',
+    tempThreshold: '温度阈值（°C）',
+    tempThresholdDescription: '当喷嘴冷却到此温度以下时关闭',
     edit: '编辑',
     deleteConfirm: '确定要删除"{{name}}"吗？此操作无法撤销。',
     turnOnConfirm: '确定要开启"{{name}}"吗？',

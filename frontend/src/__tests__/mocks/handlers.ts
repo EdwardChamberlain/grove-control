@@ -14,6 +14,9 @@ const mockSmartPlugs = [
     enabled: true,
     auto_on: true,
     auto_off: true,
+    off_delay_mode: 'time',
+    off_delay_minutes: 5,
+    off_temp_threshold: 70,
     username: null,
     password: null,
     power_alert_enabled: false,
@@ -212,6 +215,8 @@ export const handlers = [
   // ========================================================================
   // Printers
   // ========================================================================
+
+  http.get('/api/v1/printers/queue-work', () => HttpResponse.json({})),
 
   http.get('/api/v1/printers/', () => {
     return HttpResponse.json(mockPrinters);

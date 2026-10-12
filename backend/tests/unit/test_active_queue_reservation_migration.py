@@ -3,11 +3,11 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from backend.app.core.database import Base, _migrate_queue_lifecycle
+from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
 from backend.app.models.print_queue import PrintQueueItem
 
 
@@ -20,7 +20,6 @@ async def test_duplicate_active_rows_are_recovered_before_unique_index_creation(
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(text("DROP INDEX uq_print_queue_holding_printer"))
 
         now = datetime.now(timezone.utc)
         async with AsyncSession(engine) as session:
@@ -33,15 +32,15 @@ async def test_duplicate_active_rows_are_recovered_before_unique_index_creation(
             await session.commit()
 
         async with engine.begin() as conn:
-            await _migrate_queue_lifecycle(conn)
+            await _ensure_active_queue_printer_reservation(conn)
 
         async with AsyncSession(engine) as session:
             rows = list(
                 (await session.execute(select(PrintQueueItem).where(PrintQueueItem.printer_id == 42))).scalars()
             )
-            assert {row.status for row in rows} == {"printing", "unsuccessful"}
-            recovered = next(row for row in rows if row.status == "unsuccessful")
-            assert recovered.error_message and "Duplicate legacy printer reservation" in recovered.error_message
+            assert {row.status for row in rows} == {"printing", "failed"}
+            recovered = next(row for row in rows if row.status == "failed")
+            assert recovered.error_message and "duplicate active queue reservation" in recovered.error_message
 
             session.add(PrintQueueItem(id=3, printer_id=42, status="dispatching"))
             with pytest.raises(IntegrityError):

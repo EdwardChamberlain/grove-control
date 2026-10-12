@@ -50,9 +50,9 @@ async def printer_with_queue(db_session):
     await db_session.commit()
 
     item = PrintQueueItem(
-        assigned_printer_id=printer.id,
+        printer_id=printer.id,
         position=1,
-        status="queued",
+        status="pending",
         manual_start=True,
         timelapse=True,
         bed_levelling="on",

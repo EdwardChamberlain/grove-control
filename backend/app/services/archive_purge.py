@@ -16,14 +16,16 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core import database as _database
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
+from backend.app.models.print_log import PrintLogEntry
+from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
-from backend.app.services.archive import ArchiveDeletionConflict, ArchiveService
+from backend.app.services.archive import ArchiveService
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ AUTO_PURGE_LAST_RUN_KEY = "archive_auto_purge_last_run"
 # (default), each purged archive goes through soft_delete_archive — files
 # removed from disk, row hidden via `deleted_at`, PrintLogEntry rows
 # untouched so Quick Stats keeps every contribution. When True, the linked
-# log rows and the archive row are removed in the same guarded transaction,
+# log rows are deleted up front and the archive row is hard-removed,
 # matching the route's `?purge_stats=true` semantics.
 AUTO_PURGE_STATS_KEY = "archive_auto_purge_stats"
 
@@ -70,12 +72,15 @@ def _last_activity_expr():
 
 
 def _unheld_archive_filter():
+    """Keep waiting/active reprint sources and the persisted plate-clear Archive."""
+    # A previous-print failure skips waiting jobs until Resume restores them.
+    # Their Archive files are still needed even though they are not pending.
     return ~exists().where(
-        or_(
-            PrintQueueItem.archive_id == PrintArchive.id,
-            PrintQueueItem.id == PrintArchive.dispatched_queue_item_id,
-        ),
-        PrintQueueItem.status.in_(HOLDING_STATUSES),
+        PrintQueueItem.archive_id == PrintArchive.id,
+        PrintQueueItem.status.in_(("pending", "preheating", "dispatching", "printing", "skipped")),
+    ) & ~exists().where(
+        Printer.awaiting_plate_clear.is_(True),
+        Printer.awaiting_plate_clear_archive_id == PrintArchive.id,
     )
 
 
@@ -265,7 +270,7 @@ class ArchivePurgeService:
         now = datetime.now(timezone.utc)
         cutoff = _age_cutoff(now, older_than_days)
         last_activity = _last_activity_expr()
-        clause = (last_activity < cutoff) & _unheld_archive_filter()
+        clause = (last_activity < cutoff) & (PrintArchive.status != "printing") & _unheld_archive_filter()
 
         count_stmt = select(func.count(PrintArchive.id)).where(clause)
         size_stmt = select(func.coalesce(func.sum(PrintArchive.file_size), 0)).where(clause)
@@ -402,18 +407,29 @@ class ArchivePurgeService:
         deleted = 0
         for archive_id in ids:
             async with _database.async_session() as delete_db:
-                service = ArchiveService(delete_db)
-                try:
-                    removed = (
-                        await service.delete_archive(archive_id, purge_stats=True)
-                        if purge_stats
-                        else await service.soft_delete_archive(archive_id)
+                # Lock the Archive before checking its current references. SQLite
+                # takes a write lock; PostgreSQL locks this exact source row.
+                await delete_db.execute(
+                    update(PrintArchive).where(PrintArchive.id == archive_id).values(id=PrintArchive.id)
+                )
+                eligible = await delete_db.scalar(
+                    select(PrintArchive.id).where(
+                        PrintArchive.id == archive_id,
+                        PrintArchive.status != "printing",
+                        _unheld_archive_filter(),
                     )
-                    if removed:
-                        deleted += 1
-                except ArchiveDeletionConflict:
+                )
+                if eligible is None:
                     await delete_db.rollback()
-                    logger.info("Archive %s acquired a printer hold during purge; retained", archive_id)
+                    continue
+                service = ArchiveService(delete_db)
+                if purge_stats:
+                    await delete_db.execute(delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
+                    removed = await service.delete_archive(archive_id)
+                else:
+                    removed = await service.soft_delete_archive(archive_id)
+                if removed:
+                    deleted += 1
         return deleted
 
     async def purge_older_than(
@@ -432,15 +448,14 @@ class ArchivePurgeService:
           and the row hidden via ``deleted_at``, but the linked
           ``PrintLogEntry`` rows are untouched so Quick Stats keeps every
           contribution (filament, cost, energy, time accuracy).
-        * ``purge_stats=True``: linked log rows and the archive row are
-          hard-removed in the same guarded transaction via
+        * ``purge_stats=True``: linked log rows are hard-deleted up front and
+          the archive row is hard-removed via
           :meth:`ArchiveService.delete_archive`. Matches the single-archive
           ``DELETE /archives/{id}?purge_stats=true`` semantics from #1343.
 
         Each delete runs in its own session so a commit-per-row doesn't churn
         the caller's session (matches how the sweeper uses
         :func:`_database.async_session` in production).
-        Jobs holding a printer are excluded and rechecked at deletion time.
         """
         if older_than_days < 1:
             return 0
@@ -451,7 +466,9 @@ class ArchivePurgeService:
         # a repeat sweeper run keeps re-touching the same rows. Hard-delete
         # mode doesn't filter — already-soft-deleted rows are eligible for
         # promotion to hard-delete when the user opts in.
-        select_stmt = select(PrintArchive.id).where(_last_activity_expr() < cutoff, _unheld_archive_filter())
+        select_stmt = select(PrintArchive.id).where(
+            _last_activity_expr() < cutoff, PrintArchive.status != "printing", _unheld_archive_filter()
+        )
         if not purge_stats:
             select_stmt = select_stmt.where(PrintArchive.deleted_at.is_(None))
         id_result = await db.execute(select_stmt)
@@ -459,21 +476,7 @@ class ArchivePurgeService:
         if not ids:
             return 0
 
-        deleted = 0
-        for archive_id in ids:
-            async with _database.async_session() as delete_db:
-                service = ArchiveService(delete_db)
-                try:
-                    removed = (
-                        await service.delete_archive(archive_id, purge_stats=True)
-                        if purge_stats
-                        else await service.soft_delete_archive(archive_id)
-                    )
-                    if removed:
-                        deleted += 1
-                except ArchiveDeletionConflict:
-                    await delete_db.rollback()
-                    logger.info("Archive %s acquired a printer hold during purge; retained", archive_id)
+        deleted = await self._delete_archive_ids(ids, purge_stats=purge_stats)
         if deleted:
             logger.info(
                 "Archive purge: %s %d archive(s) (older_than_days=%d, purge_stats=%s)",

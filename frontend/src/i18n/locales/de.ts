@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'Der Entwickler-LAN-Modus ist nicht aktiviert auf: {{names}}. Einige Funktionen funktionieren möglicherweise nicht.',
     howToEnable: 'Aktivieren',
     incompatibleFile: 'Diese Datei wurde für {{slicedFor}} geslicet, aber dieser Drucker ist ein {{printerModel}}',
-    directUploadLibraryNote: 'Der Upload wird zur Warteschlange hinzugefügt und nicht im Dateimanager gespeichert.',
+    directUploadLibraryNote: 'Die hochgeladene Datei wird vor dem Einreihen im Dateimanager gespeichert.',
     dropNotPrintable: 'Nur .gcode- und .gcode.3mf-Dateien können gedruckt werden',
     dropToPrint: 'Zum Drucken ablegen',
     cannotPrint: 'Drucker beschäftigt',
@@ -835,8 +835,6 @@ export default {
       failedUpdateFavorites: 'Fehler beim Aktualisieren der Favoriten',
       exportDownloaded: 'Export heruntergeladen',
       exportFailed: 'Export fehlgeschlagen',
-      savedToFiles: '{{filename}} wurde in Dateien gespeichert',
-      failedSaveToFiles: 'Druckdatei konnte nicht in Dateien gespeichert werden',
     },
     menu: {
       print: 'Drucken',
@@ -876,7 +874,6 @@ export default {
       select: 'Auswählen',
       deselect: 'Abwählen',
       delete: 'Löschen',
-      saveToFiles: 'In Dateien speichern',
     },
     permission: {
       noReprint: 'Sie haben keine Berechtigung, dieses Archiv erneut zu drucken',
@@ -974,7 +971,7 @@ export default {
       deleteButton: 'Löschen',
       deletePurgeStats: 'Diesen Druck auch aus den Quick Stats entfernen (Filament, Zeit, Kosten, Energie)',
       deleteQueueItemsWarning: '{{count}} mit diesem Archiv verknüpfte Warteschlangeneinträge werden ebenfalls entfernt.',
-      deleteBlockedByPrinting: 'Löschen nicht möglich — {{count}} Aufträge belegen noch einen Drucker. Aktive Aufträge zuerst stoppen und die Druckplatten freigeben.',
+      deleteBlockedByPrinting: 'Löschen nicht möglich — {{count}} Warteschlangeneinträge werden gerade gesendet oder gedruckt. Aktiven Auftrag zuerst stoppen und erneut versuchen.',
       removeSource3mf: 'Quell-3MF entfernen',
       removeSource3mfConfirm: 'Möchten Sie die Quell-3MF-Datei wirklich von "{{name}}" entfernen? Die ursprüngliche Slicer-Projektdatei wird gelöscht.',
       removeButton: 'Entfernen',
@@ -1064,12 +1061,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: 'Warten auf Freigabe der Druckplatte',
-    resolveDispatch: {
-      prompt: "Der Drucker hat diesen Auftrag nicht bestätigt. Prüfen Sie den Drucker, bevor Sie wählen:",
-      printing: "Der Druck läuft",
-      failed: "Der Druck hat nicht begonnen",
-    },
     filamentShort: {
       rowBadge: 'Filament fuer die zugewiesene Spule reicht nicht',
       rowTooltip: 'Der Dispatcher hat diese Position markiert. Klicke auf Play, um den Pro-Slot-Fehlbestand zu sehen und zu entscheiden, ob trotzdem gedruckt werden soll.',
@@ -1150,10 +1141,6 @@ export default {
     },
     // Status
     status: {
-      queued: 'In Warteschlange',
-      finished: 'Fertig',
-      successful: 'Erfolgreich',
-      unsuccessful: 'Nicht erfolgreich',
       pending: 'Ausstehend',
       scheduled: 'Geplant',
       waiting: 'Wartend',
@@ -1193,7 +1180,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: 'Manueller Start',
+      staged: 'Bereitgestellt',
+      requiresPrevious: 'Erfordert vorherigen Erfolg',
       autoPowerOff: 'Automatisch ausschalten',
       gcodeInjection: 'G-Code',
     },
@@ -1213,8 +1201,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: 'Druckplatte freigeben',
-      retry: 'Erneut versuchen',
       startPrint: 'Druck starten',
       stopPrint: 'Druck stoppen',
       requeue: 'Erneut einreihen',
@@ -1854,6 +1840,12 @@ export default {
     saveThumbnails: 'Vorschaubilder speichern',
     captureFinishPhoto: 'Abschlussfoto aufnehmen',
     noPrintersConfigured: 'Keine Drucker konfiguriert',
+    // Archive settings
+    archiveMode: {
+      always: 'Immer Archiveintrag erstellen',
+      never: 'Nie Archiveintrag erstellen',
+      ask: 'Jedes Mal fragen',
+    },
     // Updates
     checkForUpdatesLabel: 'Nach Updates suchen',
     checkPrinterFirmware: 'Drucker-Firmware prüfen',
@@ -2362,6 +2354,8 @@ export default {
     energyModeTotalDescription: 'Dashboard zeigt Gesamtenergie der Smart Plugs',
     // File Manager
     fileManager: 'Dateimanager',
+    createArchiveEntry: 'Archiveintrag beim Drucken erstellen',
+    createArchiveEntryDescription: 'Beim Drucken aus dem Dateimanager optional einen Archiveintrag erstellen',
     lowDiskSpaceWarning: 'Warnung bei wenig Speicherplatz',
     lowDiskSpaceDescription: 'Warnung anzeigen, wenn freier Speicherplatz unter diesen Schwellenwert fällt',
     // Updates
@@ -3834,7 +3828,6 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Plate {{plateIndex}} von {{plateCount}} • {{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     completedToast: '{{name}} wurde gesliced',
-    completedToFilesToast: '{{name}} wurde gesliced und in Dateien gespeichert',
     failedTitle: 'Slicen fehlgeschlagen',
     failedToast: 'Slicen von {{name}} fehlgeschlagen: {{detail}}',
     tier: {
@@ -4919,12 +4912,12 @@ export default {
     },
     mode: {
       title: 'Modus',
-      archive: 'Dateien',
-      archiveDesc: 'Uploads in Dateien speichern',
+      archive: 'Archivieren',
+      archiveDesc: 'Dateien sofort archivieren',
       review: 'Überprüfen',
-      reviewDesc: 'Uploads vor dem Speichern in Dateien prüfen',
+      reviewDesc: 'Vor dem Archivieren überprüfen',
       queue: 'Warteschlange',
-      queueDesc: 'Uploads zur Druckwarteschlange hinzufügen',
+      queueDesc: 'Archivieren und zur Warteschlange hinzufügen',
       proxy: 'Proxy',
       proxyDesc: 'An echten Drucker weiterleiten',
     },
@@ -4950,8 +4943,8 @@ export default {
       readGuide: 'Lese die Einrichtungsanleitung vor dem Aktivieren',
     },
     archiveNameSource: {
-      title: 'Upload-Anzeigename',
-      description: 'Lege fest, wie Uploads in der Überprüfungsliste angezeigt werden. „Metadaten“ verwendet den im 3MF eingebetteten Titel; „Dateiname“ verwendet den per FTP empfangenen Dateinamen.',
+      title: 'Quelle des Archivnamens',
+      description: 'Lege fest, wie neue Archive benannt werden, wenn Dateien über den virtuellen Drucker eintreffen. "Metadaten" verwendet den im 3MF eingebetteten Titel des Slicers (Standard). "Dateiname" nutzt den Dateinamen, den Bambu Studio per FTP gesendet hat. Hinweis: Bambu Studio überschreibt den im Dialog "Zum Drucker senden" eingegebenen Namen mit dem Titelfeld der 3MF, sofern eines vorhanden ist — beide Modi liefern daher oft denselben Wert.',
       metadata: 'Metadaten',
       filename: 'Dateiname',
     },
@@ -4966,7 +4959,7 @@ export default {
     howItWorks: {
       title: 'So funktioniert es',
       step1: 'Im selben LAN erscheinen virtuelle Drucker automatisch in deinem Slicer (Bambu Studio / OrcaSlicer). Aus anderen Netzwerken füge sie manuell per IP-Adresse und Zugangscode hinzu.',
-      step2: 'Im Dateien-, Überprüfungs- und Warteschlangen-Modus verwende die Schaltfläche „Senden“ im Slicer, um 3MF-Dateien an Grove Control zu übertragen. Dateien-Modus speichert in Dateien, Überprüfung hält Uploads zum Speichern oder Verwerfen bereit, Queue erstellt Druckaufträge. „Druck erfolgreich“ bedeutet, dass der Upload abgeschlossen ist.',
+      step2: 'Im Archiv-, Überprüfungs- und Warteschlangen-Modus verwende die "Senden"-Funktion im Slicer, um 3MF-Dateien an Grove Control zu senden. Der Slicer zeigt "Druck erfolgreich" — die Datei wird gespeichert, nicht gedruckt.',
       step3: 'Im Proxy-Modus leitet der virtuelle Drucker den gesamten Datenverkehr an einen echten Drucker weiter — Drucke starten sofort wie bei einer direkten Verbindung.',
     },
     status: {
@@ -5249,6 +5242,12 @@ export default {
     autoOffAfterDrying: 'Automatisch aus nach Trocknung',
     autoOffAfterDryingDescription: 'Ausschalten, wenn AMS-Trocknung abgeschlossen ist',
     delayAfterDryingMinutes: 'Verzögerung nach Trocknung (Minuten)',
+    turnOffDelayMode: 'Ausschaltverzögerungsmodus',
+    time: 'Zeit',
+    temp: 'Temp.',
+    delayMinutes: 'Verzögerung (Minuten)',
+    tempThreshold: 'Temperaturschwelle (°C)',
+    tempThresholdDescription: 'Schaltet aus wenn die Düse unter diese Temperatur abkühlt',
     edit: 'Bearbeiten',
     deleteConfirm: 'Möchten Sie "{{name}}" wirklich löschen? Dies kann nicht rückgängig gemacht werden.',
     turnOnConfirm: 'Möchten Sie "{{name}}" wirklich einschalten?',

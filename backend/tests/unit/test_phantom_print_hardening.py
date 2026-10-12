@@ -240,10 +240,10 @@ class TestBusyPrinterSeedingFromPrintingItems:
             db.add_all(
                 [
                     PrintQueueItem(printer_id=1, status="printing", position=1, archive_id=10),
-                    PrintQueueItem(assigned_printer_id=1, status="queued", position=2, archive_id=10),
+                    PrintQueueItem(printer_id=1, status="pending", position=2, archive_id=10),
                     PrintQueueItem(printer_id=2, status="printing", position=1, archive_id=11),
-                    PrintQueueItem(assigned_printer_id=3, status="queued", position=1, archive_id=12),
-                    PrintQueueItem(printer_id=None, status="queued", position=1, archive_id=13),
+                    PrintQueueItem(printer_id=3, status="pending", position=1, archive_id=12),
+                    PrintQueueItem(printer_id=None, status="pending", position=1, archive_id=13),
                 ]
             )
             await db.commit()
@@ -276,7 +276,7 @@ class TestBusyPrinterSeedingFromPrintingItems:
         async with session_maker() as db:
             db.add_all(
                 [
-                    PrintQueueItem(assigned_printer_id=1, status="queued", position=1, archive_id=10),
+                    PrintQueueItem(printer_id=1, status="pending", position=1, archive_id=10),
                     PrintQueueItem(printer_id=2, status="completed", position=1, archive_id=11),
                     PrintQueueItem(printer_id=3, status="failed", position=1, archive_id=12),
                     PrintQueueItem(printer_id=4, status="cancelled", position=1, archive_id=13),
@@ -301,7 +301,7 @@ class TestBusyPrinterSeedingFromPrintingItems:
         has another queue item in 'printing' status. The scheduler must NOT dispatch the
         pending item even if the live MQTT state reports IDLE.
         """
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, patch
 
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -319,24 +319,21 @@ class TestBusyPrinterSeedingFromPrintingItems:
             db.add_all(
                 [
                     PrintQueueItem(printer_id=1, status="printing", position=1, archive_id=84),
-                    PrintQueueItem(assigned_printer_id=1, status="queued", position=2, archive_id=84),
+                    PrintQueueItem(printer_id=1, status="pending", position=2, archive_id=84),
                 ]
             )
             await db.commit()
 
         scheduler = PrintScheduler()
-        start_print_mock = MagicMock()
+        start_print_mock = AsyncMock()
 
         with (
             patch("backend.app.services.print_scheduler.async_session", session_maker),
             patch.object(scheduler, "_get_bool_setting", AsyncMock(return_value=False)),
-            patch.object(scheduler.mapping, "_get_bool_setting", AsyncMock(return_value=False)),
-            patch.object(scheduler.drying, "_get_bool_setting", AsyncMock(return_value=False)),
-            patch.object(scheduler.selection, "_is_printer_idle", return_value=True),
-            patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
-            patch.object(scheduler.drying, "_check_auto_drying", AsyncMock()),
-            patch.object(scheduler.workers, "launch", start_print_mock),
-            patch("backend.app.services.printer_selection.printer_manager") as mock_pm,
+            patch.object(scheduler, "_is_printer_idle", return_value=True),
+            patch.object(scheduler, "_check_auto_drying", AsyncMock()),
+            patch.object(scheduler, "_start_print", start_print_mock),
+            patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
         ):
             mock_pm.is_connected.return_value = True
             await scheduler.check_queue()
@@ -346,6 +343,6 @@ class TestBusyPrinterSeedingFromPrintingItems:
         async with session_maker() as db:
             rows = (await db.execute(select(PrintQueueItem).order_by(PrintQueueItem.position))).scalars().all()
             statuses = [r.status for r in rows]
-        assert statuses == ["printing", "queued"]
+        assert statuses == ["printing", "pending"]
 
         await engine.dispose()

@@ -50,6 +50,7 @@ export function PrintModal({
   onClose,
   onSuccess,
   projectId,
+  cleanupLibraryAfterDispatch,
   variantFiles,
 }: PrintModalProps) {
   const { t } = useTranslation();
@@ -152,6 +153,7 @@ export function PrintModal({
         postponePrint: Boolean(editingItem.scheduled_time),
         scheduledTime,
         requireManualStart: editingItem.manual_start,
+        requirePreviousSuccess: editingItem.require_previous_success,
         waitForDryingComplete: editingItem.wait_for_drying_complete ?? false,
         chamberHeatSoak: editingItem.chamber_heat_soak ?? false,
         heatSoakTemperature: editingItem.heat_soak_temperature ?? 60,
@@ -866,6 +868,7 @@ export function PrintModal({
             filament_overrides: filamentOverridesArray,
           })),
           target_location: targetLocation,
+          require_previous_success: scheduleOptions.requirePreviousSuccess,
           auto_off_after: scheduleOptions.autoOffAfter,
           gcode_injection: scheduleOptions.gcodeInjection,
           manual_start: scheduleOptions.requireManualStart,
@@ -898,6 +901,7 @@ export function PrintModal({
         target_location: assignmentMode === 'model' ? targetLocation : null,
         filament_overrides: getFilamentOverridesForPrinter(printerId) || null,
         force_color_match: forceColorMatch,
+        require_previous_success: scheduleOptions.requirePreviousSuccess,
         wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
         chamber_heat_soak: scheduleOptions.chamberHeatSoak,
         heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
@@ -960,6 +964,7 @@ export function PrintModal({
         // Use library_file_id for library files, archive_id for archives
         archive_id: isLibraryFile ? undefined : archiveId,
         library_file_id: isLibraryFile ? libraryFileId : undefined,
+        require_previous_success: scheduleOptions.requirePreviousSuccess,
         wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
         chamber_heat_soak: scheduleOptions.chamberHeatSoak,
         heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
@@ -978,6 +983,12 @@ export function PrintModal({
           : undefined,
         ...printOptions,
         project_id: projectId ?? undefined,
+        // Separate printer/plate requests can begin dispatching before the
+        // remaining requests have been created. Keep their shared source in
+        // the library; a single request (including quantity > 1) is atomic.
+        cleanup_library_after_dispatch: cleanupLibraryAfterDispatch
+          && totalCount === 1
+          && quantityForPlate(plateOverride !== undefined ? plateOverride : selectedPlate) === 1,
       };
     };
 
@@ -1119,6 +1130,13 @@ export function PrintModal({
     if (assignmentMode === 'printer' && selectedPrinters.length > 1) return 1;
     return Math.max(1, plateQuantities[plateIndex] ?? 1);
   };
+
+  const directUploadWillBeRetained = cleanupLibraryAfterDispatch && (
+    (assignmentMode === 'printer' && selectedPrinters.length > 1)
+    || selectedPlates.size > 1
+    || quantityForPlate(selectedPlate) > 1
+    || (usePerPlateQuantities && [...selectedPlates].some((plateIndex) => quantityForPlate(plateIndex) > 1))
+  );
 
   // Clear gcode_injection if the admin removes all snippets while the modal
   // is open — the checkbox itself hides via hasGcodeSnippets in
@@ -1380,6 +1398,12 @@ export function PrintModal({
                   ))}
                 </div>
               </div>
+            )}
+
+            {directUploadWillBeRetained && (
+              <p className="mb-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200">
+                {t('printModal.directUploadRetained', 'This upload will stay in File Manager because it is being used by multiple queue items.')}
+              </p>
             )}
 
             {/* Warning when archive data couldn't be loaded */}
