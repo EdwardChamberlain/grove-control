@@ -105,11 +105,11 @@ async def _queue_item(
     plate_id: int | None = None,
 ) -> PrintQueueItem:
     item = PrintQueueItem(
-        assigned_printer_id=printer_id,
+        printer_id=printer_id,
         archive_id=archive.id if archive else None,
         ams_mapping=json.dumps(ams_mapping) if ams_mapping is not None else None,
         plate_id=plate_id,
-        status="queued",
+        status="pending",
         manual_start=True,
     )
     db_session.add(item)

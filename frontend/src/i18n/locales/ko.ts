@@ -691,7 +691,7 @@ export default {
     developerModeWarning: '개발자 LAN 모드가 활성화되지 않음: {{names}}. 일부 기능이 작동하지 않을 수 있습니다.',
     howToEnable: '활성화 방법',
     incompatibleFile: '이 파일은 {{slicedFor}}용으로 슬라이싱되었지만, 이 프린터는 {{printerModel}}입니다',
-    directUploadLibraryNote: '업로드한 파일은 대기열에 추가되며 파일 관리자에는 저장되지 않습니다.',
+    directUploadLibraryNote: '업로드한 파일은 대기열에 추가하기 전에 파일 관리자에 저장됩니다.',
     dropNotPrintable: '.gcode 및 .gcode.3mf 파일만 인쇄할 수 있습니다',
     dropToPrint: '놓아서 인쇄',
     cannotPrint: '프린터 사용 중',
@@ -792,9 +792,7 @@ export default {
       failedDeleteArchives: '아카이브 삭제 실패',
       failedUpdateFavorites: '즐겨찾기 업데이트 실패',
       exportDownloaded: '내보내기 다운로드됨',
-      exportFailed: '내보내기 실패',
-      savedToFiles: '{{filename}}을(를) 파일에 저장했습니다',
-      failedSaveToFiles: '인쇄 파일을 파일에 저장하지 못했습니다',
+      exportFailed: '내보내기 실패'
     },
     menu: {
       print: '인쇄',
@@ -833,8 +831,7 @@ export default {
       select: '선택',
       deselect: '선택 해제',
       delete: '삭제',
-      printLog: '인쇄 기록',
-      saveToFiles: '파일에 저장',
+      printLog: '인쇄 기록'
     },
     permission: {
       noReprint: '이 아카이브를 재인쇄할 권한이 없습니다',
@@ -924,7 +921,7 @@ export default {
       deleteCount: '{{count}}개 삭제',
       deletePurgeStats: '빠른 통계에서도 이 인쇄 항목 제거 (필라멘트, 시간, 비용, 에너지)',
       deleteQueueItemsWarning: '이 아카이브와 연결된 {{count}}개의 대기열 항목도 함께 제거됩니다.',
-      deleteBlockedByPrinting: '삭제할 수 없습니다 — {{count}}개의 작업이 아직 프린터를 점유하고 있습니다. 먼저 활성 작업을 중지하고 플레이트를 비우십시오.'
+      deleteBlockedByPrinting: '삭제할 수 없습니다 — {{count}}개의 대기열 항목이 전송 중이거나 인쇄 중입니다. 활성 작업을 먼저 중지한 다음 다시 시도하십시오.'
     },
     page: {
       title: '아카이브',
@@ -1020,12 +1017,6 @@ export default {
     }
   },
   queue: {
-    awaitingPlateClear: '플레이트 정리 대기',
-    resolveDispatch: {
-      prompt: "프린터가 이 작업을 확인하지 않았습니다. 선택하기 전에 프린터를 확인하세요:",
-      printing: "인쇄 중입니다",
-      failed: "인쇄가 시작되지 않았습니다",
-    },
     title: '인쇄 대기열',
     subtitle: '인쇄 작업을 예약하고 관리하세요',
     editQueueItem: '대기열 항목 편집',
@@ -1093,10 +1084,6 @@ export default {
       history: '기록'
     },
     status: {
-      queued: '대기 중',
-      finished: '완료',
-      successful: '성공',
-      unsuccessful: '실패',
       pending: '대기 중',
       scheduled: '예약됨',
       waiting: '기다리는 중',
@@ -1132,7 +1119,8 @@ export default {
       descendingNewest: '내림차순 (최신 것 먼저)'
     },
     badges: {
-      manualStart: '수동 시작',
+      staged: '준비됨',
+      requiresPrevious: '이전 성공 필요',
       autoPowerOff: '자동 전원 끄기',
       gcodeInjection: 'G코드'
     },
@@ -1149,8 +1137,6 @@ export default {
       inHours: '{{count}}시간 후'
     },
     actions: {
-      clearPlate: '플레이트 정리',
-      retry: '재시도',
       startPrint: '인쇄 시작',
       stopPrint: '인쇄 정지',
       requeue: '재대기',
@@ -1758,6 +1744,11 @@ export default {
     saveThumbnails: '썸네일 저장',
     captureFinishPhoto: '완료 사진 캡처',
     noPrintersConfigured: '설정된 프린터 없음',
+    archiveMode: {
+      always: '항상 아카이브 항목 생성',
+      never: '아카이브 항목 생성 안 함',
+      ask: '매번 묻기'
+    },
     checkForUpdatesLabel: '업데이트 확인',
     checkPrinterFirmware: '프린터 펌웨어 확인',
     includeBetaUpdates: '베타 버전 포함',
@@ -2232,6 +2223,8 @@ export default {
     energyModePrintDescription: '대시보드가 인쇄 중 사용된 에너지 합계를 표시',
     energyModeTotalDescription: '대시보드가 스마트 플러그의 전체 에너지를 표시',
     fileManager: '파일 관리자',
+    createArchiveEntry: '인쇄 시 아카이브 항목 생성',
+    createArchiveEntryDescription: '파일 관리자에서 인쇄할 때 선택적으로 아카이브 항목 생성',
     lowDiskSpaceWarning: '디스크 공간 부족 경고',
     lowDiskSpaceDescription: '여유 디스크 공간이 이 임계값 아래로 떨어지면 경고 표시',
     printerFirmware: '프린터 펌웨어',
@@ -3628,7 +3621,6 @@ export default {
     runningToast: '{{name}} 슬라이싱 중 — {{elapsed}}',
     runningWithProgress: '{{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     completedToast: '{{name}} 슬라이싱 완료',
-    completedToFilesToast: '{{name}} 슬라이싱 후 파일에 저장했습니다',
     failedToast: '{{name}} 슬라이싱 실패: {{detail}}',
     tier: {
       local: '가져온 것',
@@ -4663,12 +4655,12 @@ export default {
     },
     mode: {
       title: '모드',
-      archive: '파일',
-      archiveDesc: '업로드를 파일에 저장',
+      archive: '아카이브',
+      archiveDesc: '파일 즉시 아카이브',
       review: '검토',
-      reviewDesc: '파일에 저장하기 전에 업로드 검토',
+      reviewDesc: '아카이브 전 검토',
       queue: '대기열',
-      queueDesc: '업로드를 인쇄 대기열에 추가',
+      queueDesc: '아카이브 후 대기열 추가',
       proxy: '프록시',
       proxyDesc: '실제 프린터로 릴레이'
     },
@@ -4694,15 +4686,15 @@ export default {
       readGuide: '활성화 전에 설정 가이드를 읽으세요'
     },
     archiveNameSource: {
-      title: '업로드 표시 이름',
-      description: '검토 목록에서 업로드를 표시할 방식을 선택합니다. “메타데이터”는 3MF에 포함된 제목을 사용하고, “파일 이름”은 FTP로 받은 파일 이름을 사용합니다.',
+      title: '아카이브 이름 출처',
+      description: '가상 프린터를 통해 파일이 도착할 때 새 아카이브의 이름 지정 방법을 선택합니다. "메타데이터"는 3MF의 슬라이서 내장 제목을 사용합니다(기본값). "파일 이름"은 Bambu Studio가 FTP를 통해 전송한 파일 이름을 사용합니다. 참고: Bambu Studio는 3MF에 제목 필드가 있을 경우 "프린터로 보내기" 대화 상자에 입력한 이름을 해당 값으로 덮어쓰므로, 두 모드 모두 동일한 문자열이 표시되는 경우가 많습니다.',
       metadata: '메타데이터',
       filename: '파일 이름'
     },
     howItWorks: {
       title: '작동 방식',
       step1: '같은 LAN에서 가상 프린터는 검색을 통해 슬라이서(Bambu Studio / OrcaSlicer)에 자동으로 나타납니다. 다른 네트워크에서는 IP 주소와 액세스 코드로 수동으로 추가하세요.',
-      step2: '파일, 검토, 대기열 모드에서 슬라이서의 “보내기” 버튼으로 3MF 파일을 Grove Control에 업로드합니다. 파일 모드는 파일에 저장하고, 검토 모드는 저장하거나 폐기할 수 있으며, 대기열 모드는 인쇄 작업을 추가합니다. “인쇄 성공”은 업로드가 완료되었다는 뜻입니다.',
+      step2: '아카이브, 검토, 대기열 모드에서 슬라이서의 "전송" 버튼을 사용하여 3MF 파일을 Grove Control에 업로드하세요. 슬라이서는 "인쇄 성공"을 표시하지만 파일은 저장되고 인쇄되지 않습니다.',
       step3: '프록시 모드에서 가상 프린터는 모든 트래픽을 실제 프린터로 릴레이합니다 — 직접 연결된 것처럼 즉시 인쇄가 시작됩니다.'
     },
     status: {
@@ -4983,6 +4975,12 @@ export default {
     autoOffPersistentDescription: '1회성 대신 인쇄 사이에 활성화 유지',
     controlsPrinterPower: '프린터에 전원 공급',
     controlsPrinterPowerDescription: '이 플러그가 액세서리(필터 팬, 조명)에만 전원을 공급한다면 끄세요. 그렇지 않으면 플러그를 끌 때 프린터가 오프라인으로 표시됩니다.',
+    turnOffDelayMode: '끄기 지연 모드',
+    time: '시간',
+    temp: '온도',
+    delayMinutes: '지연 (분)',
+    tempThreshold: '온도 임계값 (°C)',
+    tempThresholdDescription: '노즐이 이 온도 이하로 냉각될 때 끄기',
     edit: '편집',
     deleteConfirm: '"{{name}}"을(를) 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.',
     turnOnConfirm: '"{{name}}"을(를) 켜시겠습니까?',
@@ -5848,20 +5846,10 @@ export default {
   },
   archiveAutoPurge: {
     enableLabel: '오래된 아카이브 자동 삭제',
-    enableDescription: '선택한 아카이브 보존 정책을 하루에 한 번 실행합니다.',
-    modeLabel: '보존 정책',
-    ageMode: '기간 기준',
-    countMode: '파일 개수 기준',
+    enableDescription: '매일 한 번, 임계값 내에 인쇄되지 않은 아카이브를 영구적으로 삭제합니다. 아카이브를 다시 인쇄하면 카운터가 초기화됩니다. 휴지통 없음 — 삭제는 즉각적입니다.',
     ageLabel: '다음 기간 동안 인쇄되지 않은 아카이브 자동 삭제',
     ageDescription: '최소 7일, 최대 10년. 가장 최근 인쇄 완료 시점 기준 — 아카이브를 다시 인쇄하면 날짜가 새로고침됩니다. 아카이브, 3MF, 썸네일, 타임랩스 및 사진을 삭제합니다.',
     days: '일',
-    maxCountLabel: '보관할 아카이브 파일의 최대 개수',
-    countDescription: '경과 기간과 관계없이 최근 사용한 아카이브를 유지합니다. 재인쇄하면 보관 순서가 갱신됩니다. 인쇄 중인 아카이브는 삭제하지 않습니다.',
-    countDraftHint: '적용을 선택하면 변경 사항이 반영됩니다.',
-    countValidationError: '1부터 100,000까지의 정수를 입력하세요.',
-    ageValidationError: '7부터 3,650까지의 정수를 입력하세요.',
-    countPreviewSummary: '다음 실행에서 아카이브 {{count}}개를 삭제합니다.',
-    countPreviewNone: '현재 이 한도를 초과한 아카이브가 없습니다.',
     runNow: '지금 아카이브 삭제',
     saveFailed: '자동 삭제 설정을 저장할 수 없습니다.',
     purgeStatsLabel: '통계에서도 제거',

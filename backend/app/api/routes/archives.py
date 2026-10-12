@@ -30,7 +30,7 @@ from backend.app.schemas.print_log import PrintLogResponse
 from backend.app.schemas.slicer import SliceRequest
 from backend.app.services.archive import ArchiveService
 from backend.app.utils.http import build_content_disposition
-from backend.app.utils.safe_path import assert_under, safe_join_under
+from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import (
     extract_embedded_presets_from_3mf,
     extract_nozzle_mapping_from_3mf,
@@ -1504,7 +1504,7 @@ async def get_archive_delete_impact(
     """Pre-flight for the delete-confirm modal (#1734).
 
     Returns the number of related queue items the user is about to remove
-    AND how many hold a printer, including jobs awaiting Clear Plate. Holds block deletion
+    AND whether any are dispatching or printing. Active work blocks deletion
     with a 409 — surfaced to the modal so it can disable the
     confirm button instead of failing on submit). Cheap, single endpoint —
     not folded into the archive GET response so the much larger list
@@ -2008,9 +2008,11 @@ async def delete_archive(
 ):
     """Delete an archive (soft by default; ``?purge_stats=true`` to hard-delete).
 
-    Both paths remove related Queue rows. The service rejects deletion while
-    any job holds a printer, including jobs awaiting Clear Plate, so Archive
-    deletion cannot release a physical hold or remove an active source.
+    Both delete paths now cascade to related ``print_queue`` rows (#1734) —
+    hard delete via the ``ON DELETE CASCADE`` FK, soft delete via the
+    ``_delete_related_queue_items`` helper. A 409 guard blocks the delete
+    when any related queue item is currently mid-print so the dispatcher
+    doesn't lose its metadata trail under the running print.
     """
     user, can_modify_all = auth_result
 
@@ -2025,21 +2027,40 @@ async def delete_archive(
         if archive.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own archives")
 
-    from backend.app.services.archive import ArchiveDeletionConflict
+    # #1734: block delete when any related queue item is dispatching or printing.
+    # Both soft and hard delete are gated — an in-flight print needs its
+    # backing archive to stay around for the metadata trail (filament,
+    # plate, ams_mapping). The user can stop the print first, then retry.
+    from backend.app.services.archive import _count_related_queue_items
+
+    _related_total, related_active = await _count_related_queue_items(db, archive_id)
+    if related_active > 0:
+        raise HTTPException(
+            409,
+            f"Cannot delete archive — {related_active} related queue item(s) are "
+            f"being dispatched or printed. Stop the active job first, then retry.",
+        )
 
     service = ArchiveService(db)
-    try:
-        deleted = (
-            await service.delete_archive(archive_id, purge_stats=True)
-            if purge_stats
-            else await service.soft_delete_archive(archive_id)
-        )
-    except ArchiveDeletionConflict as exc:
-        await db.rollback()
-        raise HTTPException(409, str(exc)) from exc
-    if not deleted:
+    if purge_stats:
+        # Hard-delete the linked PrintLogEntry rows first so their filament /
+        # cost / count contributions disappear from /archives/stats. The FK is
+        # ON DELETE SET NULL, so without this delete the runs would survive
+        # the archive row and keep showing up in totals (#1343 / #1378).
+        from sqlalchemy import delete as sa_delete
+
+        from backend.app.models.print_log import PrintLogEntry
+
+        await db.execute(sa_delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
+        await db.commit()
+
+        if not await service.delete_archive(archive_id):
+            raise HTTPException(404, "Archive not found")
+        return {"status": "deleted", "purged_from_stats": True}
+
+    if not await service.soft_delete_archive(archive_id):
         raise HTTPException(404, "Archive not found")
-    return {"status": "deleted", "purged_from_stats": purge_stats}
+    return {"status": "deleted", "purged_from_stats": False}
 
 
 @router.get("/{archive_id}/download")
@@ -3325,11 +3346,41 @@ async def upload_archive(
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.ARCHIVES_CREATE),
 ):
-    """Retired: printable uploads belong in Files or the Queue."""
-    raise HTTPException(
-        status_code=410,
-        detail="Direct uploads to Archive are no longer supported. Upload to Files to keep a file, or to Queue to print it.",
-    )
+    """Manually upload a 3MF file to archive."""
+    if not file.filename or not file.filename.endswith(".3mf"):
+        raise HTTPException(400, "File must be a .3mf file")
+
+    # Save uploaded file temporarily — strip directory components to prevent path traversal
+    safe_filename = _safe_filename(file.filename)
+    temp_path = (
+        settings.archive_dir / "temp" / safe_filename
+    )  # SEC-PATH-OK: safe_filename = _safe_filename(...) basename-stripped above
+    temp_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        content = await file.read()
+        # #1401: same content validation as library upload — catches
+        # raw-gcode-renamed-to-.3mf and other unprintable shapes before
+        # archiving them and offering them up for print.
+        from backend.app.api.routes.library import validate_print_file_upload
+
+        validate_print_file_upload(file.filename, content)
+        temp_path.write_bytes(content)
+
+        service = ArchiveService(db)
+        archive = await service.archive_print(
+            printer_id=printer_id,
+            source_file=temp_path,
+            created_by_id=current_user.id if current_user else None,
+        )
+
+        if not archive:
+            raise HTTPException(400, "Failed to archive file")
+
+        return ArchiveResponse.model_validate(archive)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 @router.post("/upload-bulk")
@@ -3339,67 +3390,65 @@ async def upload_archives_bulk(
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.ARCHIVES_CREATE),
 ):
-    """Retired: bulk uploads belong in Files, not print history."""
-    raise HTTPException(
-        status_code=410,
-        detail="Direct uploads to Archive are no longer supported. Upload to Files to keep files, or to Queue to print them.",
-    )
+    """Bulk upload multiple 3MF files to archive."""
+    from backend.app.api.routes.library import validate_print_file_upload
 
+    results = []
+    errors = []
 
-@router.post("/{archive_id}/save-to-files", status_code=201)
-async def save_archive_to_files(
-    archive_id: int,
-    db: AsyncSession = Depends(get_db),
-    auth_result: tuple[User | None, bool] = Depends(
-        require_ownership_permission(
-            Permission.ARCHIVES_READ_ALL,
-            Permission.ARCHIVES_READ_OWN,
-        )
-    ),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.LIBRARY_UPLOAD),
-):
-    """Copy a historical print artifact into the user's managed Files library."""
-    from io import BytesIO
+    for file in files:
+        if not file.filename or not file.filename.endswith(".3mf"):
+            errors.append({"filename": file.filename or "unknown", "error": "Not a .3mf file"})
+            continue
 
-    from backend.app.api.routes.library import upload_file
-    from backend.app.models.library import LibraryFile
+        safe_filename = _safe_filename(file.filename)
+        temp_path = (
+            settings.archive_dir / "temp" / safe_filename
+        )  # SEC-PATH-OK: safe_filename = _safe_filename(...) basename-stripped above
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
 
-    owner_user, can_read_all = auth_result
-    archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
-    archive = _ensure_archive_visible(archive_result.scalar_one_or_none(), owner_user, can_read_all)
-    if not archive.file_path:
-        raise HTTPException(status_code=404, detail="This print has no retained artifact to save")
+        try:
+            content = await file.read()
+            # #1401: bulk-upload variant of the library validation. Collect
+            # the rejection per-file rather than aborting the whole batch
+            # so one bad file in a 10-file drag-drop doesn't lose the
+            # other nine.
+            try:
+                validate_print_file_upload(file.filename, content)
+            except HTTPException as exc:
+                errors.append({"filename": file.filename, "error": exc.detail})
+                continue
+            temp_path.write_bytes(content)
 
-    try:
-        stored_path = Path(archive.file_path)
-        source_path = (
-            stored_path
-            if stored_path.is_absolute()
-            else safe_join_under(Path(settings.base_dir), archive.file_path, http=False)
-        )
-        source_path = assert_under(Path(settings.archive_dir), source_path, http=False)
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail="Archive artifact path is invalid") from exc
-    if not source_path.is_file():
-        raise HTTPException(status_code=404, detail="Archive artifact is missing from disk")
+            service = ArchiveService(db)
+            archive = await service.archive_print(
+                printer_id=printer_id,
+                source_file=temp_path,
+                created_by_id=current_user.id if current_user else None,
+            )
 
-    upload = UploadFile(filename=archive.filename, file=BytesIO(source_path.read_bytes()))
-    library_response = await upload_file(
-        file=upload,
-        folder_id=None,
-        generate_stl_thumbnails=True,
-        db=db,
-        current_user=current_user or owner_user,
-        api_key_owner=None,
-    )
-    library_file = await db.get(LibraryFile, library_response.id)
-    if library_file:
-        library_file.project_id = archive.project_id
-        await db.commit()
+            if archive:
+                results.append(
+                    {
+                        "filename": file.filename,
+                        "id": archive.id,
+                        "status": "success",
+                    }
+                )
+            else:
+                errors.append({"filename": file.filename, "error": "Failed to process"})
+        except Exception as e:
+            logger.exception("Failed to upload archive %s: %s", file.filename, e)
+            errors.append({"filename": file.filename, "error": "Failed to process file"})
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
 
     return {
-        "library_file_id": library_response.id,
-        "filename": library_response.filename,
+        "uploaded": len(results),
+        "failed": len(errors),
+        "results": results,
+        "errors": errors,
     }
 
 
@@ -3965,7 +4014,7 @@ async def slice_archive(
     user originally sent to slice) → ``file_path`` (the sliced 3MF/gcode that
     actually printed).
     """
-    from backend.app.api.routes.library import guard_nozzle_class_reslice, slice_and_persist
+    from backend.app.api.routes.library import guard_nozzle_class_reslice, slice_and_persist_as_archive
     from backend.app.core.database import async_session
     from backend.app.services.slice_dispatch import (
         http_exception_to_job_error,
@@ -4008,7 +4057,8 @@ async def slice_archive(
         )
 
     # Match the library route: derive the sliced output's filename from
-    # `print_name` when set, so the saved File has a useful name.
+    # `print_name` when set, so the new archive row's display name lines
+    # up with the source's display.
     src_ext = Path(raw_filename).suffix.lower() or ".3mf"
     src_filename = (
         f"{archive.print_name.strip()}{src_ext}" if archive.print_name and archive.print_name.strip() else raw_filename
@@ -4032,17 +4082,14 @@ async def slice_archive(
                     HTTPException(status_code=404, detail="Archive disappeared during slice")
                 )
             try:
-                response = await slice_and_persist(
+                response = await slice_and_persist_as_archive(
                     task_db,
                     model_bytes=model_bytes,
                     model_filename=src_filename,
-                    folder_id=None,
-                    extra_metadata={"sliced_from_archive_id": src_archive.id},
                     request=request,
+                    source_archive=src_archive,
                     current_user_id=user_id,
                     job_id=job_id,
-                    project_id=src_archive.project_id,
-                    fallback_metadata={"bed_type": src_archive.bed_type},
                 )
             except HTTPException as exc:
                 raise http_exception_to_job_error(exc) from exc

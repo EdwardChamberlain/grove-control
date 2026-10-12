@@ -406,7 +406,7 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    @pytest.mark.parametrize("queue_status", ["queued", "preheating", "dispatching", "printing", "paused"])
+    @pytest.mark.parametrize("queue_status", ["pending", "preheating", "dispatching", "printing"])
     async def test_get_printer_status_reports_queue_work_for_active_queue_states(
         self, async_client: AsyncClient, printer_factory, db_session, queue_status
     ):
@@ -415,14 +415,7 @@ class TestPrintersAPI:
         from backend.app.services.bambu_mqtt import PrinterState
 
         printer = await printer_factory()
-        db_session.add(
-            PrintQueueItem(
-                assigned_printer_id=printer.id if queue_status == "queued" else None,
-                printer_id=None if queue_status == "queued" else printer.id,
-                position=1,
-                status=queue_status,
-            )
-        )
+        db_session.add(PrintQueueItem(printer_id=printer.id, position=1, status=queue_status))
         await db_session.commit()
 
         state = PrinterState()
@@ -450,7 +443,7 @@ class TestPrintersAPI:
                 target_model="X1C",
                 target_location="Workshop",
                 position=1,
-                status="queued",
+                status="pending",
             )
         )
         await db_session.commit()
@@ -462,9 +455,8 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    @pytest.mark.parametrize(("queue_status", "printer_state"), [("printing", "RUNNING"), ("paused", "PAUSE")])
     async def test_get_printer_status_includes_active_queue_owner(
-        self, async_client: AsyncClient, printer_factory, db_session, queue_status: str, printer_state: str
+        self, async_client: AsyncClient, printer_factory, db_session
     ):
         """The status projection includes the active queue owner's username."""
         from backend.app.models.print_queue import PrintQueueItem
@@ -477,10 +469,9 @@ class TestPrintersAPI:
         await db_session.flush()
         db_session.add(
             PrintQueueItem(
-                assigned_printer_id=printer.id if queue_status == "queued" else None,
-                printer_id=None if queue_status == "queued" else printer.id,
+                printer_id=printer.id,
                 position=1,
-                status=queue_status,
+                status="printing",
                 created_by_id=owner.id,
             )
         )
@@ -488,7 +479,7 @@ class TestPrintersAPI:
 
         state = PrinterState()
         state.connected = True
-        state.state = printer_state
+        state.state = "RUNNING"
         with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = state
             mock_pm.is_awaiting_plate_clear.return_value = False
@@ -515,9 +506,7 @@ class TestPrintersAPI:
             filename="completed-widget.3mf",
             thumbnail_path="completed-widget.png",
         )
-        from backend.app.models.print_queue import PrintQueueItem
-
-        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=target.id, status="finished"))
+        printer.awaiting_plate_clear_archive_id = target.id
         await db_session.commit()
 
         state = PrinterState()
@@ -568,7 +557,7 @@ class TestPrintersAPI:
                 printer_id=printer.id,
                 archive_id=target.id,
                 position=1,
-                status="finished",
+                status="completed",
                 completed_at=datetime.now(timezone.utc),
                 created_by_id=queue_owner.id,
             )
@@ -587,37 +576,6 @@ class TestPrintersAPI:
 
         assert response.status_code == 200
         assert response.json()["awaiting_plate_clear_print"]["created_by_username"] == "queue_owner"
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_get_printer_status_falls_back_to_archive_owner_without_a_queue_owner(
-        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
-    ):
-        """An awaiting job with no creator, such as an external print, names the Archive's uploader."""
-        from backend.app.models.print_queue import PrintQueueItem
-        from backend.app.models.user import User
-        from backend.app.services.bambu_mqtt import PrinterState
-
-        printer = await printer_factory(awaiting_plate_clear=True)
-        archive_owner = User(username="archive_uploader", password_hash="test-hash")
-        db_session.add(archive_owner)
-        await db_session.flush()
-        target = await archive_factory(printer.id, print_name="External Widget", created_by_id=archive_owner.id)
-        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=target.id, status="finished"))
-        await db_session.commit()
-
-        state = PrinterState()
-        state.connected = True
-        state.state = "IDLE"
-        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
-            mock_pm.get_status = MagicMock(return_value=state)
-            mock_pm.is_awaiting_plate_clear = MagicMock(return_value=True)
-            mock_pm.get_awaiting_plate_clear_archive_id = MagicMock(return_value=target.id)
-
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/status")
-
-        assert response.status_code == 200
-        assert response.json()["awaiting_plate_clear_print"]["created_by_username"] == "archive_uploader"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -932,43 +890,33 @@ class TestPrinterDataIntegrity:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_get_current_print_user_returns_empty_when_no_user(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
-        """An idle printer, or an ownerless active job, credits nobody."""
-        from backend.app.models.print_queue import PrintQueueItem
-
+    async def test_get_current_print_user_returns_empty_when_no_user(self, async_client: AsyncClient, printer_factory):
+        """Verify empty object returned when no user is tracked."""
         printer = await printer_factory(name="Test Printer")
-        response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
-        assert response.status_code == 200
-        assert response.json() == {}
 
-        db_session.add(PrintQueueItem(printer_id=printer.id, status="printing", position=1))
-        await db_session.commit()
-        response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
-        assert response.status_code == 200
-        assert response.json() == {}
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_current_print_user.return_value = None
+
+            response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
+
+            assert response.status_code == 200
+            assert response.json() == {}
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_get_current_print_user_returns_user_info(
-        self, async_client: AsyncClient, printer_factory, db_session
-    ):
-        """The active job's owner is the current print user, read from the job (#204 stage 6)."""
-        from backend.app.models.print_queue import PrintQueueItem
-        from backend.app.models.user import User
-
+    async def test_get_current_print_user_returns_user_info(self, async_client: AsyncClient, printer_factory):
+        """Verify user info is returned when tracked."""
         printer = await printer_factory(name="Test Printer")
-        owner = User(username="testuser", password_hash="x", is_active=True)
-        db_session.add(owner)
-        await db_session.flush()
-        db_session.add(PrintQueueItem(printer_id=printer.id, status="printing", position=1, created_by_id=owner.id))
-        await db_session.commit()
 
-        response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_current_print_user.return_value = {"user_id": 42, "username": "testuser"}
 
-        assert response.status_code == 200
-        assert response.json() == {"user_id": owner.id, "username": "testuser"}
+            response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
+
+            assert response.status_code == 200
+            result = response.json()
+            assert result["user_id"] == 42
+            assert result["username"] == "testuser"
 
 
 class TestPrintControlAPI:
@@ -987,49 +935,35 @@ class TestPrintControlAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_stop_print_refuses_without_an_identifiable_job(self, async_client: AsyncClient, printer_factory):
-        """A printer-wide Stop must not guess which physical print to stop."""
+    async def test_stop_print_not_connected(self, async_client: AsyncClient, printer_factory):
+        """Verify error when printer is not connected."""
         printer = await printer_factory(name="Disconnected Printer")
 
-        with patch("backend.app.services.printer_manager.printer_manager") as mock_pm:
-            mock_pm.get_status.return_value = None
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_client.return_value = None
 
             response = await async_client.post(f"/api/v1/printers/{printer.id}/print/stop")
 
-            assert response.status_code == 409
-            assert "identifiable active print" in response.json()["detail"].lower()
+            assert response.status_code == 400
+            assert "not connected" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_stop_print_success_for_the_identified_job(
-        self, async_client: AsyncClient, db_session, printer_factory
-    ):
-        """Stop targets the current queue job identified by fresh telemetry."""
-        from types import SimpleNamespace
-
-        from backend.app.models.print_queue import PrintQueueItem
-
+    async def test_stop_print_success(self, async_client: AsyncClient, printer_factory):
+        """Verify successful stop print request."""
         printer = await printer_factory(name="Printing Printer")
-        job = PrintQueueItem(printer_id=printer.id, status="printing", dispatch_subtask_id="known-run")
-        db_session.add(job)
-        await db_session.commit()
 
-        with patch("backend.app.services.printer_manager.printer_manager") as mock_pm:
-            mock_pm.get_status.return_value = SimpleNamespace(
-                connected=True,
-                job_telemetry_ready=True,
-                state="RUNNING",
-                submission_id="known-run",
-            )
-            mock_pm.stop_print.return_value = True
+        mock_client = MagicMock()
+        mock_client.stop_print.return_value = True
+
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_client.return_value = mock_client
 
             response = await async_client.post(f"/api/v1/printers/{printer.id}/print/stop")
 
             assert response.status_code == 200
             assert response.json()["success"] is True
-            mock_pm.stop_print.assert_called_once_with(printer.id)
-        await db_session.refresh(job)
-        assert job.stop_requested_at is not None
+            mock_client.stop_print.assert_called_once()
 
     # ========================================================================
     # Pause print endpoint

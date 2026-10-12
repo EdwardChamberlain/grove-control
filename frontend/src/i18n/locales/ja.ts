@@ -736,7 +736,7 @@ export default {
     developerModeWarning: '開発者LANモードが有効になっていません: {{names}}。一部の機能が動作しない可能性があります。',
     howToEnable: '有効化方法',
     incompatibleFile: 'このファイルは{{slicedFor}}用にスライスされていますが、このプリンターは{{printerModel}}です',
-    directUploadLibraryNote: 'アップロードしたファイルはキューに追加され、ファイル管理には保存されません。',
+    directUploadLibraryNote: 'アップロードしたファイルは、キューに追加する前にファイルマネージャーへ保存されます。',
     dropNotPrintable: '.gcodeおよび.gcode.3mfファイルのみ印刷できます',
     dropToPrint: 'ドロップして印刷',
     cannotPrint: 'プリンター使用中',
@@ -834,8 +834,6 @@ export default {
       failedUpdateFavorites: 'お気に入りの更新に失敗しました',
       exportDownloaded: 'エクスポートをダウンロードしました',
       exportFailed: 'エクスポートに失敗しました',
-      savedToFiles: '{{filename}} をファイルに保存しました',
-      failedSaveToFiles: '印刷ファイルをファイルに保存できませんでした',
     },
     menu: {
       print: '印刷',
@@ -875,7 +873,6 @@ export default {
       select: '選択',
       deselect: '選択解除',
       delete: '削除',
-      saveToFiles: 'ファイルに保存',
     },
     permission: {
       noReprint: 'このアーカイブを再印刷する権限がありません',
@@ -973,7 +970,7 @@ export default {
       deleteButton: '削除',
       deletePurgeStats: 'このプリントをQuick Statsからも削除（フィラメント、時間、コスト、電力）',
       deleteQueueItemsWarning: 'このアーカイブにリンクされた {{count}} 件のキュー項目も削除されます。',
-      deleteBlockedByPrinting: '削除できません — {{count}} 件のジョブがまだプリンターを占有しています。先に実行中のジョブを停止し、プレートをクリアしてください。',
+      deleteBlockedByPrinting: '削除できません — {{count}} 件のキュー項目が送信中または印刷中です。先に実行中のジョブを停止してから再試行してください。',
       removeSource3mf: 'ソース3MFを削除',
       removeSource3mfConfirm: '"{{name}}"からソース3MFファイルを削除してもよろしいですか？元のスライサープロジェクトファイルが削除されます。',
       removeButton: '削除',
@@ -1063,12 +1060,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: 'プレートの清掃待ち',
-    resolveDispatch: {
-      prompt: "プリンターがこのジョブを確認していません。選択する前にプリンターを確認してください：",
-      printing: "印刷中です",
-      failed: "印刷は開始されませんでした",
-    },
     filamentShort: {
       rowBadge: '割り当てられたスプールのフィラメントが不足しています',
       rowTooltip: 'スケジューラーがこのアイテムをフラグしました。再生ボタンをクリックしてスロットごとの不足量を確認し、それでも印刷するか判断してください。',
@@ -1149,10 +1140,6 @@ export default {
     },
     // Status
     status: {
-      queued: '待機中',
-      finished: '完了',
-      successful: '成功',
-      unsuccessful: '未成功',
       pending: '待機中',
       scheduled: '予定済み',
       waiting: '待機中',
@@ -1192,7 +1179,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: '手動開始',
+      staged: 'ステージ済み',
+      requiresPrevious: '前の成功が必要',
       autoPowerOff: '自動電源オフ',
       gcodeInjection: 'G-code',
     },
@@ -1212,8 +1200,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: 'プレートを清掃',
-      retry: '再試行',
       startPrint: '印刷を開始',
       stopPrint: '印刷を停止',
       requeue: '再キュー',
@@ -1853,6 +1839,12 @@ export default {
     saveThumbnails: 'サムネイルを保存',
     captureFinishPhoto: '完了写真を撮影',
     noPrintersConfigured: 'プリンターが設定されていません',
+    // Archive settings
+    archiveMode: {
+      always: '常にアーカイブを作成',
+      never: 'アーカイブを作成しない',
+      ask: '毎回確認',
+    },
     // Updates
     checkForUpdatesLabel: 'アップデートを確認',
     checkPrinterFirmware: 'プリンターファームウェアの確認',
@@ -2361,6 +2353,8 @@ export default {
     energyModeTotalDescription: 'ダッシュボードにスマートプラグの累計エネルギーを表示',
     // File Manager
     fileManager: 'ファイルマネージャー',
+    createArchiveEntry: '印刷時にアーカイブエントリを作成',
+    createArchiveEntryDescription: 'ファイルマネージャーから印刷時に、オプションでアーカイブエントリを作成',
     lowDiskSpaceWarning: 'ディスク容量不足の警告',
     lowDiskSpaceDescription: '空きディスク容量がこのしきい値を下回った場合に警告を表示',
     // Updates
@@ -3834,7 +3828,6 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'プレート {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}}をスライス済み',
-    completedToFilesToast: '{{name}}をスライスしてファイルに保存しました',
     failedTitle: 'スライスに失敗しました',
     failedToast: '{{name}}のスライスに失敗: {{detail}}',
     tier: {
@@ -4920,12 +4913,12 @@ export default {
     },
     mode: {
       title: 'モード',
-      archive: 'ファイル',
-      archiveDesc: 'アップロードをファイルに保存',
+      archive: 'アーカイブ',
+      archiveDesc: 'ファイルを即座にアーカイブ',
       review: 'レビュー',
-      reviewDesc: '保存前にアップロードを確認',
+      reviewDesc: 'アーカイブ前にレビュー',
       queue: 'キュー',
-      queueDesc: 'アップロードを印刷キューに追加',
+      queueDesc: 'アーカイブしてキューに追加',
       proxy: 'プロキシ',
       proxyDesc: '実際のプリンターに転送',
     },
@@ -4953,7 +4946,7 @@ export default {
     howItWorks: {
       title: '仕組み',
       step1: '同じLAN上では、仮想プリンターはスライサー（Bambu Studio / OrcaSlicer）に自動的に表示されます。他のネットワークからは、IPアドレスとアクセスコードで手動で追加してください。',
-      step2: 'ファイル、レビュー、キューの各モードでは、スライサーの「送信」ボタンで3MFをGrove Controlにアップロードします。ファイルモードはファイルに保存し、レビューでは保存または破棄を選べ、キューモードは印刷ジョブを追加します。「印刷成功」はアップロード完了を意味します。',
+      step2: 'アーカイブ、レビュー、キューモードでは、スライサーの「送信」ボタンを使用して3MFファイルをGrove Controlにアップロードします。スライサーは「印刷成功」と表示しますが、ファイルは保存され、印刷はされません。',
       step3: 'プロキシモードでは、仮想プリンターはすべてのトラフィックを実際のプリンターに転送します。直接接続されているかのように印刷がすぐに開始されます。',
     },
     status: {
@@ -5009,8 +5002,8 @@ export default {
       message: '「{{name}}」を削除してもよろしいですか？このプリンターのすべてのサービスが停止されます。',
     },
     archiveNameSource: {
-      title: 'アップロード表示名',
-      description: 'レビュー一覧でアップロードをどう表示するか選びます。「メタデータ」は3MFに埋め込まれたタイトルを使い、「ファイル名」はFTPで受信した名前を使います。',
+      title: 'アーカイブ名のソース',
+      description: '仮想プリンター経由でファイルが到着したときに、新しいアーカイブをどのように命名するかを選択します。「メタデータ」は3MFに埋め込まれたスライサータイトル（デフォルト）を使用します。「ファイル名」はBambu StudioがFTPで送信したファイル名を使用します。注: Bambu Studioは、3MFにタイトルフィールドが存在する場合、「プリンターに送信」ダイアログで入力した名前をその値で上書きするため、両方のモードで同じ文字列になることが多くあります。',
       metadata: 'メタデータ',
       filename: 'ファイル名',
     },
@@ -5250,6 +5243,12 @@ export default {
     autoOffAfterDrying: '乾燥完了後に自動オフ',
     autoOffAfterDryingDescription: 'AMSの乾燥が完了したらオフにする',
     delayAfterDryingMinutes: '乾燥後の遅延（分）',
+    turnOffDelayMode: 'オフ遅延モード',
+    time: '時間',
+    temp: '温度',
+    delayMinutes: '遅延（分）',
+    tempThreshold: '温度しきい値（°C）',
+    tempThresholdDescription: 'ノズルがこの温度以下に冷却されるとオフになります',
     edit: '編集',
     deleteConfirm: '"{{name}}"を削除してもよろしいですか？この操作は取り消せません。',
     turnOnConfirm: '"{{name}}"をオンにしてもよろしいですか？',
@@ -6366,20 +6365,10 @@ export default {
   },
   archiveAutoPurge: {
     enableLabel: '古いアーカイブを自動削除',
-    enableDescription: '選択したアーカイブ保持ポリシーを1日1回実行します。',
-    modeLabel: '保持ポリシー',
-    ageMode: '経過日数で指定',
-    countMode: 'ファイル数で指定',
+    enableDescription: '1日1回、しきい値内に印刷されていないアーカイブをリストから非表示にし、ファイルをディスクから削除します。再印刷するとタイマーがリセットされます。',
     ageLabel: '印刷されていないアーカイブを自動削除（過去',
     ageDescription: '最小7日、最大10年。最新の印刷完了に基づきます — 再印刷するとエイジがリセットされます。3MF、サムネイル、タイムラプス、ソース3MF、F3D、写真を削除します。',
     days: '日',
-    maxCountLabel: '保持するアーカイブファイルの最大数',
-    countDescription: '経過日数に関係なく、最近使用したアーカイブを残します。再印刷すると保持順序が更新されます。印刷中のアーカイブは削除しません。',
-    countDraftHint: '「適用」を選択すると変更が反映されます。',
-    countValidationError: '1 から 100,000 までの整数を入力してください。',
-    ageValidationError: '7 から 3,650 までの整数を入力してください。',
-    countPreviewSummary: '次回の実行で {{count}} 件のアーカイブを削除します。',
-    countPreviewNone: '現在、この上限を超えるアーカイブはありません。',
     purgeStatsLabel: '統計からも削除',
     purgeStatsDescription: '有効にすると、毎日のスイーパーが削除した各アーカイブを Quick Stats（フィラメント、時間、コスト、エネルギー）からも除外します。既定はオフ — Quick Stats は寄与を保持し、ファイルのみがディスクから消えます。',
     runNow: 'アーカイブを今すぐ削除',

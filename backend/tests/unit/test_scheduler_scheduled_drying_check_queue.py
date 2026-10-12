@@ -33,8 +33,6 @@ def _utcnow_naive() -> datetime:
 
 def _state(dry_time=0):
     state = MagicMock()
-    state.state = "IDLE"
-    state.connected = True
     state.firmware_version = "01.09.00.00"
     state.raw_data = {"ams": [{"id": 0, "dry_time": dry_time, "dry_sf_reason": []}]}
     return state
@@ -80,9 +78,9 @@ async def _add_print_item(ctx, *, sliced_for_model="P2S"):
         await db.flush()
         db.add(
             PrintQueueItem(
-                status="queued",
+                status="pending",
                 position=1,
-                assigned_printer_id=1,
+                printer_id=1,
                 library_file_id=lib.id,
                 # Keep this feature's queue-pass assertions focused on
                 # scheduled drying rather than the separate safe-default
@@ -115,18 +113,16 @@ async def _run(ctx, scheduler, *, state):
     started = AsyncMock()
     patches = [
         patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=state)),
+        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=state)),
         patch(
-            "backend.app.services.lifecycle.dispatching.printer_manager.send_drying_command",
+            "backend.app.services.print_scheduler.printer_manager.send_drying_command",
             MagicMock(return_value=True),
         ),
-        patch.object(scheduler.selection, "_is_printer_idle", MagicMock(return_value=True)),
-        patch.object(scheduler.drying, "_is_printer_idle", MagicMock(return_value=True)),
-        patch.object(scheduler.selection, "_block_on_filament_deficit", AsyncMock(return_value=False)),
-        patch.object(scheduler.workers, "leave", started),
+        patch.object(scheduler, "_is_printer_idle", MagicMock(return_value=True)),
+        patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
+        patch.object(scheduler, "_start_print", started),
     ]
     with ExitStack() as stack:
         for p in patches:
@@ -155,7 +151,7 @@ async def test_a_due_row_dispatches_through_the_real_queue_pass(queue_db):
     async with queue_db.session_maker() as db:
         stored = (await db.execute(select(ScheduledDrying).where(ScheduledDrying.id == row.id))).scalar_one()
         assert stored.status == "running"
-    assert 1 in scheduler.drying._drying_in_progress
+    assert 1 in scheduler._drying_in_progress
 
 
 @pytest.mark.asyncio

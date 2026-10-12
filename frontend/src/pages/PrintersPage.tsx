@@ -105,6 +105,7 @@ import { PrinterHealthMenu } from '../components/printer/PrinterHealthMenu';
 import { FirmwareUpdateModal } from '../components/printer/FirmwareUpdateModal';
 import { PrinterThermalControls } from '../components/printer/PrinterThermalControls';
 import { PrinterAirductControl } from '../components/printer/PrinterAirductControl';
+import { PrinterPlateDetectionControl } from '../components/printer/PrinterPlateDetectionControl';
 import { PrinterStopPrintConfirmation } from '../components/printer/PrinterStopPrintConfirmation';
 import {
   AmsDryingControl,
@@ -857,7 +858,7 @@ function PrinterListRow({
   const isMaintenanceMode = printer.is_active === false;
   const isPrintingOrPaused = !isMaintenanceMode && (status?.state === 'RUNNING' || status?.state === 'PAUSE');
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
-  const needsPlateClear = !isMaintenanceMode && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = !!requirePlateClear && !isMaintenanceMode && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected === true && needsPlateClear;
   const clearPlateMutation = useMutation({
     mutationFn: () => api.clearPlate(printer.id),
@@ -1068,6 +1069,7 @@ function SinglePrinterSwitcherItem({
   isSelected,
   maintenanceInfo,
   smartPlugPoweredOff = false,
+  requirePlateClear,
   checkPrinterFirmware = true,
   onSelect,
 }: {
@@ -1096,7 +1098,7 @@ function SinglePrinterSwitcherItem({
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
   const printerHealth = getPrinterHealthMeta({
     connected: status?.connected,
@@ -1384,21 +1386,23 @@ function useCurrentPrintOwner(
   printerId: number,
   isPrintingOrPaused: boolean,
   printIdentity: string | null,
-  queueOwner: string | null | undefined,
 ) {
+  const { data: printingQueueItems } = useQuery({
+    queryKey: ['queue', printerId, 'printing', printIdentity],
+    queryFn: () => api.getQueue(printerId, 'printing'),
+    enabled: isPrintingOrPaused && printIdentity !== null,
+  });
   const { data: reprintUser } = useQuery({
     queryKey: ['currentPrintUser', printerId, printIdentity],
     queryFn: () => api.getCurrentPrintUser(printerId),
     enabled: isPrintingOrPaused && printIdentity !== null,
   });
 
-  // Printer status resolves the durable active job owner, including paused jobs.
-  return queueOwner || reprintUser?.username;
+  return printingQueueItems?.[0]?.created_by_username || reprintUser?.username;
 }
 
 function SinglePrinterCockpit({
   printer,
-  queueWork,
   maintenanceInfo,
   smartPlugPoweredOff = false,
   requirePlateClear,
@@ -1422,7 +1426,6 @@ function SinglePrinterCockpit({
   onUnassignSpoolmanSpool,
 }: {
   printer: Printer;
-  queueWork?: Record<number, boolean>;
   maintenanceInfo?: PrinterMaintenanceInfo;
   smartPlugPoweredOff?: boolean;
   requirePlateClear?: boolean;
@@ -1788,6 +1791,14 @@ function SinglePrinterCockpit({
       showToast(error.message || t('printers.toast.failedToSendCommand'), 'error');
     },
   });
+  const plateDetectionMutation = useMutation({
+    mutationFn: (enabled: boolean) => api.updatePrinter(printer.id, { plate_detection_enabled: enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      showToast(plateDetectionMutation.variables ? t('printers.toast.plateCheckEnabled') : t('printers.toast.plateCheckDisabled'));
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToUpdateSetting'), 'error'),
+  });
   const xyJogMutation = useMutation({
     mutationFn: ({ x, y }: { x: number; y: number }) => api.xyJog(printer.id, x, y),
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
@@ -1816,11 +1827,11 @@ function SinglePrinterCockpit({
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const hasQueuedWork = isPrintingOrPaused || !!(queueWork?.[printer.id] ?? status?.has_queued_work);
+  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const isPaused = status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
-  const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = !!status?.connected && needsPlateClear && !isPrintingOrPaused;
   const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
   const printerHealth = getPrinterHealthMeta({
@@ -1847,7 +1858,7 @@ function SinglePrinterCockpit({
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
-  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity, status?.current_queue_owner);
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity);
   const printEntries = useMemo(() => printLog?.items ?? [], [printLog?.items]);
   const printerStats = useMemo(() => {
     const completed = printEntries.filter(entry => entry.status === 'completed').length;
@@ -1942,7 +1953,7 @@ function SinglePrinterCockpit({
     : cockpitStatusErrorClass;
   const isMaintenanceMode = printer.is_active === false;
   const cockpitPlateStatus = (() => {
-    if (!needsPlateClear) return null;
+    if (!requirePlateClear || !status?.connected || !needsPlateClear) return null;
     return {
       label: t('printers.plateStatus.notCleared'),
       className: cockpitStatusWarningClass,
@@ -2078,6 +2089,9 @@ function SinglePrinterCockpit({
   const currentPrintLabel = status?.preheating
     ? t('heatSoak.status')
     : activePrintName || t('printers.noActiveJob', 'No active job');
+  const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
+    ? plateDetectionMutation.variables
+    : printer.plate_detection_enabled;
   const requestBedJog = (distance: number) => {
     const warnedKey = `bambuddy.bedJog.warned.${printer.id}`;
     let warned = false;
@@ -2397,6 +2411,17 @@ function SinglePrinterCockpit({
         >
           <ChamberLight on={!!status?.chamber_light} className="h-4 w-4" />
         </button>
+        <PrinterPlateDetectionControl
+          printer={printer}
+          status={status}
+          enabled={plateDetectionEnabled}
+          connected={!!status?.connected}
+          canUpdate={hasPermission('printers:update')}
+          togglePending={plateDetectionMutation.isPending}
+          iconControlClass={iconControlClass}
+          inactiveClassName="bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white"
+          onToggle={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
+        />
         <button
           type="button"
           onClick={() => canControl && isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'speed' ? null : 'speed')}
@@ -2749,7 +2774,7 @@ function SinglePrinterCockpit({
           const slicedFor = (uploadedFile.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
           const printerModel = mapModelCode(printer.model);
           if (slicedFor && printerModel && !isGcodeCompatible(slicedFor, printerModel)) {
-            api.discardQueueSource(uploadedFile.id).catch(() => {});
+            api.deleteLibraryFile(uploadedFile.id).catch(() => {});
             return t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', { slicedFor, printerModel });
           }
           setShowUploadForPrint(false);
@@ -2786,11 +2811,9 @@ function SinglePrinterCockpit({
         libraryFileId={printAfterUpload.id}
         archiveName={printAfterUpload.filename}
         initialSelectedPrinterIds={[printer.id]}
-        onClose={() => {
-          api.discardQueueSource(printAfterUpload.id).catch(() => {});
-          setPrintAfterUpload(null);
-        }}
+        onClose={() => setPrintAfterUpload(null)}
         onSuccess={() => setPrintAfterUpload(null)}
+        cleanupLibraryAfterDispatch
       />
     )}
     {reprintEntry?.archive_id && (
@@ -3047,7 +3070,6 @@ function ScheduledDryingBanner({
 
 function PrinterCard({
   printer,
-  queueWork,
   hideIfDisconnected,
   maintenanceInfo,
   smartPlugPoweredOff = false,
@@ -3081,7 +3103,6 @@ function PrinterCard({
   aiLastError = null,
 }: {
   printer: Printer;
-  queueWork?: Record<number, boolean>;
   hideIfDisconnected?: boolean;
   maintenanceInfo?: PrinterMaintenanceInfo;
   smartPlugPoweredOff?: boolean;
@@ -3339,8 +3360,8 @@ function PrinterCard({
 
   // Fetch queue count for this printer
   const { data: queueItems } = useQuery({
-    queryKey: ['queue', printer.id, 'queued', printer.model],
-    queryFn: () => api.getQueue(printer.id, 'queued', printer.model || undefined),
+    queryKey: ['queue', printer.id, 'pending', printer.model],
+    queryFn: () => api.getQueue(printer.id, 'pending', printer.model || undefined),
     refetchInterval: 30000,
   });
   // Filter queue items by filament compatibility (same logic as PrinterQueueWidget)
@@ -3359,9 +3380,9 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const hasQueuedWork = isPrintingOrPaused || !!(queueWork?.[printer.id] ?? status?.has_queued_work);
+  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
-  const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
   // A live WebSocket status update carries the plate-clear flag, but the exact
   // archive summary is resolved by the REST status endpoint. Fetch it promptly
@@ -3377,7 +3398,7 @@ function PrinterCard({
     status?.awaiting_plate_clear_print,
   ]);
   const activePrintIdentity = getActivePrintIdentity(status);
-  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity, status?.current_queue_owner);
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity);
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t, activePlateLabel)
     : null;
@@ -3415,7 +3436,7 @@ function PrinterCard({
     [plateClearPrint?.archive_id, plateClearPrint?.thumbnail_path],
   );
   const plateStatus = (() => {
-    if (!status || (!requirePlateClear && !status.awaiting_plate_clear)) return null;
+    if (!requirePlateClear || !status?.connected) return null;
     if (isPrintingOrPaused) {
       return {
         label: t('printers.plateStatus.inUse'),
@@ -3860,6 +3881,14 @@ function PrinterCard({
   });
 
   // Plate detection setting mutation
+  const plateDetectionMutation = useMutation({
+    mutationFn: (enabled: boolean) => api.updatePrinter(printer.id, { plate_detection_enabled: enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      showToast(plateDetectionMutation.variables ? t('printers.toast.plateCheckEnabled') : t('printers.toast.plateCheckDisabled'));
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToUpdateSetting'), 'error'),
+  });
 
   // Maintenance mode toggle (#1476). Wraps the `is_active` backend field that
   // already gates MQTT connection, queue dispatch, scheduler eligibility,
@@ -3966,6 +3995,11 @@ function PrinterCard({
       showToast(error.message || t('printers.toast.failedToUnload'), 'error');
     },
   });
+
+  // Toggle plate detection enabled/disabled
+  const handleTogglePlateDetection = () => {
+    plateDetectionMutation.mutate(!printer.plate_detection_enabled);
+  };
 
   // Watch ams_status_main to detect when RFID read completes
   // ams_status_main: 0=idle, 2=rfid_identifying
@@ -4838,6 +4872,18 @@ function PrinterCard({
                         );
                       })()}
 
+                      <PrinterPlateDetectionControl
+                        printer={printer}
+                        status={status}
+                        enabled={printer.plate_detection_enabled}
+                        connected={status.connected}
+                        canUpdate={hasPermission('printers:update')}
+                        togglePending={plateDetectionMutation.isPending}
+                        iconControlClass={iconControlClass}
+                        iconClassName="w-4 h-4"
+                        onToggle={handleTogglePlateDetection}
+                      />
+
                       {/* Print Speed */}
                       {(() => (
                         <div className="relative">
@@ -5500,7 +5546,7 @@ function PrinterCard({
             const slicedFor = (uploadedFile.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
             const printerModel = mapModelCode(printer.model);
             if (slicedFor && printerModel && !isGcodeCompatible(slicedFor, printerModel)) {
-              api.discardQueueSource(uploadedFile.id).catch(() => {});
+              api.deleteLibraryFile(uploadedFile.id).catch(() => {});
               return t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', { slicedFor, printerModel });
             }
             setPrintAfterUpload({ id: uploadedFile.id, filename: uploadedFile.filename });
@@ -5515,11 +5561,9 @@ function PrinterCard({
           libraryFileId={printAfterUpload.id}
           archiveName={printAfterUpload.filename}
           initialSelectedPrinterIds={[printer.id]}
-          onClose={() => {
-            api.discardQueueSource(printAfterUpload.id).catch(() => {});
-            setPrintAfterUpload(null);
-          }}
+          onClose={() => setPrintAfterUpload(null)}
           onSuccess={() => setPrintAfterUpload(null)}
+          cleanupLibraryAfterDispatch
         />
       )}
 
@@ -6573,11 +6617,6 @@ function PowerDropdownItem({
 
 export function PrintersPage() {
   const { t } = useTranslation();
-  const { data: queueWork } = useQuery({
-    queryKey: ['printerQueueWork'],
-    queryFn: api.getPrinterQueueWork,
-    refetchInterval: 30000,
-  });
   const { resolvedMode, darkAccent, lightAccent } = useTheme();
   const activeAccent = resolvedMode === 'dark' ? darkAccent : lightAccent;
   const accentButtonClass = {
@@ -7679,7 +7718,6 @@ export function PrintersPage() {
 
           <div className="min-h-0 min-w-0">
             <SinglePrinterCockpit
-              queueWork={queueWork}
               printer={selectedSinglePrinter}
               maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
               smartPlugPoweredOff={isSmartPlugPoweredOff(selectedSinglePrinter.id)}
@@ -7792,7 +7830,6 @@ export function PrintersPage() {
                 <div className={`grid gap-4 ${getGridClasses()}`}>
                   {groupPrinters.map((printer) => (
                     <PrinterCard
-                      queueWork={queueWork}
                       key={printer.id}
                       printer={printer}
                       hideIfDisconnected={hideDisconnected}
@@ -7844,7 +7881,6 @@ export function PrintersPage() {
         <div className={`grid gap-4 ${getGridClasses()}`}>
           {sortedPrinters.map((printer) => (
             <PrinterCard
-              queueWork={queueWork}
               key={printer.id}
               printer={printer}
               hideIfDisconnected={hideDisconnected}

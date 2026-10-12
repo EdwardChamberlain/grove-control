@@ -737,7 +737,7 @@ export default {
     developerModeWarning: '以下印表機未啟用開發者區域網路模式：{{names}}。某些功能可能無法使用。',
     howToEnable: '如何啟用',
     incompatibleFile: '此檔案是為 {{slicedFor}} 切片的，但該印表機是 {{printerModel}}',
-    directUploadLibraryNote: '此上傳會加入佇列，不會儲存至檔案管理員。',
+    directUploadLibraryNote: '上傳的檔案會先儲存到檔案管理員，再加入佇列。',
     dropNotPrintable: '只能列印 .gcode 和 .gcode.3mf 檔案',
     dropToPrint: '拖放以列印',
     cannotPrint: '印表機忙碌',
@@ -835,8 +835,6 @@ export default {
       failedUpdateFavorites: '更新收藏失敗',
       exportDownloaded: '匯出已下載',
       exportFailed: '匯出失敗',
-      savedToFiles: '已將 {{filename}} 儲存至檔案',
-      failedSaveToFiles: '無法將列印檔案儲存至檔案',
     },
     menu: {
       print: '列印',
@@ -876,7 +874,6 @@ export default {
       select: '選擇',
       deselect: '取消選擇',
       delete: '刪除',
-      saveToFiles: '儲存至檔案',
     },
     permission: {
       noReprint: '您沒有重新列印此歸檔的權限',
@@ -974,7 +971,7 @@ export default {
       deleteButton: '刪除',
       deletePurgeStats: '同時從快速統計中刪除此列印（耗材、時間、成本、能耗）',
       deleteQueueItemsWarning: '與此封存連結的 {{count}} 個佇列項目也將被移除。',
-      deleteBlockedByPrinting: '無法刪除 — {{count}} 個工作仍佔用印表機。請先停止進行中的工作並清理其列印板。',
+      deleteBlockedByPrinting: '無法刪除 — {{count}} 個佇列項目正在傳送或列印。請先停止進行中的工作再重試。',
       removeSource3mf: '移除源 3MF',
       removeSource3mfConfirm: '確定要從"{{name}}"中移除源 3MF 檔案嗎？這將刪除原始切片專案檔案。',
       removeButton: '移除',
@@ -1064,12 +1061,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: '等待清理列印板',
-    resolveDispatch: {
-      prompt: "印表機尚未確認此工作。選擇前請檢查印表機：",
-      printing: "正在列印",
-      failed: "尚未開始列印",
-    },
     filamentShort: {
       rowBadge: '所分配料盤的線材不足',
       rowTooltip: '調度程式已標記此項目。點擊播放查看各槽位的不足量，並決定是否仍要列印。',
@@ -1150,10 +1141,6 @@ export default {
     },
     // Status
     status: {
-      queued: '排隊中',
-      finished: '已完成',
-      successful: '成功',
-      unsuccessful: '未成功',
       pending: '等待中',
       scheduled: '已排程',
       waiting: '等待中',
@@ -1193,7 +1180,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: '手動開始',
+      staged: '已暫存',
+      requiresPrevious: '需要前一個成功',
       autoPowerOff: '自動關機',
       gcodeInjection: 'G-code',
     },
@@ -1213,8 +1201,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: '清理列印板',
-      retry: '重試',
       startPrint: '開始列印',
       stopPrint: '停止列印',
       requeue: '重新佇列',
@@ -1854,6 +1840,12 @@ export default {
     saveThumbnails: '儲存縮圖',
     captureFinishPhoto: '拍攝完成照片',
     noPrintersConfigured: '未設定印表機',
+    // Archive settings
+    archiveMode: {
+      always: '始終建立歸檔條目',
+      never: '從不建立歸檔條目',
+      ask: '每次詢問',
+    },
     // Updates
     checkForUpdatesLabel: '檢查更新',
     checkPrinterFirmware: '檢查印表機韌體',
@@ -2356,6 +2348,8 @@ export default {
     energyModePrintDescription: '儀表板顯示列印期間使用的能源總和',
     energyModeTotalDescription: '儀表板顯示智慧插座的累計能源',
     fileManager: '檔案管理器',
+    createArchiveEntry: '列印時建立歸檔條目',
+    createArchiveEntryDescription: '從檔案管理器列印時，可選擇建立歸檔條目',
     lowDiskSpaceWarning: '磁碟空間不足警告',
     lowDiskSpaceDescription: '當可用磁碟空間低於此閾值時顯示警告',
     printerFirmware: '印表機韌體',
@@ -3821,7 +3815,6 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: '盤面 {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '已切片 {{name}}',
-    completedToFilesToast: '已切片 {{name}} 並儲存至檔案',
     failedTitle: '切片失敗',
     failedToast: '切片 {{name}} 失敗：{{detail}}',
     tier: {
@@ -4907,12 +4900,12 @@ export default {
     },
     mode: {
       title: '模式',
-      archive: '檔案',
-      archiveDesc: '將上傳內容儲存到檔案',
+      archive: '歸檔',
+      archiveDesc: '立即歸檔檔案',
       review: '審核',
-      reviewDesc: '儲存到檔案前先審核上傳內容',
+      reviewDesc: '歸檔前審核',
       queue: '佇列',
-      queueDesc: '將上傳內容新增至列印佇列',
+      queueDesc: '歸檔並新增到佇列',
       proxy: '代理',
       proxyDesc: '中繼到真實印表機',
     },
@@ -4938,8 +4931,8 @@ export default {
       readGuide: '啟用前請閱讀設定指南',
     },
     archiveNameSource: {
-      title: '上傳顯示名稱',
-      description: '選擇上傳內容在審核清單中的顯示方式。「中繼資料」使用 3MF 中嵌入的標題；「檔名」使用透過 FTP 接收的檔案名稱。',
+      title: '存檔名稱來源',
+      description: '選擇透過虛擬印表機接收檔案時新存檔的命名方式。"元資料"使用 3MF 中嵌入的切片標題（預設）。"檔名"使用 Bambu Studio 透過 FTP 傳送的檔案名稱。注意：當 3MF 包含標題欄位時，Bambu Studio 會以該欄位覆寫您在"傳送到印表機"對話方塊中輸入的名稱，因此兩種模式通常會產生相同的字串。',
       metadata: '元資料',
       filename: '檔名',
     },
@@ -4954,7 +4947,7 @@ export default {
     howItWorks: {
       title: '工作原理',
       step1: '在同一區域網路中，虛擬印表機會透過發現機制自動出現在您的切片軟體（Bambu Studio / OrcaSlicer）中。從其他網路，透過 IP 位址和存取碼手動新增。',
-      step2: '在檔案、審核和佇列模式下，使用切片軟體中的「傳送」按鈕將 3MF 檔案上傳至 Grove Control。檔案模式會儲存至檔案，審核模式可選擇儲存或捨棄，佇列模式會新增列印工作。「列印成功」表示上傳已完成。',
+      step2: '在歸檔、審核和佇列模式下，使用切片軟體中的"傳送"按鈕將 3MF 檔案上傳到 Grove Control。切片軟體會顯示"列印成功"— 檔案已儲存，未列印。',
       step3: '在代理模式下，虛擬印表機將所有流量中繼到真實印表機 — 列印會立即開始，就像直接連線一樣。',
     },
     status: {
@@ -5236,6 +5229,12 @@ export default {
     autoOffAfterDrying: '乾燥完成後自動關閉',
     autoOffAfterDryingDescription: 'AMS 乾燥完成後關閉',
     delayAfterDryingMinutes: '乾燥後延遲（分鐘）',
+    turnOffDelayMode: '關閉延遲模式',
+    time: '時間',
+    temp: '溫度',
+    delayMinutes: '延遲（分鐘）',
+    tempThreshold: '溫度閾值（°C）',
+    tempThresholdDescription: '當噴嘴冷卻到此溫度以下時關閉',
     edit: '編輯',
     deleteConfirm: '確定要刪除"{{name}}"嗎？此操作無法復原。',
     turnOnConfirm: '確定要開啟"{{name}}"嗎？',
@@ -6351,20 +6350,10 @@ export default {
   },
   archiveAutoPurge: {
     enableLabel: '自動清除舊歸檔',
-    enableDescription: '每天依照所選的歸檔保留政策執行一次清理。',
-    modeLabel: '保留政策',
-    ageMode: '依時間',
-    countMode: '依檔案數量',
+    enableDescription: '每天一次，將閾值內未列印的歸檔從清單中隱藏，並從磁碟中刪除其檔案。重新列印會重設計時器。',
     ageLabel: '自動刪除最近未列印的歸檔：',
     ageDescription: '最少 7 天，最多 10 年。基於最近一次列印完成 — 重新列印會重新整理年齡。刪除 3MF、縮圖、縮時攝影、原始 3MF、F3D 與照片。',
     days: '天',
-    maxCountLabel: '最多保留的歸檔檔案數',
-    countDescription: '不論歸檔年齡，保留最近使用的歸檔。重新列印會更新保留順序。不會刪除正在列印的歸檔。',
-    countDraftHint: '選擇「套用」後變更才會生效。',
-    countValidationError: '請輸入 1 到 100,000 之間的整數。',
-    ageValidationError: '請輸入 7 到 3,650 之間的整數。',
-    countPreviewSummary: '下次執行時會刪除 {{count}} 個歸檔。',
-    countPreviewNone: '目前歸檔數量未超過此上限。',
     purgeStatsLabel: '同時從統計中移除',
     purgeStatsDescription: '啟用後，每日清理任務還會將每個被清除的歸檔從 Quick Stats（耗材、時間、成本、能耗）中移除。預設關閉 — Quick Stats 會保留貢獻，僅檔案從磁碟刪除。',
     runNow: '立即清除歸檔',

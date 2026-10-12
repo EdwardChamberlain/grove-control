@@ -2,7 +2,7 @@
  * Tests for the SmartPlugCard component.
  *
  * These tests focus on critical regression scenarios:
- * - Plug-level automation and power control
+ * - Toggle persistence for auto_on/auto_off settings
  * - Power control functionality
  * - Status display
  */
@@ -45,6 +45,9 @@ const createMockPlug = (overrides: Partial<SmartPlug> = {}): SmartPlug => ({
   auto_on: true,
   auto_off: true,
   auto_off_persistent: false,
+  off_delay_mode: 'time',
+  off_delay_minutes: 5,
+  off_temp_threshold: 70,
   username: null,
   password: null,
   power_alert_enabled: false,
@@ -96,7 +99,7 @@ describe('SmartPlugCard', () => {
   });
 
   describe('automation settings', () => {
-    it('shows Auto On but leaves print Auto Off to the job', async () => {
+    it('shows automation settings section when expanded', async () => {
       const user = userEvent.setup();
       const plug = createMockPlug();
       render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
@@ -105,40 +108,67 @@ describe('SmartPlugCard', () => {
       const settingsToggle = screen.getByText('Automation Settings');
       await user.click(settingsToggle);
 
-      // Print shutdown is selected per queue job, not on the printer plug.
+      // Should show Auto On and Auto Off labels
       await waitFor(() => {
         expect(screen.getByText('Auto On')).toBeInTheDocument();
-        expect(screen.queryByText('Auto Off')).not.toBeInTheDocument();
+        expect(screen.getByText('Auto Off')).toBeInTheDocument();
       });
     });
 
-    it('does not expose print auto-off delay or temperature settings', async () => {
+    it('displays auto_off toggle in correct state when enabled', async () => {
       const user = userEvent.setup();
-      const plug = createMockPlug();
-      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
-
-      await user.click(screen.getByText('Automation Settings'));
-
-      await waitFor(() => {
-        expect(screen.queryByText('Turn Off Delay Mode')).not.toBeInTheDocument();
-        expect(screen.queryByText('Temperature threshold (°C)')).not.toBeInTheDocument();
-      });
-    });
-
-    it('shows Auto Off only for a Home Assistant script plug', async () => {
-      const user = userEvent.setup();
-      const plug = createMockPlug({
-        plug_type: 'homeassistant',
-        ip_address: null,
-        ha_entity_id: 'script.turn_off_printer',
-      });
+      const plug = createMockPlug({ auto_off: true });
       render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
 
       // Expand settings
       await user.click(screen.getByText('Automation Settings'));
 
       await waitFor(() => {
-        expect(screen.getByText('Auto Off')).toBeInTheDocument();
+        // The toggle should reflect auto_off = true
+        const autoOffText = screen.getByText('Auto Off');
+        expect(autoOffText).toBeInTheDocument();
+      });
+    });
+
+    it('displays auto_off toggle in correct state when disabled', async () => {
+      const user = userEvent.setup();
+      const plug = createMockPlug({ auto_off: false });
+      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
+
+      // Expand settings
+      await user.click(screen.getByText('Automation Settings'));
+
+      await waitFor(() => {
+        const autoOffText = screen.getByText('Auto Off');
+        expect(autoOffText).toBeInTheDocument();
+      });
+    });
+
+    it('shows delay mode options when auto_off is enabled', async () => {
+      const user = userEvent.setup();
+      const plug = createMockPlug({ auto_off: true, off_delay_mode: 'time' });
+      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
+
+      // Expand settings
+      await user.click(screen.getByText('Automation Settings'));
+
+      await waitFor(() => {
+        // Should show delay mode buttons
+        expect(screen.getByText('Time')).toBeInTheDocument();
+        expect(screen.getByText('Temp')).toBeInTheDocument();
+      });
+    });
+
+    it('does not show delay mode options when auto_off is disabled', async () => {
+      const user = userEvent.setup();
+      const plug = createMockPlug({ auto_off: false });
+      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
+
+      // Expand settings
+      await user.click(screen.getByText('Automation Settings'));
+
+      await waitFor(() => {
+        // Delay mode options should not be visible
         expect(screen.queryByText('Turn Off Delay Mode')).not.toBeInTheDocument();
       });
     });
@@ -210,6 +240,51 @@ describe('SmartPlugCard', () => {
 
       // onEdit should have been called (may not be called if edit button not found)
       // This test verifies the interaction pattern
+    });
+  });
+
+  describe('persistent auto-off', () => {
+    it('shows Keep Enabled toggle when auto_off is enabled', async () => {
+      const user = userEvent.setup();
+      const plug = createMockPlug({ auto_off: true, auto_off_persistent: false });
+      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
+
+      await user.click(screen.getByText('Automation Settings'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Keep Enabled')).toBeInTheDocument();
+        expect(screen.getByText('Stay enabled between prints instead of one-shot')).toBeInTheDocument();
+      });
+    });
+
+    it('does not show Keep Enabled toggle when auto_off is disabled', async () => {
+      const user = userEvent.setup();
+      const plug = createMockPlug({ auto_off: false });
+      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
+
+      await user.click(screen.getByText('Automation Settings'));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Keep Enabled')).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows Keep Enabled toggle for HA plugs with auto_off enabled', async () => {
+      const user = userEvent.setup();
+      const plug = createMockPlug({
+        plug_type: 'homeassistant',
+        ip_address: null,
+        ha_entity_id: 'switch.bentobox_filter',
+        auto_off: true,
+        auto_off_persistent: true,
+      });
+      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
+
+      await user.click(screen.getByText('Automation Settings'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Keep Enabled')).toBeInTheDocument();
+      });
     });
   });
 

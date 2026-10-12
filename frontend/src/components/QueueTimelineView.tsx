@@ -25,7 +25,7 @@ interface ScheduleEvent {
   estimatedStart: Date;
   estimatedEnd: Date;
   progress?: number;
-  type: 'preheating' | 'dispatching' | 'printing' | 'paused' | 'queued';
+  type: 'preheating' | 'dispatching' | 'printing' | 'queued';
 }
 
 interface QueueTimelineViewProps {
@@ -104,7 +104,7 @@ export function QueueTimelineView({
     };
 
     for (const item of queueItems) {
-      if (item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing' || item.status === 'paused') {
+      if (item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing') {
         const isDispatching = item.status === 'preheating' || item.status === 'dispatching';
         const status = item.printer_id != null ? printerStatuses[item.printer_id] : undefined;
         const start = parseUTCDate(isDispatching ? item.dispatched_at : item.started_at) || new Date();
@@ -128,7 +128,7 @@ export function QueueTimelineView({
         const lk = laneKeyOf(item);
         lanesWithActive.add(lk);
         chainEndByLane.set(lk, Math.max(chainEndByLane.get(lk) ?? nowMs, endTime.getTime()));
-      } else if (item.status === 'queued') {
+      } else if (item.status === 'pending') {
         // Skip un-committed pending shapes — staged items and waiting items
         // won't auto-dispatch, so a bar would lie.
         if (item.manual_start) continue;
@@ -399,15 +399,13 @@ export function QueueTimelineView({
                         : ev.item.library_file_thumbnail
                           ? api.getLibraryFileThumbnailUrl(ev.item.library_file_id!)
                           : null;
-                      const isPrinting = ev.type === 'printing' || ev.type === 'paused';
-                      const isPaused = ev.type === 'paused';
+                      const isPrinting = ev.type === 'printing';
                       const isDispatching = ev.type === 'preheating' || ev.type === 'dispatching';
                       const tooltipParts = [
                         displayName,
                         `${formatTooltipTime(ev.estimatedStart)} → ${formatTooltipTime(ev.estimatedEnd)}`,
                         ev.item.print_time_seconds ? formatDuration(ev.item.print_time_seconds) : null,
                         isDispatching ? t(ev.type === 'preheating' ? 'heatSoak.status' : 'queue.status.dispatching') : null,
-                        isPaused ? t('queue.status.paused') : null,
                         isPrinting && ev.progress != null ? `${Math.round(ev.progress)}%` : null,
                       ].filter(Boolean).join(' · ');
                       return (
@@ -418,9 +416,7 @@ export function QueueTimelineView({
                           onClick={() => onItemClick(ev.item)}
                           title={tooltipParts}
                           className={`absolute rounded-md transition-all hover:brightness-110 hover:z-10 overflow-hidden flex items-center gap-1.5 px-1.5 text-left ${
-                            isPaused
-                              ? 'bg-yellow-500/30 border border-yellow-400/60'
-                              : isPrinting
+                            isPrinting
                               ? 'bg-blue-500/30 border border-blue-400/60'
                               : isDispatching
                                 ? 'bg-purple-500/30 border border-purple-400/60'
@@ -449,7 +445,6 @@ export function QueueTimelineView({
                               {isDispatching
                                 ? `${ev.item.print_time_seconds ? ' · ' : ''}${t(ev.type === 'preheating' ? 'heatSoak.status' : 'queue.status.dispatching')}`
                                 : ''}
-                              {isPaused ? ` · ${t('queue.status.paused')}` : ''}
                               {isPrinting && ev.progress != null ? ` · ${Math.round(ev.progress)}%` : ''}
                             </div>
                           </div>

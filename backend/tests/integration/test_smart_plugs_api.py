@@ -176,6 +176,21 @@ class TestSmartPlugsAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_update_off_delay_mode(self, async_client: AsyncClient, smart_plug_factory, db_session):
+        """Verify off_delay_mode can be changed."""
+        plug = await smart_plug_factory(off_delay_mode="time")
+
+        response = await async_client.patch(
+            f"/api/v1/smart-plugs/{plug.id}", json={"off_delay_mode": "temperature", "off_temp_threshold": 50}
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["off_delay_mode"] == "temperature"
+        assert result["off_temp_threshold"] == 50
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_update_schedule_settings(self, async_client: AsyncClient, smart_plug_factory, db_session):
         """Verify schedule settings can be updated."""
         plug = await smart_plug_factory(schedule_enabled=False)

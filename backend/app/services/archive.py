@@ -8,10 +8,9 @@ import shutil
 import zipfile
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from uuid import uuid4
 
 from defusedxml import ElementTree as ET
-from sqlalchemy import and_, or_, select, text, update
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -22,73 +21,6 @@ from backend.app.models.printer import Printer
 from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 
 logger = logging.getLogger(__name__)
-
-
-class ArchiveDeletionConflict(RuntimeError):
-    """An Archive still backs a job that holds a printer."""
-
-
-def _related_queue_items_filter(archive_id: int):
-    """Include the durable owner even if its Queue projection failed to link."""
-    from backend.app.models.print_queue import PrintQueueItem
-
-    owner_id = select(PrintArchive.dispatched_queue_item_id).where(PrintArchive.id == archive_id).scalar_subquery()
-    return or_(PrintQueueItem.archive_id == archive_id, PrintQueueItem.id == owner_id)
-
-
-async def _guard_archive_deletion(db: AsyncSession, archive_id: int) -> bool:
-    from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
-
-    queue = PrintQueueItem.__table__
-    archive = PrintArchive.__table__
-    # Match the outcome writer's lock order: job first, then Archive. The
-    # Archive PK lock also fences new FK references on PostgreSQL. Re-lock
-    # references admitted while waiting for that lock before checking holds.
-    with db.no_autoflush:
-        related = _related_queue_items_filter(archive_id)
-        lock_jobs = queue.update().where(related).values(id=queue.c.id)
-        await db.execute(lock_jobs)
-        locked = await db.execute(archive.update().where(archive.c.id == archive_id).values(id=archive.c.id))
-        if locked.rowcount != 1:
-            return False
-        await db.execute(lock_jobs)
-        holding = await db.scalar(select(queue.c.id).where(related, queue.c.status.in_(HOLDING_STATUSES)).limit(1))
-    if holding is not None:
-        raise ArchiveDeletionConflict(
-            "Cannot delete archive while a related job is dispatching, printing, or awaiting plate clear. "
-            "Stop active jobs and clear their plates first."
-        )
-    return True
-
-
-async def detach_dispatch_archive_links(db: AsyncSession, queue_item_ids: list[int]) -> None:
-    """Clear Archive links before deleting queue rows.
-
-    PostgreSQL enforces the foreign key's ON DELETE action. SQLite deployments
-    do not enable foreign-key enforcement on every legacy connection, so
-    application deletion paths also perform the same update explicitly.
-    """
-    if not queue_item_ids:
-        return
-    await db.execute(
-        update(PrintArchive)
-        .where(PrintArchive.dispatched_queue_item_id.in_(queue_item_ids))
-        .values(dispatched_queue_item_id=None)
-    )
-
-
-def _stored_archive_path(path: Path) -> str:
-    """Store archive paths relative to ``base_dir`` when possible.
-
-    ``archive_dir`` is configurable independently from ``base_dir``. A
-    deployment may keep Archives on a separate mounted volume, so preserve
-    that valid location as an absolute path when it is outside ``base_dir``.
-    Readers already support legacy absolute archive paths.
-    """
-    try:
-        return str(path.relative_to(Path(settings.base_dir)))
-    except ValueError:
-        return str(path)
 
 
 def _copy_and_fsync(src: Path, dst: Path, chunk_size: int = 1024 * 1024) -> None:
@@ -1006,38 +938,59 @@ async def _null_print_log_thumbnail_paths(db: AsyncSession, archive_id: int) -> 
 
 
 async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
-    """Delete references after the service has locked and ruled out holds.
+    """Delete every queue item pointing at *archive_id* (#1734).
 
-    Both deletion modes use this explicitly, including legacy SQLite
-    connections that do not enforce the Archive FK's cascade.
+    Called from ``soft_delete_archive``. Hard-delete is covered by the
+    ``ON DELETE CASCADE`` on ``print_queue.archive_id`` — same end state
+    via the FK. Pre-#1734 this helper merely flipped pending rows to
+    ``status='cancelled'`` while leaving every other status alone and
+    leaving the rows in the DB, which surprised users who expected the
+    queue lines to disappear when their backing archive went away. Worse,
+    a Send-All archive backed N queue items (one per plate, #1733) — soft-
+    deleting that archive left N "cancelled" rows behind, none of which
+    could ever dispatch.
+
+    Now we delete unconditionally regardless of status. ``printing`` rows
+    are blocked one layer up at the route (``delete_archive`` returns 409
+    when a related row is mid-print) so we never delete an actively-
+    running queue row out from under the dispatcher. Completed / failed
+    / cancelled rows go too — they're queue history, not print history.
+    PrintLogEntry rows are the authoritative print history and are
+    untouched (FK ``ON DELETE SET NULL``).
+
+    Returns the number of rows removed so the caller can report it.
     """
     from sqlalchemy import delete as sa_delete
 
     from backend.app.models.print_queue import PrintQueueItem
 
-    queue_item_ids = list(
-        (await db.scalars(select(PrintQueueItem.id).where(_related_queue_items_filter(archive_id)))).all()
-    )
-    await detach_dispatch_archive_links(db, queue_item_ids)
-    result = await db.execute(sa_delete(PrintQueueItem).where(PrintQueueItem.id.in_(queue_item_ids)))
+    result = await db.execute(sa_delete(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id))
     return result.rowcount or 0
 
 
 async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple[int, int]:
-    """Return ``(total, holding)`` jobs for deletion pre-flight."""
+    """Return ``(total, active)`` queue items linked to *archive_id*.
+
+    Used by the archive GET response so the frontend delete-confirm modal
+    can surface how much the deletion will wipe out, and by the delete route
+    so it can 409 while a related row is dispatching or printing (#1734).
+    """
     from sqlalchemy import func as sa_func, select as sa_select
 
-    from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
+    from backend.app.models.print_queue import PrintQueueItem
 
-    related = _related_queue_items_filter(archive_id)
-    total = (await db.execute(sa_select(sa_func.count()).select_from(PrintQueueItem).where(related))).scalar_one()
+    total = (
+        await db.execute(
+            sa_select(sa_func.count()).select_from(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id)
+        )
+    ).scalar_one()
     active = (
         await db.execute(
             sa_select(sa_func.count())
             .select_from(PrintQueueItem)
             .where(
-                related,
-                PrintQueueItem.status.in_(HOLDING_STATUSES),
+                PrintQueueItem.archive_id == archive_id,
+                PrintQueueItem.status.in_(["preheating", "dispatching", "printing"]),
             )
         )
     ).scalar_one()
@@ -1199,11 +1152,6 @@ class ArchiveService:
         project_id: int | None = None,
         subtask_id: str | None = None,
         prefer_filename_for_name: bool = False,
-        commit: bool = True,
-        dispatched_queue_item_id: int | None = None,
-        flush: bool = True,
-        unique_dir: bool = False,
-        created_dirs: list[Path] | None = None,
     ) -> PrintArchive | None:
         """Archive a 3MF file with metadata.
 
@@ -1219,21 +1167,11 @@ class ArchiveService:
             subtask_id: MQTT-provided task identifier (optional). Used to match an
                 existing archive across a backend restart mid-print so the
                 original row can be resumed instead of cancelled (#972).
-            dispatched_queue_item_id: Queue item that created this dispatch
-                attempt, stored as a real unique foreign key for exact outcome
-                updates.
             prefer_filename_for_name: When True, use the uploaded filename stem as the
                 archive's display name even if the 3MF embeds a `print_name` in its
                 metadata. Used by virtual-printer flows so users who rename a job in
                 BambuStudio's "send to printer" dialog see that name instead of the
                 creator-baked title (#1152).
-            commit: When False, flush the row but leave the transaction to the caller.
-                Dispatch uses this to save the Archive event and its PrintQueue link
-                atomically before publishing the print command.
-            flush: When False with commit=False, prepare without writing the row.
-                The queue transition flushes it only after acquiring the hold.
-            unique_dir: Give this copy a private directory, even for matching names.
-            created_dirs: Record directories for caller-owned cleanup.
         """
         # Verify printer exists if specified
         if printer_id is not None:
@@ -1246,16 +1184,12 @@ class ArchiveService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         display_stem = resolve_display_stem(original_filename if original_filename else source_file.name)
         archive_name = f"{timestamp}_{display_stem}"
-        if unique_dir:
-            archive_name += f"_{uuid4().hex}"
         # Use "unassigned" folder for archives without a printer
         printer_folder = str(printer_id) if printer_id is not None else "unassigned"
         archive_dir = (
             settings.archive_dir / printer_folder / archive_name
         )  # SEC-PATH-OK: printer_folder = str(int|None) → digits or "unassigned"; archive_name = f"{timestamp}_{display_stem}" where resolve_display_stem strips path components via Path(filename).name
         archive_dir.mkdir(parents=True, exist_ok=True)
-        if created_dirs is not None:
-            created_dirs.append(archive_dir)
 
         # Copy 3MF file with an explicit fsync'd loop (avoids a sendfile
         # short-read quirk that silently truncated 3MF archives on some
@@ -1318,7 +1252,7 @@ class ArchiveService:
         if "_thumbnail_data" in metadata:
             thumb_file = archive_dir / f"thumbnail{metadata['_thumbnail_ext']}"
             thumb_file.write_bytes(metadata["_thumbnail_data"])
-            thumbnail_path = _stored_archive_path(thumb_file)
+            thumbnail_path = str(thumb_file.relative_to(settings.base_dir))
             del metadata["_thumbnail_data"]
             del metadata["_thumbnail_ext"]
 
@@ -1363,7 +1297,7 @@ class ArchiveService:
         archive = PrintArchive(
             printer_id=printer_id,
             filename=original_filename or source_file.name,
-            file_path=_stored_archive_path(dest_file),
+            file_path=str(dest_file.relative_to(settings.base_dir)),
             file_size=dest_file.stat().st_size,
             content_hash=content_hash,
             thumbnail_path=thumbnail_path,
@@ -1390,15 +1324,11 @@ class ArchiveService:
             created_by_id=created_by_id,
             project_id=project_id,
             subtask_id=subtask_id,
-            dispatched_queue_item_id=dispatched_queue_item_id,
         )
 
         self.db.add(archive)
-        if commit:
-            await self.db.commit()
-            await self.db.refresh(archive)
-        elif flush:
-            await self.db.flush()
+        await self.db.commit()
+        await self.db.refresh(archive)
 
         return archive
 
@@ -1412,6 +1342,27 @@ class ArchiveService:
             .where(PrintArchive.id == archive_id)
         )
         return result.scalar_one_or_none()
+
+    async def update_archive_status(
+        self,
+        archive_id: int,
+        status: str,
+        completed_at: datetime | None = None,
+        failure_reason: str | None = None,
+    ) -> bool:
+        """Update the status of an archive."""
+        archive = await self.get_archive(archive_id)
+        if not archive:
+            return False
+
+        archive.status = status
+        if completed_at:
+            archive.completed_at = completed_at
+        if failure_reason:
+            archive.failure_reason = failure_reason
+
+        await self.db.commit()
+        return True
 
     async def list_archives(
         self,
@@ -1472,12 +1423,9 @@ class ArchiveService:
         checkbox in the delete dialog — that path calls ``delete_archive``
         instead and removes the row entirely.
         """
-        if not await _guard_archive_deletion(self.db, archive_id):
-            return False
         archive = await self.get_archive(archive_id)
         if not archive:
             return False
-        await self.db.refresh(archive)
         if archive.deleted_at is not None:
             # Already soft-deleted; nothing to do. The files were purged on
             # the first soft-delete pass so there is nothing left on disk.
@@ -1530,22 +1478,52 @@ class ArchiveService:
             return None
         return archive_dir
 
-    async def delete_archive(self, archive_id: int, *, purge_stats: bool = False) -> bool:
+    async def delete_archive(self, archive_id: int) -> bool:
         """Delete an archive and its files."""
-        if not await _guard_archive_deletion(self.db, archive_id):
-            return False
         archive = await self.get_archive(archive_id)
         if not archive:
             return False
-        await self.db.refresh(archive)
-        dir_to_delete = self._resolve_archive_dir_for_delete(archive)
 
-        if purge_stats:
-            from sqlalchemy import delete
+        # Resolve the directory to delete BEFORE committing the DB change
+        dir_to_delete: Path | None = None
 
-            from backend.app.models.print_log import PrintLogEntry
+        if archive.file_path and archive.file_path.strip():
+            file_path = settings.base_dir / archive.file_path
+            if file_path.exists():
+                archive_dir = file_path.parent
 
-            await self.db.execute(delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
+                # Safety check 1: archive_dir must be inside archive_dir
+                try:
+                    archive_dir.resolve().relative_to(settings.archive_dir.resolve())
+                except ValueError:
+                    logger.error(
+                        f"SECURITY: Refusing to delete archive {archive_id} - "
+                        f"path {archive_dir} is outside archive directory {settings.archive_dir}"
+                    )
+                    await self.db.delete(archive)
+                    await self.db.commit()
+                    return True
+
+                # Safety check 2: archive_dir must be at least 1 level deep inside archive_dir
+                try:
+                    relative_path = archive_dir.resolve().relative_to(settings.archive_dir.resolve())
+                    if len(relative_path.parts) < 1:
+                        logger.error(
+                            f"SECURITY: Refusing to delete archive {archive_id} - "
+                            f"path {archive_dir} is not deep enough inside archive directory"
+                        )
+                        await self.db.delete(archive)
+                        await self.db.commit()
+                        return True
+                except ValueError:
+                    pass  # Already handled above
+
+                dir_to_delete = archive_dir
+        else:
+            logger.error(
+                f"SECURITY: Refusing to delete files for archive {archive_id} - "
+                f"file_path is empty or invalid: '{archive.file_path}'"
+            )
 
         # NULL stale thumbnail_path on linked PrintLogEntries before the FK
         # SET-NULL cascade fires. The on-disk file is about to be removed by
@@ -1553,7 +1531,6 @@ class ArchiveService:
         # gets SET NULL by the FK) would otherwise point at a missing file
         # and produce 404 storms in the print-log view (#1348-followup).
         await _null_print_log_thumbnail_paths(self.db, archive_id)
-        await _delete_related_queue_items(self.db, archive_id)
 
         # Delete database record FIRST — if the commit fails (e.g. database locked
         # during concurrent bulk deletes), the files stay on disk and nothing is lost.

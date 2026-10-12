@@ -21,30 +21,48 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.core.config import settings as app_settings
-from backend.app.services.lifecycle.intake import print_memory
+from backend.app.main import (
+    _active_prints,
+    _expected_print_creators,
+    _expected_print_registered_at,
+    _expected_prints,
+    _print_ams_mappings,
+    _timelapse_baselines,
+    register_expected_print,
+)
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    print_memory.timelapse_baselines.clear()
+    _expected_prints.clear()
+    _expected_print_registered_at.clear()
+    _expected_print_creators.clear()
+    _print_ams_mappings.clear()
+    _active_prints.clear()
+    _timelapse_baselines.clear()
     yield
-    print_memory.timelapse_baselines.clear()
+    _expected_prints.clear()
+    _expected_print_registered_at.clear()
+    _expected_print_creators.clear()
+    _print_ams_mappings.clear()
+    _active_prints.clear()
+    _timelapse_baselines.clear()
 
 
 def _patches():
     return (
-        patch("backend.app.services.print_effects.async_session"),
-        patch("backend.app.services.print_effects.notification_service"),
-        patch("backend.app.services.print_effects.smart_plug_manager"),
-        patch("backend.app.services.print_effects.ws_manager"),
-        patch("backend.app.services.print_effects.printer_manager"),
-        patch("backend.app.services.print_effects.mqtt_relay"),
-        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._load_objects_from_archive"),
-        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.main.async_session"),
+        patch("backend.app.main.notification_service"),
+        patch("backend.app.main.smart_plug_manager"),
+        patch("backend.app.main.ws_manager"),
+        patch("backend.app.main.printer_manager"),
+        patch("backend.app.main.mqtt_relay"),
+        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.main._load_objects_from_archive"),
+        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
         patch(
-            "backend.app.services.print_effects._list_timelapse_videos",
+            "backend.app.main._list_timelapse_videos",
             new=AsyncMock(return_value=([], "/timelapse")),
         ),
     )
@@ -107,6 +125,7 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
     given ``subtask_id`` (the printer-echoed id at PRINT START — set by the
     queue dispatcher's fresh ``submission_id``)."""
     mock_printer = _make_printer()
+    register_expected_print(1, mock_archive.filename, archive_id=mock_archive.id, ams_mapping=None)
     mock_session = _build_mocks(mock_printer, mock_archive)
 
     (
@@ -144,9 +163,10 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
         mock_ws.send_archive_updated = AsyncMock()
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
-        mock_pm.get_client = MagicMock(return_value=MagicMock())
+        # last_dispatch_subtask_id fallback shouldn't fire — MQTT carried one.
+        mock_pm.get_client = MagicMock(return_value=MagicMock(last_dispatch_subtask_id=None))
 
-        from backend.app.services.print_effects import _archive_print_start as on_print_start
+        from backend.app.main import on_print_start
 
         await on_print_start(
             1,
@@ -155,8 +175,6 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
                 "subtask_name": mock_archive.print_name,
                 "raw_data": {"subtask_id": mqtt_subtask_id} if mqtt_subtask_id is not None else {},
             },
-            queue_archive_id=mock_archive.id,
-            memory=print_memory,
         )
 
 

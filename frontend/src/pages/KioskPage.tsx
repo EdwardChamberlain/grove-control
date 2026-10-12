@@ -164,8 +164,8 @@ function KioskQueueCard({
   timeFormat: TimeFormat;
   t: Translate;
 }) {
-  const printing = item.status === 'printing' || item.status === 'paused' || item.status === 'preheating';
-  const active = (item.status === 'printing' || item.status === 'paused') && isActivePrint(status);
+  const printing = item.status === 'printing' || item.status === 'preheating';
+  const active = item.status === 'printing' && isActivePrint(status);
   const progress = active ? Math.max(0, Math.min(100, status?.progress ?? 0)) : 0;
   const title = item.archive_name || item.library_file_name || `${t('common.print')} #${item.id}`;
   const thumbnail = item.archive_thumbnail && item.archive_id
@@ -188,7 +188,7 @@ function KioskQueueCard({
             {item.print_time_seconds && <span>{formatDuration(item.print_time_seconds)}</span>}
           </div>
         </div>
-        <KioskQueueStatusPill item={item} t={t} />
+        <KioskQueueStatusPill item={item} status={status} t={t} />
       </div>
 
       {printing && (
@@ -216,12 +216,14 @@ function KioskQueueCard({
 /** Compact kiosk equivalent of the main Queue page's status badge. */
 function KioskQueueStatusPill({
   item,
+  status,
   t,
 }: {
   item: KioskQueueItem;
+  status: PrinterStatus | undefined;
   t: Translate;
 }) {
-  const scheduled = item.status === 'queued' && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
+  const scheduled = item.status === 'pending' && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
   const className = 'flex max-w-[48%] shrink-0 items-center gap-1 self-center truncate rounded-full border px-2 py-1 text-right text-xs';
 
   if (scheduled) {
@@ -233,7 +235,7 @@ function KioskQueueStatusPill({
     );
   }
 
-  if (item.status === 'queued' && item.waiting_reason) {
+  if (item.status === 'pending' && item.waiting_reason) {
     return (
       <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-purple-400/30 bg-purple-400/10 text-purple-400`} title={item.waiting_reason}>
         <AlertCircle className="h-3 w-3 shrink-0" />
@@ -242,7 +244,7 @@ function KioskQueueStatusPill({
     );
   }
 
-  if (item.status === 'printing' || item.status === 'paused' || item.status === 'preheating') {
+  if (item.status === 'printing' || item.status === 'preheating') {
     if (item.status === 'preheating') {
       return (
         <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-amber-400/20 bg-amber-400/10 text-amber-300`}>
@@ -251,7 +253,7 @@ function KioskQueueStatusPill({
         </p>
       );
     }
-    const paused = item.status === 'paused';
+    const paused = status?.state === 'PAUSE';
     return (
       <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} ${paused ? 'border-yellow-400/20 bg-yellow-400/10 text-yellow-400' : 'border-blue-400/20 bg-blue-400/10 text-blue-400'}`}>
         {paused ? <Pause className="h-3 w-3 shrink-0" /> : <Play className="h-3 w-3 shrink-0" />}
@@ -272,7 +274,7 @@ function KioskQueueStatusPill({
   return (
     <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-status-warning/20 bg-status-warning/10 text-status-warning`}>
       <Clock className="h-3 w-3 shrink-0" />
-      <span className="truncate">{t('queue.status.queued')}</span>
+      <span className="truncate">{t('queue.status.pending')}</span>
     </p>
   );
 }
@@ -363,10 +365,10 @@ export function KioskPage() {
     }),
   });
   const printingItems = useMemo(
-    () => queue.filter((item) => ['preheating', 'dispatching', 'printing', 'paused'].includes(item.status)),
+    () => queue.filter((item) => item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing'),
     [queue],
   );
-  const pendingItems = useMemo(() => queue.filter((item) => item.status === 'queued').sort((a, b) => a.position - b.position), [queue]);
+  const pendingItems = useMemo(() => queue.filter((item) => item.status === 'pending').sort((a, b) => a.position - b.position), [queue]);
   const printingItemsByPrinter = useMemo(() => new Map(printingItems.filter((item) => item.printer_id != null).map((item) => [item.printer_id!, item])), [printingItems]);
 
   const owners = useMemo(() => new Map(printers.map((printer, index) => {
@@ -398,7 +400,7 @@ export function KioskPage() {
       printer_name: printer.name,
       created_by_username: owners.get(printer.id) ?? null,
       print_time_seconds: null,
-      status: status?.preheating ? 'preheating' : status?.state === 'PAUSE' ? 'paused' : 'printing',
+      status: status?.preheating ? 'preheating' : 'printing',
       scheduled_time: null,
       waiting_reason: null,
     }];

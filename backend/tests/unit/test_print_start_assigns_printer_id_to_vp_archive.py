@@ -16,14 +16,32 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.services.lifecycle.intake import print_memory
+from backend.app.main import (
+    _active_prints,
+    _expected_print_creators,
+    _expected_print_registered_at,
+    _expected_prints,
+    _print_ams_mappings,
+    _timelapse_baselines,
+    register_expected_print,
+)
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    print_memory.timelapse_baselines.clear()
+    _expected_prints.clear()
+    _expected_print_registered_at.clear()
+    _expected_print_creators.clear()
+    _print_ams_mappings.clear()
+    _active_prints.clear()
+    _timelapse_baselines.clear()
     yield
-    print_memory.timelapse_baselines.clear()
+    _expected_prints.clear()
+    _expected_print_registered_at.clear()
+    _expected_print_creators.clear()
+    _print_ams_mappings.clear()
+    _active_prints.clear()
+    _timelapse_baselines.clear()
 
 
 @pytest.mark.asyncio
@@ -41,7 +59,6 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
 
     # VP-queue archive: printer_id is None — this is the bug surface.
     mock_archive = MagicMock()
-    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 42
     mock_archive.filename = "bambu_lab_a1_tool_plate_3.gcode.3mf"
     mock_archive.subtask_id = None
@@ -52,6 +69,8 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
     mock_archive.status = "archived"
     mock_archive.file_path = "/tmp/fake.3mf"  # nosec B108 — mock path; nothing ever writes to it
     mock_archive.energy_start_kwh = None
+
+    register_expected_print(1, "bambu_lab_a1_tool_plate_3.gcode.3mf", archive_id=42, ams_mapping=None)
 
     def execute_router(stmt, *args, **kwargs):
         sql = str(stmt).lower()
@@ -77,16 +96,16 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
     mock_session.commit = AsyncMock()
 
     with (
-        patch("backend.app.services.print_effects.async_session") as mock_session_maker,
-        patch("backend.app.services.print_effects.notification_service") as mock_notif,
-        patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
-        patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-        patch("backend.app.services.print_effects.printer_manager") as mock_pm,
-        patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
-        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._load_objects_from_archive"),
-        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.main.async_session") as mock_session_maker,
+        patch("backend.app.main.notification_service") as mock_notif,
+        patch("backend.app.main.smart_plug_manager") as mock_plug,
+        patch("backend.app.main.ws_manager") as mock_ws,
+        patch("backend.app.main.printer_manager") as mock_pm,
+        patch("backend.app.main.mqtt_relay") as mock_relay,
+        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.main._load_objects_from_archive"),
+        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
     ):
         mock_session_maker.return_value = mock_session
         mock_notif.on_print_start = AsyncMock()
@@ -96,7 +115,7 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.services.print_effects import _archive_print_start as on_print_start
+        from backend.app.main import on_print_start
 
         await on_print_start(
             1,
@@ -104,8 +123,6 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
                 "filename": "bambu_lab_a1_tool_plate_3.gcode.3mf",
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },
-            queue_archive_id=mock_archive.id,
-            memory=print_memory,
         )
 
         assert mock_archive.printer_id == 1, (
@@ -129,7 +146,6 @@ async def test_expected_archive_path_preserves_existing_printer_id():
     mock_printer.name = "TestP1S"
 
     mock_archive = MagicMock()
-    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 99
     mock_archive.filename = "MyModel.3mf"
     mock_archive.subtask_id = None
@@ -140,6 +156,8 @@ async def test_expected_archive_path_preserves_existing_printer_id():
     mock_archive.status = "archived"
     mock_archive.file_path = "/tmp/fake.3mf"  # nosec B108 — mock path; nothing ever writes to it
     mock_archive.energy_start_kwh = None
+
+    register_expected_print(7, "MyModel.3mf", archive_id=99, ams_mapping=None)
 
     def execute_router(stmt, *args, **kwargs):
         sql = str(stmt).lower()
@@ -165,16 +183,16 @@ async def test_expected_archive_path_preserves_existing_printer_id():
     mock_session.commit = AsyncMock()
 
     with (
-        patch("backend.app.services.print_effects.async_session") as mock_session_maker,
-        patch("backend.app.services.print_effects.notification_service") as mock_notif,
-        patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
-        patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-        patch("backend.app.services.print_effects.printer_manager") as mock_pm,
-        patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
-        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._load_objects_from_archive"),
-        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.main.async_session") as mock_session_maker,
+        patch("backend.app.main.notification_service") as mock_notif,
+        patch("backend.app.main.smart_plug_manager") as mock_plug,
+        patch("backend.app.main.ws_manager") as mock_ws,
+        patch("backend.app.main.printer_manager") as mock_pm,
+        patch("backend.app.main.mqtt_relay") as mock_relay,
+        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.main._load_objects_from_archive"),
+        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
     ):
         mock_session_maker.return_value = mock_session
         mock_notif.on_print_start = AsyncMock()
@@ -184,14 +202,9 @@ async def test_expected_archive_path_preserves_existing_printer_id():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.services.print_effects import _archive_print_start as on_print_start
+        from backend.app.main import on_print_start
 
-        await on_print_start(
-            7,
-            {"filename": "MyModel.3mf", "subtask_name": "MyModel"},
-            queue_archive_id=mock_archive.id,
-            memory=print_memory,
-        )
+        await on_print_start(7, {"filename": "MyModel.3mf", "subtask_name": "MyModel"})
 
         assert mock_archive.printer_id == 7
         assert mock_archive.status == "printing"
@@ -206,7 +219,7 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     the new file ends up in the baseline set and no diff ever matches, so
     auto-attach never picks the right file.
 
-    Regression: at print start the global print_memory.timelapse_baselines dict must
+    Regression: at print start the global _timelapse_baselines dict must
     contain the snapshot of existing video filenames for this printer_id,
     so the completion-time scan can set-diff against it.
     """
@@ -218,7 +231,6 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     mock_printer.name = "TestP1S"
 
     mock_archive = MagicMock()
-    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 42
     mock_archive.filename = "bambu_lab_a1_tool_plate_3.gcode.3mf"
     mock_archive.subtask_id = None
@@ -229,6 +241,8 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     mock_archive.status = "archived"
     mock_archive.file_path = "/tmp/fake.3mf"  # nosec B108 — mock path; nothing ever writes to it
     mock_archive.energy_start_kwh = None
+
+    register_expected_print(1, "bambu_lab_a1_tool_plate_3.gcode.3mf", archive_id=42, ams_mapping=None)
 
     # Two pre-existing files on the printer's SD card before this print starts.
     # The fake completion scan would diff against this set.
@@ -261,18 +275,18 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     mock_session.commit = AsyncMock()
 
     with (
-        patch("backend.app.services.print_effects.async_session") as mock_session_maker,
-        patch("backend.app.services.print_effects.notification_service") as mock_notif,
-        patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
-        patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-        patch("backend.app.services.print_effects.printer_manager") as mock_pm,
-        patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
-        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._load_objects_from_archive"),
-        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.main.async_session") as mock_session_maker,
+        patch("backend.app.main.notification_service") as mock_notif,
+        patch("backend.app.main.smart_plug_manager") as mock_plug,
+        patch("backend.app.main.ws_manager") as mock_ws,
+        patch("backend.app.main.printer_manager") as mock_pm,
+        patch("backend.app.main.mqtt_relay") as mock_relay,
+        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.main._load_objects_from_archive"),
+        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
         patch(
-            "backend.app.services.print_effects._list_timelapse_videos",
+            "backend.app.main._list_timelapse_videos",
             new=AsyncMock(return_value=(existing_videos, "/timelapse")),
         ),
     ):
@@ -284,26 +298,17 @@ async def test_expected_archive_path_captures_timelapse_baseline():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from types import SimpleNamespace
-
-        mock_pm.get_status.return_value = SimpleNamespace(
-            connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="run"
-        )
-
-        from backend.app.services.print_effects import _archive_print_start as on_print_start
+        from backend.app.main import on_print_start
 
         await on_print_start(
             1,
             {
-                "submission_id": "run",
                 "filename": "bambu_lab_a1_tool_plate_3.gcode.3mf",
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },
-            queue_archive_id=mock_archive.id,
-            memory=print_memory,
         )
 
-        assert print_memory.timelapse_baselines.get(1) == {"earlier_print_a.mp4", "earlier_print_b.mp4"}, (
+        assert _timelapse_baselines.get(1) == {"earlier_print_a.mp4", "earlier_print_b.mp4"}, (
             "expected-archive branch must capture the printer's existing-videos "
             "baseline so completion-time scan can set-diff to find the new file"
         )

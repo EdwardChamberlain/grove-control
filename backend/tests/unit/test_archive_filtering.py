@@ -21,12 +21,12 @@ class TestCalibrationPrintFiltering:
     async def test_usr_prefix_skips_archive(self, capture_logs):
         """Calibration gcode (/usr/etc/print/auto_cali_for_user.gcode) should skip archiving."""
         with (
-            patch("backend.app.services.print_effects.async_session") as mock_session_maker,
-            patch("backend.app.services.print_effects.notification_service") as mock_notif,
-            patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.printer_manager") as mock_pm,
-            patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
+            patch("backend.app.main.async_session") as mock_session_maker,
+            patch("backend.app.main.notification_service") as mock_notif,
+            patch("backend.app.main.smart_plug_manager") as mock_plug,
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.printer_manager") as mock_pm,
+            patch("backend.app.main.mqtt_relay") as mock_relay,
         ):
             mock_notif.on_print_start = AsyncMock()
             mock_plug.on_print_start = AsyncMock()
@@ -48,19 +48,16 @@ class TestCalibrationPrintFiltering:
             mock_session_maker.return_value = mock_session
 
             # Mock _send_print_start_notification
-            with patch(
-                "backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock
-            ) as mock_notif_send:
-                from backend.app.services.lifecycle.intake import print_memory
-                from backend.app.services.print_effects import _archive_print_start, _finish_new_print
+            with patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock) as mock_notif_send:
+                from backend.app.main import on_print_start
 
-                data = {
-                    "filename": "/usr/etc/print/auto_cali_for_user.gcode",
-                    "subtask_name": "auto_cali_for_user",
-                }
-                await _archive_print_start(1, data, memory=print_memory)
-                mock_notif_send.assert_not_awaited()
-                await _finish_new_print(1, data, None)
+                await on_print_start(
+                    1,
+                    {
+                        "filename": "/usr/etc/print/auto_cali_for_user.gcode",
+                        "subtask_name": "auto_cali_for_user",
+                    },
+                )
 
                 # Notification should still be sent
                 mock_notif_send.assert_called_once()
@@ -81,13 +78,13 @@ class TestCalibrationPrintFiltering:
 
         for path in test_paths:
             with (
-                patch("backend.app.services.print_effects.async_session") as mock_session_maker,
-                patch("backend.app.services.print_effects.notification_service") as mock_notif,
-                patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
-                patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-                patch("backend.app.services.print_effects.printer_manager") as mock_pm,
-                patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
-                patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
+                patch("backend.app.main.async_session") as mock_session_maker,
+                patch("backend.app.main.notification_service") as mock_notif,
+                patch("backend.app.main.smart_plug_manager") as mock_plug,
+                patch("backend.app.main.ws_manager") as mock_ws,
+                patch("backend.app.main.printer_manager") as mock_pm,
+                patch("backend.app.main.mqtt_relay") as mock_relay,
+                patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
             ):
                 mock_notif.on_print_start = AsyncMock()
                 mock_plug.on_print_start = AsyncMock()
@@ -107,10 +104,9 @@ class TestCalibrationPrintFiltering:
                 )
                 mock_session_maker.return_value = mock_session
 
-                from backend.app.services.lifecycle.intake import print_memory
-                from backend.app.services.print_effects import _archive_print_start as on_print_start
+                from backend.app.main import on_print_start
 
-                await on_print_start(1, {"filename": path, "subtask_name": "test"}, memory=print_memory)
+                await on_print_start(1, {"filename": path, "subtask_name": "test"})
 
             skip_msgs = [r for r in capture_logs.records if "internal printer file" in str(r.message)]
             assert skip_msgs, f"Path {path} should be skipped"
@@ -120,12 +116,12 @@ class TestCalibrationPrintFiltering:
     async def test_normal_gcode_not_skipped(self, capture_logs):
         """User gcode files under /data/ should NOT be skipped."""
         with (
-            patch("backend.app.services.print_effects.async_session") as mock_session_maker,
-            patch("backend.app.services.print_effects.notification_service") as mock_notif,
-            patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.printer_manager") as mock_pm,
-            patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
+            patch("backend.app.main.async_session") as mock_session_maker,
+            patch("backend.app.main.notification_service") as mock_notif,
+            patch("backend.app.main.smart_plug_manager") as mock_plug,
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.printer_manager") as mock_pm,
+            patch("backend.app.main.mqtt_relay") as mock_relay,
         ):
             mock_notif.on_print_start = AsyncMock()
             mock_plug.on_print_start = AsyncMock()
@@ -145,8 +141,7 @@ class TestCalibrationPrintFiltering:
             )
             mock_session_maker.return_value = mock_session
 
-            from backend.app.services.lifecycle.intake import print_memory
-            from backend.app.services.print_effects import _archive_print_start as on_print_start
+            from backend.app.main import on_print_start
 
             await on_print_start(
                 1,
@@ -154,7 +149,6 @@ class TestCalibrationPrintFiltering:
                     "filename": "/data/Metadata/benchy.gcode.3mf",
                     "subtask_name": "benchy",
                 },
-                memory=print_memory,
             )
 
         # Should NOT see "internal printer file" skip message
@@ -183,7 +177,7 @@ class TestListTimelapseVideos:
         with patch(f"{_FTP_MODULE}.list_files_async", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = mock_files
 
-            from backend.app.services.print_effects import _list_timelapse_videos
+            from backend.app.main import _list_timelapse_videos
 
             videos, path = await _list_timelapse_videos(mock_printer)
 
@@ -205,7 +199,7 @@ class TestListTimelapseVideos:
             return []
 
         with patch(f"{_FTP_MODULE}.list_files_async", side_effect=mock_list_files):
-            from backend.app.services.print_effects import _list_timelapse_videos
+            from backend.app.main import _list_timelapse_videos
 
             mp4s, path = await _list_timelapse_videos(mock_printer)
 
@@ -224,7 +218,7 @@ class TestListTimelapseVideos:
         with patch(f"{_FTP_MODULE}.list_files_async", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = []
 
-            from backend.app.services.print_effects import _list_timelapse_videos
+            from backend.app.main import _list_timelapse_videos
 
             mp4s, path = await _list_timelapse_videos(mock_printer)
 
@@ -247,7 +241,7 @@ class TestListTimelapseVideos:
         with patch(f"{_FTP_MODULE}.list_files_async", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = mock_files
 
-            from backend.app.services.print_effects import _list_timelapse_videos
+            from backend.app.main import _list_timelapse_videos
 
             mp4s, path = await _list_timelapse_videos(mock_printer)
 
@@ -311,17 +305,17 @@ class TestScanForTimelapseWithRetries:
         mock_session = self._make_session_mock(mock_printer)
 
         with (
-            patch("backend.app.services.print_effects.async_session", return_value=mock_session),
-            patch("backend.app.services.print_effects._list_timelapse_videos", side_effect=mock_list_mp4s),
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.asyncio.sleep", new_callable=AsyncMock),
-            patch("backend.app.services.print_effects.ArchiveService", return_value=mock_service),
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.main._list_timelapse_videos", side_effect=mock_list_mp4s),
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.asyncio.sleep", new_callable=AsyncMock),
+            patch("backend.app.main.ArchiveService", return_value=mock_service),
             patch(f"{_FTP_MODULE}.download_file_bytes_async", new_callable=AsyncMock) as mock_download,
         ):
             mock_ws.send_archive_updated = AsyncMock()
             mock_download.return_value = b"fake video data"
 
-            from backend.app.services.print_effects import _scan_for_timelapse_with_retries
+            from backend.app.main import _scan_for_timelapse_with_retries
 
             await _scan_for_timelapse_with_retries(1)
 
@@ -351,17 +345,17 @@ class TestScanForTimelapseWithRetries:
         mock_session = self._make_session_mock(mock_printer)
 
         with (
-            patch("backend.app.services.print_effects.async_session", return_value=mock_session),
-            patch("backend.app.services.print_effects._list_timelapse_videos", side_effect=mock_list_mp4s),
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.asyncio.sleep", new_callable=AsyncMock),
-            patch("backend.app.services.print_effects.ArchiveService", return_value=mock_service),
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.main._list_timelapse_videos", side_effect=mock_list_mp4s),
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.asyncio.sleep", new_callable=AsyncMock),
+            patch("backend.app.main.ArchiveService", return_value=mock_service),
             patch(f"{_FTP_MODULE}.download_file_bytes_async", new_callable=AsyncMock) as mock_download,
         ):
             mock_ws.send_archive_updated = AsyncMock()
             mock_download.return_value = b"fake video data"
 
-            from backend.app.services.print_effects import _scan_for_timelapse_with_retries
+            from backend.app.main import _scan_for_timelapse_with_retries
 
             await _scan_for_timelapse_with_retries(1)
 
@@ -392,17 +386,17 @@ class TestScanForTimelapseWithRetries:
         mock_session = self._make_session_mock(mock_printer)
 
         with (
-            patch("backend.app.services.print_effects.async_session", return_value=mock_session),
-            patch("backend.app.services.print_effects._list_timelapse_videos", side_effect=mock_list_mp4s),
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.asyncio.sleep", new_callable=AsyncMock),
-            patch("backend.app.services.print_effects.ArchiveService", return_value=mock_service),
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.main._list_timelapse_videos", side_effect=mock_list_mp4s),
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.asyncio.sleep", new_callable=AsyncMock),
+            patch("backend.app.main.ArchiveService", return_value=mock_service),
             patch(f"{_FTP_MODULE}.download_file_bytes_async", new_callable=AsyncMock) as mock_download,
         ):
             mock_ws.send_archive_updated = AsyncMock()
             mock_download.return_value = b"fake video data"
 
-            from backend.app.services.print_effects import _scan_for_timelapse_with_retries
+            from backend.app.main import _scan_for_timelapse_with_retries
 
             await _scan_for_timelapse_with_retries(1)
 
@@ -424,12 +418,12 @@ class TestScanForTimelapseWithRetries:
         mock_session.__aexit__ = AsyncMock()
 
         with (
-            patch("backend.app.services.print_effects.async_session", return_value=mock_session),
-            patch("backend.app.services.print_effects._list_timelapse_videos", new_callable=AsyncMock) as mock_list,
-            patch("backend.app.services.print_effects.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-            patch("backend.app.services.print_effects.ArchiveService", return_value=mock_service),
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.main._list_timelapse_videos", new_callable=AsyncMock) as mock_list,
+            patch("backend.app.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("backend.app.main.ArchiveService", return_value=mock_service),
         ):
-            from backend.app.services.print_effects import _scan_for_timelapse_with_retries
+            from backend.app.main import _scan_for_timelapse_with_retries
 
             await _scan_for_timelapse_with_retries(1)
 
@@ -448,12 +442,12 @@ class TestScanForTimelapseWithRetries:
         mock_session.__aexit__ = AsyncMock()
 
         with (
-            patch("backend.app.services.print_effects.async_session", return_value=mock_session),
-            patch("backend.app.services.print_effects._list_timelapse_videos", new_callable=AsyncMock) as mock_list,
-            patch("backend.app.services.print_effects.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-            patch("backend.app.services.print_effects.ArchiveService", return_value=mock_service),
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.main._list_timelapse_videos", new_callable=AsyncMock) as mock_list,
+            patch("backend.app.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("backend.app.main.ArchiveService", return_value=mock_service),
         ):
-            from backend.app.services.print_effects import _scan_for_timelapse_with_retries
+            from backend.app.main import _scan_for_timelapse_with_retries
 
             await _scan_for_timelapse_with_retries(999)
 
@@ -474,15 +468,15 @@ class TestScanForTimelapseWithRetries:
         mock_session = self._make_session_mock(mock_printer)
 
         with (
-            patch("backend.app.services.print_effects.async_session", return_value=mock_session),
-            patch("backend.app.services.print_effects._list_timelapse_videos", side_effect=mock_list_mp4s),
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-            patch("backend.app.services.print_effects.ArchiveService", return_value=mock_service),
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.main._list_timelapse_videos", side_effect=mock_list_mp4s),
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("backend.app.main.ArchiveService", return_value=mock_service),
         ):
             mock_ws.send_archive_updated = AsyncMock()
 
-            from backend.app.services.print_effects import _scan_for_timelapse_with_retries
+            from backend.app.main import _scan_for_timelapse_with_retries
 
             await _scan_for_timelapse_with_retries(1)
 
@@ -515,7 +509,7 @@ class TestListTimelapseVideosAvi:
         with patch(f"{_FTP_MODULE}.list_files_async", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = mock_files
 
-            from backend.app.services.print_effects import _list_timelapse_videos
+            from backend.app.main import _list_timelapse_videos
 
             videos, path = await _list_timelapse_videos(mock_printer)
 
@@ -538,7 +532,7 @@ class TestListTimelapseVideosAvi:
         with patch(f"{_FTP_MODULE}.list_files_async", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = mock_files
 
-            from backend.app.services.print_effects import _list_timelapse_videos
+            from backend.app.main import _list_timelapse_videos
 
             videos, path = await _list_timelapse_videos(mock_printer)
 
@@ -590,17 +584,17 @@ class TestListTimelapseVideosAvi:
         )
 
         with (
-            patch("backend.app.services.print_effects.async_session", return_value=mock_session),
-            patch("backend.app.services.print_effects._list_timelapse_videos", side_effect=mock_list_videos),
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.asyncio.sleep", new_callable=AsyncMock),
-            patch("backend.app.services.print_effects.ArchiveService", return_value=mock_service),
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.main._list_timelapse_videos", side_effect=mock_list_videos),
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.asyncio.sleep", new_callable=AsyncMock),
+            patch("backend.app.main.ArchiveService", return_value=mock_service),
             patch(f"{_FTP_MODULE}.download_file_bytes_async", new_callable=AsyncMock) as mock_download,
         ):
             mock_ws.send_archive_updated = AsyncMock()
             mock_download.return_value = b"fake avi data"
 
-            from backend.app.services.print_effects import _scan_for_timelapse_with_retries
+            from backend.app.main import _scan_for_timelapse_with_retries
 
             await _scan_for_timelapse_with_retries(1)
 

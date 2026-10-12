@@ -94,13 +94,18 @@ class SmartPlug(Base):
     # Automation settings
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_on: Mapped[bool] = mapped_column(Boolean, default=True)  # Turn on at print start
-    # For HA script entities, run the script when the associated printer plug
-    # is manually switched off. Print shutdown is opted into per queue job.
-    auto_off: Mapped[bool] = mapped_column(Boolean, default=True)
-    auto_off_persistent: Mapped[bool] = mapped_column(Boolean, default=False)  # Retained for API compatibility
+    auto_off: Mapped[bool] = mapped_column(Boolean, default=True)  # Turn off at print complete/fail
+    auto_off_persistent: Mapped[bool] = mapped_column(Boolean, default=False)  # Keep auto-off enabled between prints
 
-    # Auto-off after AMS drying completes (#1349). Uses its own delay because
-    # the AMS is hot after a drying cycle. Fires whenever any AMS attached to the
+    # Turn-off delay mode: "time" or "temperature"
+    off_delay_mode: Mapped[str] = mapped_column(String(20), default="time")
+    off_delay_minutes: Mapped[int] = mapped_column(Integer, default=5)  # For time mode
+    off_temp_threshold: Mapped[int] = mapped_column(Integer, default=70)  # For temp mode (°C)
+
+    # Auto-off after AMS drying completes (#1349). Independent of `auto_off`
+    # (which only fires after a print finishes). Uses its own delay because
+    # the AMS is hot after a drying cycle and users may want longer cooldown
+    # than the print-finish default. Fires whenever any AMS attached to the
     # linked printer finishes a dry cycle — Grove Control doesn't model per-AMS
     # plug routing, the trigger is plug-vs-printer-level.
     auto_off_after_drying: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
@@ -131,10 +136,10 @@ class SmartPlug(Base):
     last_state: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "ON"/"OFF"
     last_checked: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     auto_off_executed: Mapped[bool] = mapped_column(Boolean, default=False)  # True when auto-off was triggered
-    auto_off_pending: Mapped[bool] = mapped_column(Boolean, default=False)  # True while a drying cooldown is pending
-    auto_off_pending_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Kept to clear delayed print Auto Off requests written by older versions.
-    auto_off_pending_job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    auto_off_pending: Mapped[bool] = mapped_column(Boolean, default=False)  # True when waiting for cooldown
+    auto_off_pending_since: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )  # When auto-off was scheduled
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

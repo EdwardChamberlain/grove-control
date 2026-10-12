@@ -7,8 +7,11 @@ import pytest
 from sqlalchemy import select
 
 from backend.app.models.scheduled_drying import ScheduledDrying
-from backend.app.services.ams_drying import SCHEDULED_DRYING_PRUNE_INTERVAL_SECONDS, SCHEDULED_DRYING_RETENTION_DAYS
-from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.print_scheduler import (
+    SCHEDULED_DRYING_PRUNE_INTERVAL_SECONDS,
+    SCHEDULED_DRYING_RETENTION_DAYS,
+    PrintScheduler,
+)
 
 
 def _utcnow_naive() -> datetime:
@@ -45,8 +48,8 @@ def scheduler():
 @pytest.mark.asyncio
 async def test_future_start_after_not_dispatched(scheduler, db_session, printer_factory):
     row = await _make_row(db_session, printer_factory, start_after=_utcnow_naive() + timedelta(hours=2))
-    with patch("backend.app.services.ams_drying.printer_manager") as mock_pm:
-        await scheduler.drying._check_scheduled_dryings(db_session)
+    with patch("backend.app.services.print_scheduler.printer_manager") as mock_pm:
+        await scheduler._check_scheduled_dryings(db_session)
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
     assert row.status == "pending"
@@ -58,12 +61,12 @@ async def test_due_row_dispatches_and_goes_running(scheduler, db_session, printe
         db_session, printer_factory, start_after=_utcnow_naive() - timedelta(minutes=1), filament="PETG"
     )
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     mock_pm.send_drying_command.assert_called_once_with(
         row.printer_id, 0, 65, 8, mode=1, filament="PETG", rotate_tray=False
@@ -71,19 +74,19 @@ async def test_due_row_dispatches_and_goes_running(scheduler, db_session, printe
     await db_session.refresh(row)
     assert row.status == "running"
     assert row.started_at is not None
-    assert scheduler.drying._drying_in_progress.get(row.printer_id)
+    assert scheduler._drying_in_progress.get(row.printer_id)
 
 
 @pytest.mark.asyncio
 async def test_null_start_after_dispatches_immediately(scheduler, db_session, printer_factory):
     row = await _make_row(db_session, printer_factory, start_after=None)
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "running"
 
@@ -92,11 +95,11 @@ async def test_null_start_after_dispatches_immediately(scheduler, db_session, pr
 async def test_busy_printer_stays_pending_with_reason(scheduler, db_session, printer_factory):
     row = await _make_row(db_session, printer_factory, start_after=None)
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=False),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=False),
     ):
         mock_pm.get_status.return_value = _mock_state()
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
     assert row.status == "pending"
@@ -106,9 +109,9 @@ async def test_busy_printer_stays_pending_with_reason(scheduler, db_session, pri
 @pytest.mark.asyncio
 async def test_offline_printer_stays_pending(scheduler, db_session, printer_factory):
     row = await _make_row(db_session, printer_factory, start_after=None)
-    with patch("backend.app.services.ams_drying.printer_manager") as mock_pm:
+    with patch("backend.app.services.print_scheduler.printer_manager") as mock_pm:
         mock_pm.get_status.return_value = None
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "pending"
     assert row.waiting_reason == "printer_offline"
@@ -118,11 +121,11 @@ async def test_offline_printer_stays_pending(scheduler, db_session, printer_fact
 async def test_ams_blocked_stays_pending(scheduler, db_session, printer_factory):
     row = await _make_row(db_session, printer_factory, start_after=None)
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state(dry_sf_reason=[2])
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
     assert row.status == "pending"
@@ -136,11 +139,11 @@ async def test_retract_block_gets_its_own_waiting_reason(scheduler, db_session, 
     """
     row = await _make_row(db_session, printer_factory, start_after=None)
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state(dry_sf_reason=[3])
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
     assert row.status == "pending"
@@ -152,11 +155,11 @@ async def test_power_block_outranks_retract(scheduler, db_session, printer_facto
     """Both blocking at once: power is the one that has to be fixed first."""
     row = await _make_row(db_session, printer_factory, start_after=None)
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state(dry_sf_reason=[3, 8])
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.waiting_reason == "ams_power_required"
 
@@ -167,11 +170,11 @@ async def test_power_block_gets_its_own_waiting_reason(scheduler, db_session, pr
     """A run the user has to unblock says so, rather than waiting silently."""
     row = await _make_row(db_session, printer_factory, start_after=None)
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state(dry_sf_reason=[code])
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
     assert row.status == "pending"
@@ -187,11 +190,11 @@ async def test_screen_only_model_fails_instead_of_dispatching(scheduler, db_sess
     await db_session.commit()
 
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
@@ -204,11 +207,11 @@ async def test_screen_only_model_fails_instead_of_dispatching(scheduler, db_sess
 async def test_firmware_below_minimum_fails(scheduler, db_session, printer_factory):
     row = await _make_row(db_session, printer_factory, start_after=None)
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state(firmware="01.05.00.00")
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
@@ -225,12 +228,12 @@ async def test_empty_filament_backfills_from_loaded_tray(scheduler, db_session, 
     state.raw_data["ams"][0]["tray"] = [{"tray_type": ""}, {"tray_type": "PETG"}]
 
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = state
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     assert mock_pm.send_drying_command.call_args.kwargs["filament"] == "PETG"
     await db_session.refresh(row)
@@ -241,12 +244,12 @@ async def test_empty_filament_backfills_from_loaded_tray(scheduler, db_session, 
 async def test_empty_filament_falls_back_to_pla(scheduler, db_session, printer_factory):
     await _make_row(db_session, printer_factory, start_after=None, filament="")
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     assert mock_pm.send_drying_command.call_args.kwargs["filament"] == "PLA"
 
@@ -273,8 +276,8 @@ async def test_finished_rows_pruned_after_retention(scheduler, db_session, print
     db_session.add_all([stale, recent])
     await db_session.commit()
 
-    with patch("backend.app.services.ams_drying.printer_manager"):
-        await scheduler.drying._check_scheduled_dryings(db_session)
+    with patch("backend.app.services.print_scheduler.printer_manager"):
+        await scheduler._check_scheduled_dryings(db_session)
 
     remaining = (await db_session.execute(select(ScheduledDrying.id))).scalars().all()
     assert stale.id not in remaining
@@ -303,21 +306,21 @@ async def test_prune_does_not_run_on_every_pass(scheduler, db_session, printer_f
         await db_session.refresh(row)
         return row
 
-    with patch("backend.app.services.ams_drying.printer_manager"):
+    with patch("backend.app.services.print_scheduler.printer_manager"):
         # First pass after a restart always prunes, so rows left behind by the
         # process that died are still reaped.
         first = await _stale_row()
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
         assert first.id not in (await db_session.execute(select(ScheduledDrying.id))).scalars().all()
 
         # A second pass moments later leaves an equally stale row alone.
         second = await _stale_row()
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
         assert second.id in (await db_session.execute(select(ScheduledDrying.id))).scalars().all()
 
         # ...and reaps it once the interval has elapsed.
-        scheduler.drying._last_scheduled_drying_prune -= SCHEDULED_DRYING_PRUNE_INTERVAL_SECONDS
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        scheduler._last_scheduled_drying_prune -= SCHEDULED_DRYING_PRUNE_INTERVAL_SECONDS
+        await scheduler._check_scheduled_dryings(db_session)
         assert second.id not in (await db_session.execute(select(ScheduledDrying.id))).scalars().all()
 
 
@@ -339,28 +342,28 @@ async def test_a_finished_run_releases_the_printer_without_auto_drying(scheduler
     printer_id = row.printer_id
 
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "running"
-    assert printer_id in scheduler.drying._drying_in_progress
+    assert printer_id in scheduler._drying_in_progress
 
     # The firmware has stopped reporting a dry_time, well past the duration.
     row.started_at = _utcnow_naive() - timedelta(hours=2)
     await db_session.commit()
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state(dry_time=0)
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "completed"
-    assert printer_id not in scheduler.drying._drying_in_progress
+    assert printer_id not in scheduler._drying_in_progress
 
     # And the next night's run still dispatches.
     tomorrow = ScheduledDrying(
@@ -373,12 +376,12 @@ async def test_a_finished_run_releases_the_printer_without_auto_drying(scheduler
     db_session.add(tomorrow)
     await db_session.commit()
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(tomorrow)
     assert tomorrow.status == "running"
     assert tomorrow.waiting_reason is None
@@ -394,25 +397,25 @@ async def test_a_route_cancel_releases_the_printer(scheduler, db_session, printe
     printer_id = row.printer_id
 
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
-    assert printer_id in scheduler.drying._drying_in_progress
+        await scheduler._check_scheduled_dryings(db_session)
+    assert printer_id in scheduler._drying_in_progress
 
     # What DELETE /scheduled-dryings/{id} leaves behind.
     row.status = "cancelled"
     row.completed_at = _utcnow_naive()
     await db_session.commit()
 
-    with patch("backend.app.services.ams_drying.printer_manager") as mock_pm:
+    with patch("backend.app.services.print_scheduler.printer_manager") as mock_pm:
         mock_pm.get_status.return_value = _mock_state()
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
-    assert printer_id not in scheduler.drying._drying_in_progress
-    assert printer_id not in scheduler.drying._scheduled_drying_printer_ids
+    assert printer_id not in scheduler._drying_in_progress
+    assert printer_id not in scheduler._scheduled_drying_printer_ids
 
 
 @pytest.mark.asyncio
@@ -424,9 +427,9 @@ async def test_running_completes_after_duration(scheduler, db_session, printer_f
         duration_hours=1,
         started_at=_utcnow_naive() - timedelta(minutes=58),  # >= 90% of 1h
     )
-    with patch("backend.app.services.ams_drying.printer_manager") as mock_pm:
+    with patch("backend.app.services.print_scheduler.printer_manager") as mock_pm:
         mock_pm.get_status.return_value = _mock_state(dry_time=0)
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "completed"
     assert row.completed_at is not None
@@ -444,9 +447,9 @@ async def test_running_without_matching_ams_stays_running(scheduler, db_session,
     )
     state = _mock_state()
     state.raw_data = {"ams": []}
-    with patch("backend.app.services.ams_drying.printer_manager") as mock_pm:
+    with patch("backend.app.services.print_scheduler.printer_manager") as mock_pm:
         mock_pm.get_status.return_value = state
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "running"
     assert row.waiting_reason == "ams_not_found"
@@ -463,11 +466,11 @@ async def test_running_interrupted_by_print_requeues(scheduler, db_session, prin
         started_at=_utcnow_naive() - timedelta(minutes=30),  # well past grace, far from done
     )
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=False),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=False),
     ):
         mock_pm.get_status.return_value = _mock_state(dry_time=0)
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "pending"
     assert row.started_at is None
@@ -485,11 +488,11 @@ async def test_running_stopped_while_idle_cancels(scheduler, db_session, printer
         started_at=_utcnow_naive() - timedelta(minutes=30),
     )
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state(dry_time=0)
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "cancelled"
     assert row.completed_at is not None
@@ -504,9 +507,9 @@ async def test_running_within_grace_untouched(scheduler, db_session, printer_fac
         duration_hours=8,
         started_at=_utcnow_naive() - timedelta(seconds=30),  # inside 120 s grace
     )
-    with patch("backend.app.services.ams_drying.printer_manager") as mock_pm:
+    with patch("backend.app.services.print_scheduler.printer_manager") as mock_pm:
         mock_pm.get_status.return_value = _mock_state(dry_time=0)
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
     await db_session.refresh(row)
     assert row.status == "running"
 
@@ -521,28 +524,28 @@ async def test_scheduled_drying_survives_auto_drying_stop_all(scheduler, db_sess
     """
     row = await _make_row(db_session, printer_factory, start_after=_utcnow_naive() - timedelta(minutes=1))
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
         await db_session.refresh(row)
         assert row.status == "running"
-        assert scheduler.drying._drying_in_progress.get(row.printer_id)
-        assert row.printer_id in scheduler.drying._scheduled_drying_printer_ids
+        assert scheduler._drying_in_progress.get(row.printer_id)
+        assert row.printer_id in scheduler._scheduled_drying_printer_ids
 
         mock_pm.reset_mock()
-        with patch.object(scheduler.drying, "_get_bool_setting", AsyncMock(return_value=False)):
+        with patch.object(scheduler, "_get_bool_setting", AsyncMock(return_value=False)):
             # Default config: queue_drying_enabled and ambient_drying_enabled both off.
-            await scheduler.drying._check_auto_drying(db_session, [], set())
+            await scheduler._check_auto_drying(db_session, [], set())
 
     mock_pm.send_drying_command.assert_not_called()
     await db_session.refresh(row)
     assert row.status == "running"
-    assert scheduler.drying._drying_in_progress.get(row.printer_id)
-    assert row.printer_id in scheduler.drying._scheduled_drying_printer_ids
+    assert scheduler._drying_in_progress.get(row.printer_id)
+    assert row.printer_id in scheduler._scheduled_drying_printer_ids
 
 
 @pytest.mark.asyncio
@@ -561,12 +564,12 @@ async def test_second_pending_row_for_same_printer_does_not_dispatch(scheduler, 
     await db_session.refresh(row2)
 
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     mock_pm.send_drying_command.assert_called_once()
     await db_session.refresh(row1)
@@ -595,12 +598,12 @@ async def test_earliest_start_after_dispatches_first(scheduler, db_session, prin
     await db_session.refresh(sooner)
 
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
     ):
         mock_pm.get_status.return_value = _mock_state()
         mock_pm.send_drying_command.return_value = True
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     mock_pm.send_drying_command.assert_called_once_with(printer.id, 0, 60, 6, mode=1, filament="PLA", rotate_tray=False)
     await db_session.refresh(later)
@@ -625,11 +628,11 @@ async def test_malformed_ams_id_does_not_throw_while_running(scheduler, db_sessi
     state.raw_data = {"ams": [{"id": "not-a-number", "dry_time": 120}]}
 
     with (
-        patch("backend.app.services.ams_drying.printer_manager") as mock_pm,
-        patch.object(scheduler.drying, "_is_printer_idle", return_value=False),
+        patch("backend.app.services.print_scheduler.printer_manager") as mock_pm,
+        patch.object(scheduler, "_is_printer_idle", return_value=False),
     ):
         mock_pm.get_status.return_value = state
-        await scheduler.drying._check_scheduled_dryings(db_session)
+        await scheduler._check_scheduled_dryings(db_session)
 
     # No matching unit means the cycle remains active until telemetry recovers.
     await db_session.refresh(row)

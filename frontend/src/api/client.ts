@@ -322,6 +322,8 @@ export interface Printer {
   external_camera_enabled: boolean;
   external_camera_snapshot_url: string | null;  // optional single-frame override (#1177)
   camera_rotation: number;  // 0, 90, 180, 270 degrees
+  plate_detection_enabled: boolean;  // Check plate before print
+  plate_detection_roi?: PlateDetectionROI;  // ROI for plate detection
   created_at: string;
   updated_at: string;
 }
@@ -590,6 +592,51 @@ export interface PrinterCreate {
   external_camera_enabled?: boolean;
   external_camera_snapshot_url?: string | null;
   camera_rotation?: number;
+  plate_detection_enabled?: boolean;
+  plate_detection_roi?: PlateDetectionROI;
+}
+
+// Plate Detection
+export interface PlateDetectionROI {
+  x: number;  // X start % (0.0-1.0)
+  y: number;  // Y start % (0.0-1.0)
+  w: number;  // Width % (0.0-1.0)
+  h: number;  // Height % (0.0-1.0)
+}
+
+export interface PlateDetectionResult {
+  is_empty: boolean;
+  confidence: number;
+  difference_percent: number;
+  message: string;
+  has_debug_image: boolean;
+  debug_image_url?: string;
+  needs_calibration: boolean;
+  light_warning?: boolean;
+  reference_count?: number;
+  max_references?: number;
+  roi?: PlateDetectionROI;
+}
+
+export interface PlateDetectionStatus {
+  available: boolean;
+  calibrated: boolean;
+  reference_count: number;
+  max_references: number;
+  message: string;
+}
+
+export interface CalibrationResult {
+  success: boolean;
+  message: string;
+}
+
+export interface PlateReference {
+  index: number;
+  label: string;
+  timestamp: string;
+  has_image: boolean;
+  thumbnail_url: string;
 }
 
 // Archive types
@@ -754,6 +801,13 @@ export interface FailureAnalysis {
     failed_prints: number;
     failure_rate: number;
   }>;
+}
+
+export interface BulkUploadResult {
+  uploaded: number;
+  failed: number;
+  results: Array<{ filename: string; id: number; status: string }>;
+  errors: Array<{ filename: string; error: string }>;
 }
 
 // Archive Comparison types
@@ -1175,6 +1229,7 @@ export interface AppSettings {
   location_sensor_poll_interval: number;
   location_sensor_alert_defaults: string;
   // File Manager / Library settings
+  library_archive_mode: 'always' | 'never' | 'ask';
   library_disk_warning_gb: number;
   // Camera view settings
   camera_view_mode: 'window' | 'embedded';
@@ -1589,6 +1644,15 @@ export interface SliceResponse {
   used_embedded_settings: boolean;
 }
 
+export interface SliceArchiveResponse {
+  archive_id: number;
+  name: string;
+  print_time_seconds: number;
+  filament_used_g: number;
+  filament_used_mm: number;
+  used_embedded_settings: boolean;
+}
+
 // Background slice-job lifecycle. POST /slice returns 202 + this shape;
 // the frontend polls /slice-jobs/{id} until status is terminal.
 export type SliceJobStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -1629,7 +1693,7 @@ export interface SliceJobState {
    * slicer emits its first frame (early "Initializing" phase) or when
    * the sidecar doesn't support progress. */
   progress: SliceJobProgress | null;
-  result?: SliceResponse;
+  result?: SliceResponse | SliceArchiveResponse;
   error_status?: number;
   error_detail?: string;
 }
@@ -1759,6 +1823,9 @@ export interface SmartPlug {
   auto_on: boolean;
   auto_off: boolean;
   auto_off_persistent: boolean;
+  off_delay_mode: 'time' | 'temperature';
+  off_delay_minutes: number;
+  off_temp_threshold: number;
   // #1349: auto-off after AMS drying completes.
   auto_off_after_drying: boolean;
   off_delay_after_drying_minutes: number;
@@ -1834,6 +1901,9 @@ export interface SmartPlugCreate {
   auto_on?: boolean;
   auto_off?: boolean;
   auto_off_persistent?: boolean;
+  off_delay_mode?: 'time' | 'temperature';
+  off_delay_minutes?: number;
+  off_temp_threshold?: number;
   // #1349
   auto_off_after_drying?: boolean;
   off_delay_after_drying_minutes?: number;
@@ -1901,6 +1971,9 @@ export interface SmartPlugUpdate {
   auto_on?: boolean;
   auto_off?: boolean;
   auto_off_persistent?: boolean;
+  off_delay_mode?: 'time' | 'temperature';
+  off_delay_minutes?: number;
+  off_temp_threshold?: number;
   // #1349
   auto_off_after_drying?: boolean;
   off_delay_after_drying_minutes?: number;
@@ -2053,9 +2126,7 @@ export interface DiscoveredTasmotaDevice {
 // Print Queue types
 export interface PrintQueueItem {
   id: number;
-  printer_id: number | null;  // Backwards-compatible effective printer field
-  assigned_printer_id?: number | null;  // Queue preference before dispatch binds a printer
-  bound_printer_id?: number | null;  // Immutable printer binding after dispatch starts
+  printer_id: number | null;  // null = unassigned
   target_model: string | null;  // Target printer model for model-based assignment
   target_location: string | null;  // Target location filter for model-based assignment
   required_filament_types: string[] | null;  // Required filament types for model-based assignment
@@ -2069,11 +2140,12 @@ export interface PrintQueueItem {
     target_model: string;
     position: number;
   }>;
-  // Either archive_id OR library_file_id must be set; dispatch links the attempt Archive here.
+  // Either archive_id OR library_file_id must be set (archive created at print start)
   archive_id: number | null;
   library_file_id: number | null;
   position: number;
   scheduled_time: string | null;
+  require_previous_success: boolean;
   wait_for_drying_complete: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -2102,12 +2174,7 @@ export interface PrintQueueItem {
   timelapse: boolean;
   use_ams: boolean;
   nozzle_offset_cali: CalibrationMode;
-  status: 'queued' | 'preheating' | 'dispatching' | 'printing' | 'paused' | 'finished' | 'failed' | 'cancelled' | 'successful' | 'unsuccessful';
-  dispatch_needs_resolution?: boolean;
-  dispatch_unsent?: boolean;
-  retry_on_failure?: boolean;
-  physical_outcome?: string | null;
-  awaiting_plate_clear?: boolean;
+  status: 'pending' | 'preheating' | 'dispatching' | 'printing' | 'completed' | 'failed' | 'skipped' | 'cancelled';
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -2134,6 +2201,7 @@ export interface PrintQueueItem {
   been_jumped?: boolean;
   // Auto-print G-code injection
   gcode_injection?: boolean;
+  cleanup_library_after_dispatch?: boolean;
 }
 
 export interface PrintQueueItemCreate {
@@ -2145,6 +2213,7 @@ export interface PrintQueueItemCreate {
   archive_id?: number | null;
   library_file_id?: number | null;
   scheduled_time?: string | null;
+  require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -2172,6 +2241,8 @@ export interface PrintQueueItemCreate {
   quantity?: number;
   // Project to associate the resulting archive with
   project_id?: number;
+  // Delete transient uploaded library file after scheduler creates the archive
+  cleanup_library_after_dispatch?: boolean;
   // Cross-model alternatives (#671): several sliced files, one job, whichever
   // printer frees up first. Mutually exclusive with printer_id (a named printer
   // defeats the point) and with archive_id/library_file_id (these ARE the files).
@@ -2198,6 +2269,7 @@ export interface PrintQueueItemUpdate {
   force_color_match?: boolean;
   position?: number;
   scheduled_time?: string | null;
+  require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -2223,6 +2295,7 @@ export interface PrintQueueBulkUpdate {
   item_ids: number[];
   printer_id?: number | null;
   scheduled_time?: string | null;
+  require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -2368,6 +2441,8 @@ export interface NotificationProvider {
   // AMS-HT environmental alarms
   on_ams_ht_humidity_high: boolean;
   on_ams_ht_temperature_high: boolean;
+  // Build plate detection
+  on_plate_not_empty: boolean;
   // Bed cooled
   on_bed_cooled: boolean;
   on_ha_sensor_alert: boolean;
@@ -2427,6 +2502,8 @@ export interface NotificationProviderCreate {
   // AMS-HT environmental alarms
   on_ams_ht_humidity_high?: boolean;
   on_ams_ht_temperature_high?: boolean;
+  // Build plate detection
+  on_plate_not_empty?: boolean;
   // Bed cooled
   on_bed_cooled?: boolean;
   on_ha_sensor_alert?: boolean;
@@ -2479,6 +2556,8 @@ export interface NotificationProviderUpdate {
   // AMS-HT environmental alarms
   on_ams_ht_humidity_high?: boolean;
   on_ams_ht_temperature_high?: boolean;
+  // Build plate detection
+  on_plate_not_empty?: boolean;
   // Bed cooled
   on_bed_cooled?: boolean;
   on_ha_sensor_alert?: boolean;
@@ -3816,8 +3895,6 @@ export const api = {
   },
   getPrinterStatus: (id: number) =>
     request<PrinterStatus>(`/printers/${id}/status`),
-  getPrinterQueueWork: () =>
-    request<Record<number, boolean>>('/printers/queue-work'),
   refreshPrinterStatus: (id: number) =>
     request<{ status: string }>(`/printers/${id}/refresh-status`, {
       method: 'POST',
@@ -4202,25 +4279,18 @@ export const api = {
     request<void>(`/archives/${id}${purgeStats ? '?purge_stats=true' : ''}`, { method: 'DELETE' }),
 
   // ========== Archive auto-purge (#1008 follow-up) ==========
-  previewArchivePurge: (options: { olderThanDays?: number; keepCount?: number; purgeStats?: boolean }) => {
-    const params = new URLSearchParams();
-    if (options.olderThanDays !== undefined) params.set('older_than_days', String(options.olderThanDays));
-    if (options.keepCount !== undefined) params.set('keep_count', String(options.keepCount));
-    if (options.purgeStats !== undefined) params.set('purge_stats', String(options.purgeStats));
-    return request<ArchivePurgePreview>(`/archives/purge/preview?${params.toString()}`);
-  },
+  previewArchivePurge: (olderThanDays: number, purgeStats: boolean = false) =>
+    request<ArchivePurgePreview>(
+      `/archives/purge/preview?older_than_days=${olderThanDays}&purge_stats=${purgeStats}`,
+    ),
   // #1390: purgeStats=false (default) soft-deletes each old archive — Quick Stats
   // preserved, files removed from disk, row hidden via deleted_at. true matches
   // the single-archive delete's `?purge_stats=true` semantics (hard-deletes the
   // linked PrintLogEntry rows so the contribution drops from /stats too).
-  executeArchivePurge: (options: { olderThanDays?: number; keepCount?: number; purgeStats?: boolean }) =>
+  executeArchivePurge: (olderThanDays: number, purgeStats: boolean = false) =>
     request<{ deleted: number; purge_stats: boolean }>('/archives/purge', {
       method: 'POST',
-      body: JSON.stringify({
-        ...(options.olderThanDays !== undefined ? { older_than_days: options.olderThanDays } : {}),
-        ...(options.keepCount !== undefined ? { keep_count: options.keepCount } : {}),
-        purge_stats: options.purgeStats ?? false,
-      }),
+      body: JSON.stringify({ older_than_days: olderThanDays, purge_stats: purgeStats }),
     }),
   getArchivePurgeSettings: () =>
     request<ArchivePurgeSettings>('/archives/purge/settings'),
@@ -4681,10 +4751,48 @@ export const api = {
       }>;
     }>(`/archives/${archiveId}/filament-requirements${qs.toString() ? `?${qs}` : ''}`);
   },
-  saveArchiveToFiles: (archiveId: number) =>
-    request<{ library_file_id: number; filename: string }>(`/archives/${archiveId}/save-to-files`, {
+  uploadArchive: async (file: File, printerId?: number): Promise<Archive> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = printerId
+      ? `${API_BASE}/archives/upload?printer_id=${printerId}`
+      : `${API_BASE}/archives/upload`;
+    const headers: Record<string, string> = {};
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    const response = await fetch(url, {
       method: 'POST',
-    }),
+      headers,
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  uploadArchivesBulk: async (files: File[], printerId?: number): Promise<BulkUploadResult> => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append('files', file));
+    const url = printerId
+      ? `${API_BASE}/archives/upload-bulk?printer_id=${printerId}`
+      : `${API_BASE}/archives/upload-bulk`;
+    const headers: Record<string, string> = {};
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
 
   // Print Log
   getPrintLog: (params?: {
@@ -5007,7 +5115,7 @@ export const api = {
     }),
 
   // Print Queue
-  getQueue: (printerId?: number, status?: PrintQueueItem['status'], targetModel?: string) => {
+  getQueue: (printerId?: number, status?: string, targetModel?: string) => {
     const params = new URLSearchParams();
     if (printerId) params.set('printer_id', String(printerId));
     if (status) params.set('status', status);
@@ -5034,10 +5142,6 @@ export const api = {
     }),
   cancelQueueItem: (id: number) =>
     request<{ message: string }>(`/queue/${id}/cancel`, { method: 'POST' }),
-  resolveQueueDispatch: (id: number, outcome: 'printing' | 'failed') =>
-    request<{ message: string }>(`/queue/${id}/resolve-dispatch`, {
-      method: 'POST', body: JSON.stringify({ outcome }),
-    }),
   stopQueueItem: (id: number) =>
     request<{ message: string }>(`/queue/${id}/stop`, { method: 'POST' }),
   skipQueueHeatSoak: (id: number) =>
@@ -5052,8 +5156,17 @@ export const api = {
     const qs = opts?.skipFilamentCheck ? '?skip_filament_check=true' : '';
     return request<PrintQueueItem>(`/queue/${id}/start${qs}`, { method: 'POST' });
   },
-  clearQueuePlate: (id: number) => request<{ message: string }>(`/queue/${id}/clear-plate`, { method: 'POST' }),
-  retryQueueItem: (id: number) => request<PrintQueueItem>(`/queue/${id}/retry`, { method: 'POST' }),
+  /**
+   * Clear the `require_previous_success` gate for a printer after the user
+   * resolves the failure. Acknowledges any failed/aborted predecessors and
+   * restores skipped items whose error_message matches the gate string
+   * back to pending. Returns counts so the UI can render a precise toast.
+   */
+  resumeQueueAfterFailure: (printerId: number) =>
+    request<{ acknowledged: number; restored: number }>(
+      `/queue/printer/${printerId}/resume`,
+      { method: 'POST' },
+    ),
   bulkUpdateQueue: (data: PrintQueueBulkUpdate) =>
     request<PrintQueueBulkUpdateResponse>('/queue/bulk', {
       method: 'PATCH',
@@ -5829,6 +5942,65 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // Plate Detection - Multi-reference calibration (stores up to 5 references per printer)
+  checkPlateEmpty: (printerId: number, options?: { useExternal?: boolean; includeDebugImage?: boolean }) => {
+    const params = new URLSearchParams();
+    // Only forward use_external when the caller explicitly sets it. Omitted →
+    // backend derives the default from the printer's external_camera_enabled
+    // setting so calibration and runtime checks use the same camera (#1359).
+    if (options?.useExternal !== undefined) {
+      params.set('use_external', String(options.useExternal));
+    }
+    params.set('include_debug_image', String(options?.includeDebugImage ?? false));
+    return request<PlateDetectionResult>(
+      `/printers/${printerId}/camera/check-plate?${params.toString()}`
+    );
+  },
+  getPlateDetectionStatus: (printerId: number) => {
+    return request<PlateDetectionStatus & { chamber_light?: boolean }>(
+      `/printers/${printerId}/camera/plate-detection/status`
+    );
+  },
+  calibratePlateDetection: (printerId: number, options?: { label?: string; useExternal?: boolean }) => {
+    const params = new URLSearchParams();
+    if (options?.label) params.set('label', options.label);
+    if (options?.useExternal !== undefined) {
+      params.set('use_external', String(options.useExternal));
+    }
+    return request<CalibrationResult & { index: number }>(
+      `/printers/${printerId}/camera/plate-detection/calibrate?${params.toString()}`,
+      { method: 'POST' }
+    );
+  },
+  deletePlateCalibration: (printerId: number) => {
+    return request<CalibrationResult>(
+      `/printers/${printerId}/camera/plate-detection/calibrate`,
+      { method: 'DELETE' }
+    );
+  },
+  getPlateReferences: (printerId: number) => {
+    return request<{
+      references: PlateReference[];
+      max_references: number;
+    }>(`/printers/${printerId}/camera/plate-detection/references`);
+  },
+  getPlateReferenceThumbnailUrl: (printerId: number, index: number) =>
+    withStreamToken(`${API_BASE}/printers/${printerId}/camera/plate-detection/references/${index}/thumbnail`),
+  updatePlateReferenceLabel: (printerId: number, index: number, label: string) => {
+    const params = new URLSearchParams();
+    params.set('label', label);
+    return request<{ success: boolean; index: number; label: string }>(
+      `/printers/${printerId}/camera/plate-detection/references/${index}?${params.toString()}`,
+      { method: 'PUT' }
+    );
+  },
+  deletePlateReference: (printerId: number, index: number) => {
+    return request<{ success: boolean; message: string }>(
+      `/printers/${printerId}/camera/plate-detection/references/${index}`,
+      { method: 'DELETE' }
+    );
+  },
+
   // External Links
   getExternalLinks: () => request<ExternalLink[]>('/external-links/'),
   getExternalLink: (id: number) => request<ExternalLink>(`/external-links/${id}`),
@@ -6240,28 +6412,6 @@ export const api = {
     }
     return response.json();
   },
-  uploadQueueSource: async (
-    file: File,
-    generateStlThumbnails: boolean = true
-  ): Promise<LibraryFileUploadResponse> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const params = new URLSearchParams({ generate_stl_thumbnails: String(generateStlThumbnails) });
-    const headers: Record<string, string> = {};
-    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-    const response = await fetch(`${API_BASE}/queue/upload-source?${params}`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-    return response.json();
-  },
-  discardQueueSource: (fileId: number) =>
-    request<{ deleted: boolean }>(`/queue/upload-source/${fileId}`, { method: 'DELETE' }),
   extractZipFile: async (
     file: File,
     folderId?: number | null,
@@ -6918,16 +7068,12 @@ export interface ArchivePurgePreview {
   count: number;
   total_bytes: number;
   sample_filenames: string[];
-  mode: 'age' | 'count';
-  older_than_days: number | null;
-  keep_count: number | null;
+  older_than_days: number;
 }
 
 export interface ArchivePurgeSettings {
   enabled: boolean;
   days: number;
-  mode: 'age' | 'count';
-  max_count: number;
   // #1390: when true, bulk-deletes the linked PrintLogEntry rows so the
   // contribution drops from Quick Stats too. Default false — soft-delete,
   // Quick Stats preserved.
@@ -7119,8 +7265,10 @@ export interface VirtualPrinterModels {
 export interface PendingUpload {
   id: number;
   filename: string;
-  // Resolved display name; falls back to the filename stem when the 3MF has
-  // no embedded title or the operator prefers the filename.
+  // Resolved name the review card should show — mirrors what archive_print
+  // will eventually write to PrintArchive.print_name (#1152 follow-up). Falls
+  // back to the stripped filename stem when the 3MF has no embedded title or
+  // the operator has chosen the "filename" archive-name source.
   display_name: string;
   file_size: number;
   source_ip: string | null;
@@ -7296,8 +7444,8 @@ export const pendingUploadsApi = {
 
   get: (id: number) => request<PendingUpload>(`/pending-uploads/${id}`),
 
-  saveToFiles: (id: number, data?: { tags?: string; notes?: string; project_id?: number }) =>
-    request<{ library_file_id: number; filename: string }>(`/pending-uploads/${id}/save-to-files`, {
+  archive: (id: number, data?: { tags?: string; notes?: string; project_id?: number }) =>
+    request<{ id: number; print_name: string; filename: string }>(`/pending-uploads/${id}/archive`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),
@@ -7305,8 +7453,8 @@ export const pendingUploadsApi = {
   discard: (id: number) =>
     request<{ success: boolean }>(`/pending-uploads/${id}`, { method: 'DELETE' }),
 
-  saveAllToFiles: () =>
-    request<{ saved: number; failed: number }>('/pending-uploads/save-to-files-all', { method: 'POST' }),
+  archiveAll: () =>
+    request<{ archived: number; failed: number }>('/pending-uploads/archive-all', { method: 'POST' }),
 
   discardAll: () =>
     request<{ discarded: number }>('/pending-uploads/discard-all', { method: 'DELETE' }),

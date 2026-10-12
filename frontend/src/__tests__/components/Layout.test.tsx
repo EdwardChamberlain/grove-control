@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { Layout } from '../../components/Layout';
 import { http, HttpResponse } from 'msw';
@@ -141,26 +141,6 @@ describe('Layout', () => {
   });
 
   describe('navigation', () => {
-    it('shows the sidebar Queue badge for queued jobs', async () => {
-      const jobs = [
-        { id: 1, printer_id: 1, status: 'queued' },
-        { id: 2, printer_id: 1, status: 'queued' },
-        { id: 3, printer_id: 1, status: 'paused' },
-      ];
-      server.use(
-        http.get('/api/v1/queue/', ({ request }) => {
-          const status = new URL(request.url).searchParams.get('status');
-          return HttpResponse.json(jobs.filter(job => job.status === status));
-        }),
-      );
-
-      render(<Layout />);
-
-      const sidebar = await screen.findByRole('complementary');
-      const queueLink = within(sidebar).getByRole('link', { name: /Queue/ });
-      expect(await within(queueLink).findByText('2')).toBeInTheDocument();
-    });
-
     it('has navigation items', async () => {
       render(<Layout />);
 
@@ -354,6 +334,67 @@ describe('Layout', () => {
         // Back to dark mode
         const btn = document.querySelector('button[title="Switch to light mode"]');
         expect(btn).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('plate detection alert modal', () => {
+    it('shows modal when plate-not-empty event is dispatched', async () => {
+      render(<Layout />);
+
+      // Dispatch the plate-not-empty event
+      window.dispatchEvent(
+        new CustomEvent('plate-not-empty', {
+          detail: {
+            printer_id: 1,
+            printer_name: 'Test Printer',
+            message: 'Objects detected on build plate',
+          },
+        })
+      );
+
+      await waitFor(() => {
+        // Modal should appear with "Print Paused!" text
+        expect(document.body.textContent).toContain('Print Paused!');
+        expect(document.body.textContent).toContain('Test Printer');
+      });
+    });
+
+    it('closes modal when I Understand button is clicked', async () => {
+      render(<Layout />);
+
+      // Dispatch the plate-not-empty event
+      window.dispatchEvent(
+        new CustomEvent('plate-not-empty', {
+          detail: {
+            printer_id: 1,
+            printer_name: 'Test Printer',
+            message: 'Objects detected on build plate',
+          },
+        })
+      );
+
+      await waitFor(() => {
+        expect(document.body.textContent).toContain('Print Paused!');
+      });
+
+      // Click the "I Understand" button
+      const button = document.querySelector('button');
+      if (button && button.textContent?.includes('I Understand')) {
+        button.click();
+      }
+
+      // Find and click the "I Understand" button by searching all buttons
+      const buttons = document.querySelectorAll('button');
+      buttons.forEach((btn) => {
+        if (btn.textContent?.includes('I Understand')) {
+          btn.click();
+        }
+      });
+
+      await waitFor(() => {
+        // Modal should be closed
+        expect(document.body.textContent).not.toContain('Print Paused!');
       });
     });
   });

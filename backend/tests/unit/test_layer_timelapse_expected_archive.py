@@ -17,13 +17,13 @@ behind `_maybe_start_layer_timelapse(printer, printer_id, archive_id)`,
 which gates on the same `external_camera_enabled and external_camera_url`
 check. Testing the helper directly (instead of driving the whole
 on_print_start flow) keeps this regression locked in without dragging in
-unrelated side effects (database queries, MQTT relay, etc.).
+unrelated side effects (plate detection, DB queries, MQTT relay, etc.).
 """
 
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.app.services.print_effects import _maybe_start_layer_timelapse
+from backend.app.main import _maybe_start_layer_timelapse
 
 
 def _make_printer(*, external_camera_enabled: bool, external_camera_url: str | None):

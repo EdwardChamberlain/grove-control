@@ -1,19 +1,23 @@
+import json
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import check_permission, check_printer_access, get_api_key
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
-from backend.app.core.websocket import ws_manager
 from backend.app.models.api_key import APIKey
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lifecycle.queued import create_job, filament_contract
+from backend.app.services.filament_requirements import (
+    build_queue_filament_overrides,
+    extract_filament_requirements,
+)
 from backend.app.services.printer_manager import printer_manager
 
 logger = logging.getLogger(__name__)
@@ -27,6 +31,7 @@ class QueueAddRequest(BaseModel):
     printer_id: int
     project_id: int | None = None
     scheduled_time: str | None = None  # ISO format datetime
+    require_previous_success: bool = False
     auto_off_after: bool = False
     filament_overrides: list[dict] | None = None
     force_color_match: bool = True
@@ -89,6 +94,19 @@ async def webhook_add_to_queue(
     if not printer:
         raise HTTPException(status_code=404, detail="Printer not found")
 
+    # Get next position
+    result = await db.execute(
+        select(PrintQueueItem.position)
+        .where(
+            PrintQueueItem.printer_id == data.printer_id,
+            PrintQueueItem.status == "pending",
+        )
+        .order_by(PrintQueueItem.position.desc())
+        .limit(1)
+    )
+    max_position = result.scalar()
+    next_position = (max_position or 0) + 1
+
     # Parse scheduled time if provided
     scheduled_time = None
     if data.scheduled_time:
@@ -99,32 +117,40 @@ async def webhook_add_to_queue(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid scheduled_time format")
 
-    source = settings.base_dir / archive.file_path  # SEC-PATH-OK: DB-stored; legacy rows may be absolute
+    archive_path = Path(archive.file_path)
+    source_path = (
+        archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+    )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
+    requirements = extract_filament_requirements(source_path) if source_path.exists() else []
     try:
-        _types, overrides = filament_contract(
-            source, provided=data.filament_overrides, force_color_match=data.force_color_match
+        overrides = build_queue_filament_overrides(
+            requirements,
+            data.filament_overrides,
+            force_color_match=data.force_color_match,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    job = {
-        "printer_id": data.printer_id,
-        "archive_id": data.archive_id,
-        "project_id": data.project_id,
-        "scheduled_time": scheduled_time,
-        "auto_off_after": data.auto_off_after,
-        "filament_overrides": overrides,
-        "force_color_match": data.force_color_match,
-    }
-    [queue_item] = await create_job(db, [job])
+    # Create queue item
+    queue_item = PrintQueueItem(
+        printer_id=data.printer_id,
+        archive_id=data.archive_id,
+        project_id=data.project_id,
+        position=next_position,
+        scheduled_time=scheduled_time,
+        require_previous_success=data.require_previous_success,
+        auto_off_after=data.auto_off_after,
+        filament_overrides=json.dumps(overrides) if overrides else None,
+        force_color_match=data.force_color_match,
+    )
+    db.add(queue_item)
     await db.commit()
-    await ws_manager.send_queue_work_changed()
     await db.refresh(queue_item)
 
     return QueueAddResponse(
         id=queue_item.id,
         archive_id=queue_item.archive_id,
-        printer_id=queue_item.assigned_printer_id,
+        printer_id=queue_item.printer_id,
         position=queue_item.position,
         status=queue_item.status,
         message=f"Added to queue at position {queue_item.position}",
@@ -163,8 +189,8 @@ async def webhook_start_print(
     result = await db.execute(
         select(PrintQueueItem)
         .where(
-            PrintQueueItem.assigned_printer_id == printer_id,
-            PrintQueueItem.status == "queued",
+            PrintQueueItem.printer_id == printer_id,
+            PrintQueueItem.status == "pending",
         )
         .order_by(PrintQueueItem.position)
         .limit(1)
@@ -188,7 +214,6 @@ async def webhook_start_print(
 async def webhook_stop_print(
     printer_id: int,
     api_key: APIKey = Depends(get_api_key),
-    db: AsyncSession = Depends(get_db),
 ):
     """Stop the current print on a printer.
 
@@ -196,26 +221,30 @@ async def webhook_stop_print(
     """
     check_permission(api_key, "control_printer")
     check_printer_access(api_key, printer_id)
-    state = printer_manager.get_status(printer_id)
-    if not state or not state.connected:
-        raise HTTPException(status_code=503, detail="Printer is not connected")
+
+    status = printer_manager.get_status(printer_id)
+    # `printer_manager.get_status(...)` returns a ``PrinterState`` dataclass
+    # (see backend/app/services/bambu_mqtt.py), not a dict — `.get(...)` on it
+    # raises AttributeError and surfaces as a generic 500 (#1584).
+    if not status or not status.connected:
+        raise HTTPException(status_code=503, detail="Printer not connected")
+
+    if status.state != "RUNNING":
+        raise HTTPException(status_code=409, detail="No print in progress")
 
     try:
-        from backend.app.services.lifecycle.engine import InvalidQueueTransition
-        from backend.app.services.queue_actions import stop_current_job
+        await printer_manager.stop_print(printer_id)
+    except Exception as e:
+        logger.error("Failed to stop print: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
-        _item, _physical_attempt, command_sent = await stop_current_job(db, printer_id)
-    except InvalidQueueTransition as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
-
-    return {"message": "Print stop command sent" if command_sent else "Stop intent recorded; inspect the printer"}
+    return {"message": "Print stopped"}
 
 
 @router.post("/printer/{printer_id}/cancel")
 async def webhook_cancel_print(
     printer_id: int,
     api_key: APIKey = Depends(get_api_key),
-    db: AsyncSession = Depends(get_db),
 ):
     """Cancel the current print on a printer.
 
@@ -223,19 +252,22 @@ async def webhook_cancel_print(
     """
     check_permission(api_key, "control_printer")
     check_printer_access(api_key, printer_id)
-    state = printer_manager.get_status(printer_id)
-    if not state or not state.connected:
-        raise HTTPException(status_code=503, detail="Printer is not connected")
+
+    status = printer_manager.get_status(printer_id)
+    # Same dataclass-not-dict shape as stop_print above (#1584).
+    if not status or not status.connected:
+        raise HTTPException(status_code=503, detail="Printer not connected")
+
+    if status.state not in ["RUNNING", "PAUSE"]:
+        raise HTTPException(status_code=409, detail="No print to cancel")
 
     try:
-        from backend.app.services.lifecycle.engine import InvalidQueueTransition
-        from backend.app.services.queue_actions import stop_current_job
+        await printer_manager.cancel_print(printer_id)
+    except Exception as e:
+        logger.error("Failed to cancel print: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
-        _item, _physical_attempt, command_sent = await stop_current_job(db, printer_id)
-    except InvalidQueueTransition as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
-
-    return {"message": "Print stop command sent" if command_sent else "Stop intent recorded; inspect the printer"}
+    return {"message": "Print cancelled"}
 
 
 @router.get("/printer/{printer_id}/status", response_model=PrinterStatusResponse)
@@ -304,16 +336,16 @@ async def webhook_get_queue_status(
         result = await db.execute(
             select(PrintQueueItem)
             .where(
-                func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id) == printer.id,
-                PrintQueueItem.status.in_(["queued", "preheating", "dispatching", "printing", "paused"]),
+                PrintQueueItem.printer_id == printer.id,
+                PrintQueueItem.status.in_(["pending", "preheating", "dispatching", "printing"]),
             )
             .order_by(PrintQueueItem.position)
         )
         items = result.scalars().all()
 
-        pending_count = sum(1 for i in items if i.status == "queued")
+        pending_count = sum(1 for i in items if i.status == "pending")
         dispatching_count = sum(1 for i in items if i.status == "dispatching")
-        printing_count = sum(1 for i in items if i.status in ("printing", "paused"))
+        printing_count = sum(1 for i in items if i.status == "printing")
 
         response.append(
             QueueStatusResponse(
@@ -328,8 +360,7 @@ async def webhook_get_queue_status(
                         "id": item.id,
                         "archive_id": item.archive_id,
                         "position": item.position,
-                        # Preserve the existing integration names for waiting/paused work.
-                        "status": {"queued": "pending", "paused": "printing"}.get(item.status, item.status),
+                        "status": item.status,
                     }
                     for item in items
                 ],

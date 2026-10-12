@@ -59,11 +59,11 @@ def _make_assignment(spool_id=1, ams_id=0, tray_id=0):
     return assignment
 
 
-def _make_archive(archive_id=1, file_path="archives/1/multi_plate.3mf"):
+def _make_archive(archive_id=1, plate_id=None, file_path="archives/1/multi_plate.3mf"):
     archive = MagicMock()
     archive.id = archive_id
     archive.file_path = file_path
-    archive.dispatched_queue_item_id = None
+    archive.plate_id = plate_id
     archive.extra_data = None
     return archive
 
@@ -250,11 +250,10 @@ class TestPlateIdRecovery:
 
     @pytest.mark.asyncio
     async def test_archive_plate_id_is_used_when_the_session_is_gone(self):
-        archive = _make_archive(archive_id=312)
-        queue_item = _make_queue_item(plate_id=1)
+        archive = _make_archive(archive_id=312, plate_id=1)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
-        db = _mock_db_sequential([archive, queue_item, assignment, spool])
+        db = _mock_db_sequential([archive, None, assignment, spool])
         seen_plate_ids: list = []
 
         printer_manager = MagicMock()
@@ -291,7 +290,7 @@ class TestPlateIdRecovery:
 
     @pytest.mark.asyncio
     async def test_queue_item_plate_id_is_used_when_the_archive_has_none(self):
-        archive = _make_archive(archive_id=312)
+        archive = _make_archive(archive_id=312, plate_id=None)
         queue_item = _make_queue_item(plate_id=2)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
@@ -334,7 +333,7 @@ class TestPlateIdRecovery:
 
     @pytest.mark.asyncio
     async def test_caller_plate_id_wins_over_the_database(self):
-        archive = _make_archive(archive_id=312)
+        archive = _make_archive(archive_id=312, plate_id=1)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
         db = _mock_db_sequential([archive, None, assignment, spool])
@@ -380,10 +379,10 @@ class TestMappingPriority:
 
     @pytest.mark.asyncio
     async def test_queue_mapping_beats_the_live_mqtt_mapping(self):
-        archive = _make_archive(archive_id=312)
+        archive = _make_archive(archive_id=312, plate_id=1)
         # Dispatched against AMS0-T2 (global tray 2); the printer now reports
         # tray 3 because backup swapped in the neighbouring spool.
-        queue_item = _make_queue_item(ams_mapping="[2]", plate_id=1)
+        queue_item = _make_queue_item(ams_mapping="[2]")
         spool_69 = _make_spool(spool_id=69)
         assign_69 = _make_assignment(spool_id=69, ams_id=0, tray_id=2)
         db = _mock_db_sequential([archive, queue_item, assign_69, spool_69])
@@ -425,7 +424,7 @@ class TestMappingPriority:
     @pytest.mark.asyncio
     async def test_mqtt_mapping_still_used_for_a_direct_print(self):
         """No queue item — the live field is the only mapping there is."""
-        archive = _make_archive(archive_id=400)
+        archive = _make_archive(archive_id=400, plate_id=1)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
         db = _mock_db_sequential([archive, None, assignment, spool])
@@ -506,7 +505,7 @@ class TestRestoreOnRestartRecovery:
 
     @pytest.mark.asyncio
     async def test_persisted_log_comes_back_onto_the_printer_state(self, db_session, printer):
-        from backend.app.services.print_effects import _restore_usage_tracking_session
+        from backend.app.main import _restore_usage_tracking_session
 
         await persist_session(db_session, self._session(printer.id), [(2, 0)])
         _active_sessions.clear()
@@ -519,7 +518,7 @@ class TestRestoreOnRestartRecovery:
 
     @pytest.mark.asyncio
     async def test_entries_seen_by_this_process_are_kept_after_the_persisted_ones(self, db_session, printer):
-        from backend.app.services.print_effects import _restore_usage_tracking_session
+        from backend.app.main import _restore_usage_tracking_session
 
         await persist_session(db_session, self._session(printer.id), [(2, 0)])
         state = self._state(tray_change_log=[(3, 675)])
@@ -532,7 +531,7 @@ class TestRestoreOnRestartRecovery:
     async def test_no_persisted_row_seeds_from_the_tray_feeding_now(self, db_session, printer):
         """A print that started before this build still gets its remaining
         segment attributed to the right spool."""
-        from backend.app.services.print_effects import _restore_usage_tracking_session
+        from backend.app.main import _restore_usage_tracking_session
 
         state = self._state()
 
@@ -543,7 +542,7 @@ class TestRestoreOnRestartRecovery:
 
     @pytest.mark.asyncio
     async def test_unloaded_tray_seeds_nothing(self, db_session, printer):
-        from backend.app.services.print_effects import _restore_usage_tracking_session
+        from backend.app.main import _restore_usage_tracking_session
 
         state = self._state(tray_now=255)
 
@@ -555,7 +554,7 @@ class TestRestoreOnRestartRecovery:
     async def test_a_row_from_a_different_print_is_discarded(self, db_session, printer):
         """A completion Bambuddy never saw leaves a row behind; it must not
         attach itself to whatever is running now."""
-        from backend.app.services.print_effects import _restore_usage_tracking_session
+        from backend.app.main import _restore_usage_tracking_session
 
         await persist_session(db_session, self._session(printer.id, print_name="Old_Print"), [(2, 0)])
         _active_sessions.clear()
@@ -572,7 +571,7 @@ class TestRestoreOnRestartRecovery:
     async def test_an_unloaded_tray_does_not_clobber_last_loaded_tray(self, db_session, printer):
         """``last_loaded_tray`` is the fallback that survives the end-of-print
         retract to 255; writing 255 into it would defeat its whole purpose."""
-        from backend.app.services.print_effects import _restore_usage_tracking_session
+        from backend.app.main import _restore_usage_tracking_session
 
         state = self._state(tray_now=255, last_loaded_tray=2)
 
@@ -584,7 +583,7 @@ class TestRestoreOnRestartRecovery:
     async def test_a_failure_is_swallowed_so_the_caller_keeps_going(self, db_session, printer):
         """The caller still has to capture its timelapse baseline before the
         printer uploads the in-flight recording — there is no second chance."""
-        from backend.app.services.print_effects import _restore_usage_tracking_session
+        from backend.app.main import _restore_usage_tracking_session
 
         broken = SimpleNamespace()  # no subtask_name, no tray fields at all
 
@@ -599,11 +598,10 @@ class TestPlateNotInTheFile:
     async def test_falls_back_to_the_whole_file_when_the_plate_is_absent(self):
         """The archive's own 3MF can be gone, with a same-named library file
         substituted that was sliced with different plates."""
-        archive = _make_archive(archive_id=312)
-        queue_item = _make_queue_item(plate_id=7)
+        archive = _make_archive(archive_id=312, plate_id=7)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
-        db = _mock_db_sequential([archive, queue_item, assignment, spool])
+        db = _mock_db_sequential([archive, None, assignment, spool])
         calls: list = []
 
         def _extract(path, plate_id=None):
@@ -646,9 +644,8 @@ class TestPlateNotInTheFile:
 
     @pytest.mark.asyncio
     async def test_a_file_with_no_usage_at_all_still_records_nothing(self):
-        archive = _make_archive(archive_id=312)
-        queue_item = _make_queue_item(plate_id=1)
-        db = _mock_db_sequential([archive, queue_item, None])
+        archive = _make_archive(archive_id=312, plate_id=1)
+        db = _mock_db_sequential([archive, None])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(

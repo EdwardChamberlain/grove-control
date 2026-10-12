@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'O modo desenvolvedor LAN não está ativado em: {{names}}. Alguns recursos podem não funcionar.',
     howToEnable: 'Como ativar',
     incompatibleFile: 'Este arquivo foi fatiado para {{slicedFor}}, mas esta impressora é uma {{printerModel}}',
-    directUploadLibraryNote: 'O envio é adicionado à fila e não é salvo no Gerenciador de Arquivos.',
+    directUploadLibraryNote: 'O arquivo enviado é salvo no Gerenciador de Arquivos antes de entrar na fila.',
     dropNotPrintable: 'Apenas arquivos .gcode e .gcode.3mf podem ser impressos',
     dropToPrint: 'Solte para imprimir',
     cannotPrint: 'Impressora ocupada',
@@ -835,8 +835,6 @@ export default {
       failedUpdateFavorites: 'Falha ao atualizar favoritos',
       exportDownloaded: 'Exportação baixada',
       exportFailed: 'Falha na exportação',
-      savedToFiles: '{{filename}} salvo em Arquivos',
-      failedSaveToFiles: 'Falha ao salvar o arquivo de impressão em Arquivos',
     },
     menu: {
       print: 'Imprimir',
@@ -876,7 +874,6 @@ export default {
       select: 'Selecionar',
       deselect: 'Desmarcar',
       delete: 'Excluir',
-      saveToFiles: 'Salvar em Arquivos',
     },
     permission: {
       noReprint: 'Você não tem permissão para reimprimir este arquivo',
@@ -974,7 +971,7 @@ export default {
       deleteButton: 'Excluir',
       deletePurgeStats: 'Remover também esta impressão das Quick Stats (filamento, tempo, custo, energia)',
       deleteQueueItemsWarning: '{{count}} item(ns) de fila vinculado(s) a este arquivo também serão removidos.',
-      deleteBlockedByPrinting: 'Não é possível excluir — {{count}} trabalho(s) ainda reservam uma impressora. Pare os trabalhos ativos e libere suas placas primeiro.',
+      deleteBlockedByPrinting: 'Não é possível excluir — {{count}} item(ns) de fila estão sendo enviados ou impressos. Pare o trabalho ativo primeiro e tente novamente.',
       removeSource3mf: 'Remover Source 3MF',
       removeSource3mfConfirm: 'Tem certeza de que deseja remover o arquivo source 3MF de "{{name}}"? Isso excluirá o arquivo original do projeto do fatiador.',
       removeButton: 'Remover',
@@ -1064,12 +1061,6 @@ export default {
 
   // Queue page
   queue: {
-    awaitingPlateClear: 'Aguardando limpeza da mesa',
-    resolveDispatch: {
-      prompt: "A impressora não confirmou este trabalho. Verifique a impressora antes de escolher:",
-      printing: "Está imprimindo",
-      failed: "A impressão não começou",
-    },
     filamentShort: {
       rowBadge: 'Filamento insuficiente para a bobina atribuida',
       rowTooltip: 'O escalonador sinalizou este item. Clique em Play para ver o deficit por slot e decidir se quer imprimir mesmo assim.',
@@ -1150,10 +1141,6 @@ export default {
     },
     // Status
     status: {
-      queued: 'Na fila',
-      finished: 'Concluído',
-      successful: 'Bem-sucedido',
-      unsuccessful: 'Sem sucesso',
       pending: 'Pendente',
       scheduled: 'Agendado',
       waiting: 'Aguardando',
@@ -1193,7 +1180,8 @@ export default {
     },
     // Badges
     badges: {
-      manualStart: 'Início manual',
+      staged: 'Preparado (início manual)',
+      requiresPrevious: 'Requer sucesso anterior',
       autoPowerOff: 'Desligamento automático',
       gcodeInjection: 'G-code',
     },
@@ -1213,8 +1201,6 @@ export default {
     },
     // Actions
     actions: {
-      clearPlate: 'Limpar mesa',
-      retry: 'Tentar novamente',
       startPrint: 'Iniciar Impressão',
       stopPrint: 'Parar Impressão',
       requeue: 'Reenfileirar',
@@ -1854,6 +1840,12 @@ export default {
     saveThumbnails: 'Salvar miniaturas',
     captureFinishPhoto: 'Capturar foto de conclusão',
     noPrintersConfigured: 'Nenhuma impressora configurada',
+    // Archive settings
+    archiveMode: {
+      always: 'Sempre criar entrada de arquivo',
+      never: 'Nunca criar entrada de arquivo',
+      ask: 'Perguntar a cada vez',
+    },
     // Updates
     checkForUpdatesLabel: 'Verificar atualizações',
     checkPrinterFirmware: 'Verificar firmware da impressora',
@@ -2356,6 +2348,8 @@ export default {
     energyModePrintDescription: 'O painel mostra a soma da energia usada durante as impressões',
     energyModeTotalDescription: 'O painel mostra a energia total dos plugues inteligentes',
     fileManager: 'Gerenciador de arquivos',
+    createArchiveEntry: 'Criar entrada de arquivo ao imprimir',
+    createArchiveEntryDescription: 'Ao imprimir pelo gerenciador de arquivos, criar opcionalmente uma entrada de arquivo',
     lowDiskSpaceWarning: 'Aviso de pouco espaço em disco',
     lowDiskSpaceDescription: 'Mostrar aviso quando o espaço livre em disco ficar abaixo deste limite',
     printerFirmware: 'Firmware da impressora',
@@ -3822,7 +3816,6 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Bandeja {{plateIndex}} de {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} fatiado',
-    completedToFilesToast: '{{name}} fatiado e salvo em Arquivos',
     failedTitle: 'Falha ao fatiar',
     failedToast: 'Falha ao fatiar {{name}}: {{detail}}',
     tier: {
@@ -4908,12 +4901,12 @@ export default {
     },
     mode: {
       title: 'Modo',
-      archive: 'Arquivos',
-      archiveDesc: 'Salvar envios em Arquivos',
+      archive: 'Arquivar',
+      archiveDesc: 'Arquivar arquivos imediatamente',
       review: 'Revisar',
-      reviewDesc: 'Revisar envios antes de salvar em Arquivos',
+      reviewDesc: 'Revisar antes de arquivar',
       queue: 'Fila',
-      queueDesc: 'Adicionar envios à fila de impressão',
+      queueDesc: 'Arquivar e adicionar à fila',
       proxy: 'Proxy',
       proxyDesc: 'Retransmitir para impressora real',
     },
@@ -4941,7 +4934,7 @@ export default {
     howItWorks: {
       title: 'Como funciona',
       step1: 'Complete o guia de configuração para sua plataforma',
-      step2: 'Nos modos Arquivos, Revisar e Fila, use o botão “Enviar” do fatiador para carregar arquivos 3MF no Grove Control. Arquivos salva em Arquivos, Revisar permite salvar ou descartar e Fila adiciona trabalhos de impressão. “Impressão bem-sucedida” significa que o envio terminou.',
+      step2: 'Ative a impressora virtual e defina um código de acesso',
       step3: 'No Bambu Studio ou OrcaSlicer, vá para "Adicionar Impressora"',
     },
     status: {
@@ -4997,8 +4990,8 @@ export default {
       message: 'Tem certeza que deseja excluir "{{name}}"? Isso irá parar todos os serviços desta impressora.',
     },
     archiveNameSource: {
-      title: 'Nome de exibição do envio',
-      description: 'Escolha como os envios aparecem na lista de revisão. “Metadados” usa o título incorporado no 3MF; “Nome do arquivo” usa o nome recebido por FTP.',
+      title: 'Origem do nome do arquivo',
+      description: 'Escolha como os novos arquivos são nomeados quando chegam pela impressora virtual. "Metadados" usa o título embutido pelo slicer no 3MF (padrão). "Nome do arquivo" usa o nome que o Bambu Studio enviou via FTP. Nota: o Bambu Studio sobrescreve o nome digitado no diálogo "enviar para impressora" com o campo Título do 3MF quando presente, portanto ambos os modos costumam produzir a mesma string.',
       metadata: 'Metadados',
       filename: 'Nome do arquivo',
     },
@@ -5238,6 +5231,12 @@ export default {
     autoOffAfterDrying: 'Desligar Após Secagem',
     autoOffAfterDryingDescription: 'Desligar quando a secagem do AMS terminar',
     delayAfterDryingMinutes: 'Atraso após secagem (minutos)',
+    turnOffDelayMode: 'Modo de atraso para desligar',
+    time: 'Tempo',
+    temp: 'Temp.',
+    delayMinutes: 'Atraso (minutos)',
+    tempThreshold: 'Limite de temperatura (°C)',
+    tempThresholdDescription: 'Desliga quando o bico esfria abaixo desta temperatura',
     edit: 'Editar',
     deleteConfirm: 'Tem certeza que deseja excluir "{{name}}"? Esta ação não pode ser desfeita.',
     turnOnConfirm: 'Tem certeza que deseja ligar "{{name}}"?',
@@ -6354,20 +6353,10 @@ export default {
   },
   archiveAutoPurge: {
     enableLabel: 'Limpar arquivos antigos auto.',
-    enableDescription: 'Aplica uma vez por dia a política de retenção de arquivos selecionada.',
-    modeLabel: 'Política de retenção',
-    ageMode: 'Por idade',
-    countMode: 'Por quantidade de arquivos',
+    enableDescription: 'Uma vez por dia oculta das listagens os arquivos não impressos dentro do limite e remove seus arquivos do disco. Reimprimir reinicia o cronômetro.',
     ageLabel: 'Exclusão auto. de arquivos não impressos nos últimos',
     ageDescription: 'Mínimo 7 dias, máximo 10 anos. Baseado na última conclusão de impressão — reimprimir reinicia a idade. Remove 3MF, miniatura, timelapse, 3MF de origem, F3D e fotos.',
     days: 'dias',
-    maxCountLabel: 'Número máximo de arquivos de arquivo para manter',
-    countDescription: 'Mantém os arquivos usados mais recentemente, independentemente da idade. Reimprimir atualiza sua posição. Arquivos de impressões em andamento nunca são removidos.',
-    countDraftHint: 'As alterações entram em vigor ao selecionar Aplicar.',
-    countValidationError: 'Insira um número inteiro de 1 a 100.000.',
-    ageValidationError: 'Digite um número inteiro de 7 a 3.650.',
-    countPreviewSummary: '{{count}} arquivo(s) seriam removidos na próxima execução.',
-    countPreviewNone: 'Nenhum arquivo excede este limite no momento.',
     purgeStatsLabel: 'Remover também das estatísticas',
     purgeStatsDescription: 'Quando ativada, a varredura diária também descarta a contribuição de cada arquivo limpo do Quick Stats (filamento, tempo, custo, energia). Desativada por padrão — o Quick Stats mantém a contribuição e apenas os arquivos saem do disco.',
     runNow: 'Limpar arquivos agora',

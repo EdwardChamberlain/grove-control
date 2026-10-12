@@ -12,7 +12,7 @@ export function QueueStatsBar({
   queuedCount,
   totalTime,
   totalWeight,
-  awaitingCount,
+  historyCount,
   t,
   action,
 }: {
@@ -20,7 +20,7 @@ export function QueueStatsBar({
   queuedCount: number;
   totalTime: number;
   totalWeight: number;
-  awaitingCount: number;
+  historyCount: number;
   t: (key: string) => string;
   action?: ReactNode;
 }) {
@@ -29,7 +29,7 @@ export function QueueStatsBar({
     { key: 'queued', icon: Clock, value: queuedCount, label: t('queue.summary.queued'), color: 'text-yellow-400' },
     { key: 'time', icon: Timer, value: formatDuration(totalTime), label: t('queue.summary.totalTime'), color: 'text-bambu-green' },
     { key: 'weight', icon: Weight, value: formatWeight(totalWeight), label: t('queue.summary.totalWeight'), color: 'text-purple-400' },
-    { key: 'awaiting', icon: CheckCircle, value: awaitingCount, label: t('queue.awaitingPlateClear'), color: 'text-bambu-gray' },
+    { key: 'history', icon: CheckCircle, value: historyCount, label: t('queue.summary.history'), color: 'text-bambu-gray' },
   ];
 
   return (

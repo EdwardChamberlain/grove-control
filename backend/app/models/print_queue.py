@@ -1,89 +1,19 @@
 from datetime import datetime
 
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    Text,
-    and_,
-    event,
-    func,
-    inspect,
-    or_,
-    text,
-)
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
-
-# Job state groups (#194). Defined with the table because the unique holding
-# index below is built from the states that hold their printer.
-ACTIVE_STATUSES = ("preheating", "dispatching", "printing", "paused")
-AWAITING_PLATE_CLEAR_STATUSES = ("finished", "failed", "cancelled")
-HOLDING_STATUSES = ACTIVE_STATUSES + AWAITING_PLATE_CLEAR_STATUSES
-FINAL_STATUSES = ("successful", "unsuccessful")
-HOLDING_INDEX_NAME = "uq_print_queue_holding_printer"
-PHYSICAL_HOLD_STATUSES = ACTIVE_STATUSES + ("finished", "cancelled")
-HOLDING_INDEX_WHERE = (
-    "printer_id IS NOT NULL AND (status IN ({}) OR (status = 'failed' AND physical_outcome IS NOT NULL))".format(
-        ", ".join(f"'{status}'" for status in PHYSICAL_HOLD_STATUSES)
-    )
-)
-
-
-def physical_holding_clause(status_column, physical_outcome_column):
-    """SQL predicate for jobs that physically reserve a printer.
-
-    A failed job only holds the printer after a start command may have reached
-    the machine. Proven-unsent dispatch failures keep the same lifecycle status
-    but have no physical outcome and release the printer for their fresh retry.
-    """
-    return or_(
-        status_column.in_(PHYSICAL_HOLD_STATUSES),
-        and_(status_column == "failed", physical_outcome_column.is_not(None)),
-    )
-
-
-def awaiting_plate_clear_clause(status_column, physical_outcome_column):
-    """SQL predicate for physical outcomes that require the plate-clear gate."""
-    return or_(
-        status_column.in_(("finished", "cancelled")),
-        and_(status_column == "failed", physical_outcome_column.is_not(None)),
-    )
-
-
-def is_physical_holding(status: str, physical_outcome: str | None) -> bool:
-    """Whether one persisted job state still owns a physical printer hold."""
-    return status in PHYSICAL_HOLD_STATUSES or (status == "failed" and physical_outcome is not None)
 
 
 class PrintQueueItem(Base):
     """Print queue item for scheduled/queued prints."""
 
     __tablename__ = "print_queue"
-    __table_args__ = (
-        Index(
-            HOLDING_INDEX_NAME,
-            "printer_id",
-            unique=True,
-            sqlite_where=text(HOLDING_INDEX_WHERE),
-            postgresql_where=text(HOLDING_INDEX_WHERE),
-        ),
-    )
     id: Mapped[int] = mapped_column(primary_key=True)
 
     # Links
-    # Bound printer, written once when the job leaves the queue. It remains
-    # immutable for the rest of this job's lifecycle.
     printer_id: Mapped[int | None] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), nullable=True)
-    # Queue-time preference. It is separate from the binding above so a retry
-    # starts as a fresh queued job and the scheduler can choose it again.
-    assigned_printer_id: Mapped[int | None] = mapped_column(
-        ForeignKey("printers.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     # Target printer model for model-based assignment (mutually exclusive with printer_id)
     # When set, scheduler assigns to any idle printer of matching model
     target_model: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -93,16 +23,14 @@ class PrintQueueItem(Base):
     # Required filament types for model-based assignment (JSON array, e.g., '["PLA", "PETG"]')
     # Used by scheduler to validate printer has compatible filaments loaded
     required_filament_types: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Waiting reason for a queued job, including explicit holds that need a user edit.
+    # Waiting reason - explains why a model-based job hasn't started yet
+    # Set by scheduler when no matching printer is available
     waiting_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Either archive_id OR library_file_id must be set; dispatch links the attempt Archive here.
+    # Either archive_id OR library_file_id must be set (archive created at print start from library file)
     archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="CASCADE"), nullable=True)
     library_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("library_files.id", ondelete="CASCADE"), nullable=True
     )
-    # Durable source name for an externally started print whose Archive file
-    # has not been attached yet; queue jobs use their linked source rows.
-    source_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     # Scheduling
     position: Mapped[int] = mapped_column(Integer, default=0)  # Queue order
@@ -117,19 +45,16 @@ class PrintQueueItem(Base):
     chamber_heat_soak: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     heat_soak_temperature: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
     heat_soak_minutes: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+    preheat_owner: Mapped[str | None] = mapped_column(String(36), nullable=True)
     preheat_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    preheat_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     preheat_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # The job's one pending wait (#217): when it falls due and what for. A
-    # status change clears it unless the transition sets a new one.
-    deadline_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    deadline_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Conditions
+    require_previous_success: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Power management
     auto_off_after: Mapped[bool] = mapped_column(Boolean, default=False)  # Power off printer after print
-    # A normal queue job may create one fresh replacement after a proven-unsent
-    # dispatch failure. Retry-created jobs set this false to prevent a chain.
-    retry_on_failure: Mapped[bool] = mapped_column(Boolean, default=True, server_default="false")
 
     # AMS mapping: JSON array of global tray IDs for each filament slot
     # Format: "[5, -1, 2, -1]" where position = slot_id-1, value = global tray ID (-1 = unused)
@@ -165,8 +90,8 @@ class PrintQueueItem(Base):
     nozzle_mapping: Mapped[str | None] = mapped_column(Text, nullable=True)
     nozzles_info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Queue-only uploads use a hidden LibraryFile row as temporary source
-    # storage. The scheduler clears this marker on ordinary user-managed Files.
+    # Printer-card direct uploads create transient library rows. When this is
+    # true, the scheduler deletes the source row/files after archiving a copy.
     cleanup_library_after_dispatch: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Print options. bed_levelling / flow_cali / nozzle_offset_cali are tri-state
@@ -181,9 +106,23 @@ class PrintQueueItem(Base):
     # Nozzle offset calibration — dual-nozzle printers only, MQTT-gated (#1682)
     nozzle_offset_cali: Mapped[str] = mapped_column(String(8), default="auto")
 
-    # queued, active, awaiting plate clear, or final; see services.lifecycle.engine.
-    # Persisted status changes go through its transition_queue_item.
-    status: Mapped[str] = mapped_column(String(20), default="queued")
+    # Status: pending, preheating, dispatching, printing, completed, failed, skipped, cancelled
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+
+    # Durable dispatch claim. A queue worker stamps this before slow source
+    # preparation or FTP I/O so pending rows cannot be reassigned or selected
+    # by another worker. The claim is cleared when the worker exits; startup
+    # reconciliation clears claims left by a process restart.
+    dispatching_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Cleared by the per-printer "Resume after failure" action (#1818) so the
+    # scheduler's `_check_previous_success` lookback skips this row. Without
+    # this, a single `failed` or `aborted` print poisoned every later
+    # `require_previous_success` item on the same printer forever — the
+    # lookback excluded `skipped` but had no way to dismiss the originating
+    # failure. The flag is per-item, not per-printer, so a fresh failure
+    # after a resume re-gates downstream items independently.
+    gate_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Set by the dispatch scheduler when the assigned spool can't satisfy
     # this print's per-slot filament weight (#1496). Display-only flag — the
@@ -205,30 +144,13 @@ class PrintQueueItem(Base):
     # item is only promoted from ``dispatching`` to ``printing`` once printer
     # telemetry reports an active print state.
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Durable progress through the one pre-send dispatch. I/O results are
-    # accepted only while the job remains in the stage that launched them.
-    dispatch_stage: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # The submission id embedded in the MQTT project_file command. It is
     # persisted before dispatch so terminal printer telemetry can still be
     # attributed to this exact attempt after an application restart.
     dispatch_subtask_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    # Printer identity observed when this bound attempt entered Dispatching.
-    # It distinguishes a cleared prior terminal report from another print
-    # that completed while this attempt was preparing its file.
-    dispatch_baseline_subtask_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Durable user intent; an MQTT terminal event alone confirms the physical
-    # outcome. Kept after Clear Plate so a late Archive can show the stopped
-    # attempt without pretending the printer confirmed an abort.
-    stop_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Immutable physical outcome, retained after Clear Plate even if an
-    # external print's Archive download has not finished. Display reasons and
-    # the released job state cannot distinguish a failure from a user Stop.
-    physical_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    physical_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    physical_failure_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -237,9 +159,8 @@ class PrintQueueItem(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships
-    printer: Mapped["Printer"] = relationship(foreign_keys=[printer_id])
-    assigned_printer: Mapped["Printer | None"] = relationship(foreign_keys=[assigned_printer_id])
-    archive: Mapped["PrintArchive | None"] = relationship(foreign_keys=[archive_id])
+    printer: Mapped["Printer"] = relationship()
+    archive: Mapped["PrintArchive | None"] = relationship()
     library_file: Mapped["LibraryFile | None"] = relationship()
     project: Mapped["Project | None"] = relationship(back_populates="queue_items")
     created_by: Mapped["User | None"] = relationship()
@@ -307,24 +228,18 @@ class PrintQueueVariant(Base):
     required_filament_types: Mapped[str | None] = mapped_column(Text, nullable=True)
     print_time_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Legacy column retained for existing databases; dispatch selection no
-    # longer rotates candidates or tracks attempt history.
+    # How many times this candidate has been dispatched and bounced back to
+    # pending by the start-watchdog. The resolver tries least-attempted first, so
+    # a printer that accepts the file and never starts (#1678) hands the job to
+    # the other machine on the next lap instead of burning the item's whole
+    # DISPATCH_MAX_ATTEMPTS budget against the same wedged printer — which is the
+    # entire reason the user queued an alternative.
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     queue_item: Mapped["PrintQueueItem"] = relationship(back_populates="variants")
     library_file: Mapped["LibraryFile"] = relationship()
-
-
-@event.listens_for(PrintQueueItem.status, "set")
-def _reject_direct_status_write(target: PrintQueueItem, value, oldvalue, initiator) -> None:
-    # Register with the model so the guard also applies when no service has
-    # imported the transition helper yet. New rows may set their initial state.
-    if inspect(target).has_identity:
-        from backend.app.services.lifecycle.engine import InvalidQueueTransition
-
-        raise InvalidQueueTransition("Queue status must only be changed through transition_queue_item")
 
 
 from backend.app.models.archive import PrintArchive  # noqa: E402

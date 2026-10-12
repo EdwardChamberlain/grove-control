@@ -262,12 +262,6 @@ export function useWebSocket() {
         }
         break;
 
-      case 'queue_work_changed':
-        // Queue jobs can be created by another browser, the API, or the scheduler.
-        // The shared summary is one request for all cards, independent of ownership.
-        queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-        break;
-
       case 'missing_spool_assignment': {
         if (message.printer_id === undefined || !Array.isArray(message.missing_slots)) {
           break;
@@ -315,6 +309,18 @@ export function useWebSocket() {
 
       case 'pong':
         // Keepalive response, ignore
+        break;
+
+      case 'plate_not_empty':
+        // Plate detection found objects - print was paused
+        // Dispatch event for toast notification
+        window.dispatchEvent(new CustomEvent('plate-not-empty', {
+          detail: {
+            printer_id: message.printer_id,
+            printer_name: (message as unknown as { printer_name?: string }).printer_name,
+            message: (message as unknown as { message?: string }).message,
+          }
+        }));
         break;
 
       case 'inventory_changed':

@@ -520,14 +520,10 @@ class TestQueueOwnershipPermissions(TestOwnershipPermissionsSetup):
             defaults = {
                 "printer_id": printer.id,
                 "archive_id": archive.id,
-                "status": "queued",
+                "status": "pending",
                 "position": 0,
             }
             defaults.update(kwargs)
-            if defaults.get("status") == "queued":
-                printer_id = defaults.pop("printer_id", None)
-                defaults.setdefault("assigned_printer_id", printer_id)
-                defaults["printer_id"] = None
 
             item = PrintQueueItem(**defaults)
             db_session.add(item)
@@ -798,14 +794,13 @@ class TestQueueOwnershipPermissions(TestOwnershipPermissionsSetup):
     @pytest.mark.integration
     @pytest.mark.parametrize("status", ["dispatching", "printing"])
     async def test_operator_can_stop_own_active_queue_item(
-        self, async_client: AsyncClient, auth_setup, queue_item_factory, db_session, status
+        self, async_client: AsyncClient, auth_setup, queue_item_factory, status
     ):
         """Operator can stop their own dispatching or printing queue item."""
         item = await queue_item_factory(
             created_by_id=auth_setup["operator_user"]["id"],
             status=status,
         )
-        await db_session.commit()
 
         response = await async_client.post(
             f"/api/v1/queue/{item.id}/stop",
@@ -1088,7 +1083,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_bulk_delete_nested_folder_releases_queue_reference(
         self, async_client: AsyncClient, auth_setup, db_session
     ):
-        """Folder deletion detaches sources without ending waiting jobs."""
+        """Nested files must be detached/cancelled before folder cascade."""
         from backend.app.models.library import LibraryFile, LibraryFolder
         from backend.app.models.print_queue import PrintQueueItem
 
@@ -1108,7 +1103,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         )
         db_session.add(nested_file)
         await db_session.flush()
-        queue_item = PrintQueueItem(library_file_id=nested_file.id, status="queued", position=1)
+        queue_item = PrintQueueItem(library_file_id=nested_file.id, status="pending", position=1)
         db_session.add(queue_item)
         await db_session.commit()
         await db_session.refresh(queue_item)
@@ -1121,10 +1116,8 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
         assert response.status_code == 200
         await db_session.refresh(queue_item)
-        assert queue_item.status == "queued"
+        assert queue_item.status == "cancelled"
         assert queue_item.library_file_id is None
-        assert queue_item.completed_at is None
-        assert queue_item.error_message == "'nested.3mf' was deleted from the library"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1487,15 +1480,15 @@ class TestReadIDORClosure(TestOwnershipPermissionsSetup):
         archive = await archive_factory(printer.id, print_name="A", created_by_id=auth_setup["operator_user"]["id"])
         own_item = PrintQueueItem(
             archive_id=archive.id,
-            assigned_printer_id=printer.id,
-            status="queued",
+            printer_id=printer.id,
+            status="pending",
             position=1,
             created_by_id=auth_setup["operator_user"]["id"],
         )
         admin_item = PrintQueueItem(
             archive_id=archive.id,
-            assigned_printer_id=printer.id,
-            status="queued",
+            printer_id=printer.id,
+            status="pending",
             position=2,
             created_by_id=auth_setup["admin_user"]["id"],
         )
@@ -1525,8 +1518,8 @@ class TestReadIDORClosure(TestOwnershipPermissionsSetup):
         archive = await archive_factory(printer.id, print_name="A", created_by_id=auth_setup["admin_user"]["id"])
         admin_item = PrintQueueItem(
             archive_id=archive.id,
-            assigned_printer_id=printer.id,
-            status="queued",
+            printer_id=printer.id,
+            status="pending",
             position=1,
             created_by_id=auth_setup["admin_user"]["id"],
         )
@@ -1960,19 +1953,19 @@ class TestProjectOwnershipBoundaries(TestOwnershipPermissionsSetup):
             project_id=child.id,
         )
         owned_item = PrintQueueItem(
-            assigned_printer_id=printer.id,
+            printer_id=printer.id,
             archive_id=owned_archive.id,
             project_id=project.id,
             created_by_id=auth_setup["operator_user"]["id"],
-            status="queued",
+            status="pending",
             position=1,
         )
         other_item = PrintQueueItem(
-            assigned_printer_id=printer.id,
+            printer_id=printer.id,
             archive_id=other_archive.id,
             project_id=project.id,
             created_by_id=auth_setup["operator2_user"]["id"],
-            status="queued",
+            status="pending",
             position=2,
         )
         db_session.add_all([owned_item, other_item])
