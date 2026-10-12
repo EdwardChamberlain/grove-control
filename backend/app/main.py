@@ -4774,6 +4774,8 @@ async def on_print_complete(printer_id: int, data: dict):
                 logger.info("Updated queue item %s status to %s", item.id, queue_status)
 
         await run_with_retry(_update_queue_status, label="queue status update")
+        if queue_item_id is not None:
+            await ws_manager.send_queue_work_changed()
 
         # Post-commit side effects (notifications, MQTT relay, auto-off) use
         # their own sessions and have their own error handling — no retry needed.
