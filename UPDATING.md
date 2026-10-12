@@ -9,6 +9,7 @@ later. Docker Compose is the supported production install path.
   latest stable release. Pin the image to
   `ghcr.io/edwardchamberlain/grove-control:1.0.0` when you need a reproducible
   deployment. Stable tags use the bare `X.Y.Z` version; there is no `v` prefix.
+  The matching Git source tag and GitHub Release use `vX.Y.Z`.
 - **Development:**
   `ghcr.io/edwardchamberlain/grove-control:dev` is built from the `dev` branch.
   It can change without notice and is intended for testing, not production

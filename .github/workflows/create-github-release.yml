@@ -1,0 +1,108 @@
+name: Create GitHub Release
+
+on:
+  workflow_run:
+    workflows: [Docker Publish]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      docker_publish_run_id:
+        description: Successful Docker Publish run ID to inspect without creating a tag or release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Dry-run release metadata
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download deployed metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: stable-release-metadata
+          path: ${{ runner.temp }}/release-metadata
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.docker_publish_run_id }}
+
+      - name: Validate release plan without writes
+        uses: actions/github-script@v9
+        env:
+          RELEASE_METADATA_PATH: ${{ runner.temp }}/release-metadata/stable-release.json
+        with:
+          script: |
+            const { runRelease } = require("./.github/scripts/create_github_release");
+            await runRelease({
+              github,
+              context,
+              core,
+              dryRun: true,
+              workflowRunId: core.getInput("docker_publish_run_id"),
+            });
+
+  create-release:
+    name: Tag deployed commit and publish release
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'workflow_run' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download deployed metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: stable-release-metadata
+          path: ${{ runner.temp }}/release-metadata
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Resolve deployed commit
+        id: deployment
+        shell: bash
+        run: |
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const fs = require("node:fs");
+          const metadata = JSON.parse(fs.readFileSync(
+            `${process.env.RUNNER_TEMP}/release-metadata/stable-release.json`,
+            "utf8",
+          ));
+          if (!/^[0-9a-f]{40}$/i.test(metadata.commit || "")) {
+            throw new Error("Publisher metadata has no valid deployed commit SHA.");
+          }
+          if (!/^\d+\.\d+\.\d+$/.test(metadata.version || "")) {
+            throw new Error("Publisher metadata has no stable X.Y.Z version.");
+          }
+          console.log(`sha=${metadata.commit}`);
+          NODE
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.deployment.outputs.sha }}
+          persist-credentials: false
+
+      - name: Create or update release
+        uses: actions/github-script@v9
+        env:
+          RELEASE_METADATA_PATH: ${{ runner.temp }}/release-metadata/stable-release.json
+        with:
+          script: |
+            const { runRelease } = require("./.github/scripts/create_github_release");
+            await runRelease({ github, context, core });

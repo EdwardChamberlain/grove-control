@@ -34,14 +34,21 @@ jobs:
       - name: Read version
         id: version
         shell: bash
+        env:
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           version="$(tr -d '[:space:]' < VERSION)"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "VERSION must contain an X.Y.Z version; got: $version" >&2
             exit 1
           fi
+          revision="$(git rev-parse HEAD)"
+          if [[ "$revision" != "$DEPLOYED_SHA" ]]; then
+            echo "Checked out $revision, but CI validated $DEPLOYED_SHA" >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -72,3 +79,29 @@ jobs:
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
           cache-from: type=gha,scope=docker-publish-production
           cache-to: type=gha,scope=docker-publish-production,mode=max
+
+      - name: Write deployed release metadata
+        env:
+          DEPLOYED_SHA: ${{ steps.version.outputs.revision }}
+          DEPLOYED_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const metadata = {
+            commit: process.env.DEPLOYED_SHA,
+            version: process.env.DEPLOYED_VERSION,
+          };
+          fs.writeFileSync(
+            `${process.env.RUNNER_TEMP}/stable-release.json`,
+            `${JSON.stringify(metadata, null, 2)}\n`,
+          );
+          NODE
+
+      - name: Upload deployed release metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: stable-release-metadata
+          path: ${{ runner.temp }}/stable-release.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90

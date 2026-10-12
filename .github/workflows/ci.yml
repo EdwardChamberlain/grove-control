@@ -19,6 +19,22 @@ permissions:
   contents: read
 
 jobs:
+  release-workflow-tests:
+    name: Release Workflow Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Test release workflow behavior without GitHub writes
+        run: node --test .github/scripts/create_github_release.test.js
+
+      - name: Parse workflow YAML
+        run: ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' .github/workflows/*.yml
+
   version-check:
     name: Version Consistency
     runs-on: ubuntu-latest
