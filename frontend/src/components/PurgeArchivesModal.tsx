@@ -33,12 +33,12 @@ export function PurgeArchivesModal({ onClose, initialDays }: PurgeArchivesModalP
 
   const previewQuery = useQuery({
     queryKey: ['archive-purge-preview', debouncedDays, purgeStats],
-    queryFn: () => api.previewArchivePurge(debouncedDays, purgeStats),
+    queryFn: () => api.previewArchivePurge({ olderThanDays: debouncedDays, purgeStats }),
     enabled: debouncedDays >= 1,
   });
 
   const purgeMutation = useMutation({
-    mutationFn: () => api.executeArchivePurge(days, purgeStats),
+    mutationFn: () => api.executeArchivePurge({ olderThanDays: days, purgeStats }),
     onSuccess: (res) => {
       showToast(t('archivePurge.toast.success', { count: res.deleted }), 'success');
       queryClient.invalidateQueries({ queryKey: ['archives'] });

@@ -11,6 +11,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { SIDEBAR_HIDDEN_SYSTEM_ITEMS_KEY, SIDEBAR_ORDER_KEY } from '../../utils/sidebarLayout';
 import { setAuthToken } from '../../api/client';
+import type { ArchivePurgeSettings } from '../../api/client';
 
 const mockSettings = {
   auto_archive: true,
@@ -36,6 +37,35 @@ const mockSettings = {
   check_printer_firmware: false,
   bed_cooled_threshold: 35,
 };
+
+function mockArchiveCountRetention(saveFails = false) {
+  let purgeSettings: ArchivePurgeSettings = { enabled: true, days: 365, mode: 'count', max_count: 100, purge_stats: false };
+  const saveRequests: ArchivePurgeSettings[] = [];
+  const previewCounts: number[] = [];
+  server.use(
+    http.get('/api/v1/archives/purge/settings', () => HttpResponse.json(purgeSettings)),
+    http.put('/api/v1/archives/purge/settings', async ({ request }) => {
+      const body = (await request.json()) as ArchivePurgeSettings;
+      saveRequests.push(body);
+      if (saveFails) return HttpResponse.json({ detail: 'Unable to save' }, { status: 500 });
+      purgeSettings = body;
+      return HttpResponse.json(purgeSettings);
+    }),
+    http.get('/api/v1/archives/purge/preview', ({ request }) => {
+      const keepCount = Number(new URL(request.url).searchParams.get('keep_count'));
+      previewCounts.push(keepCount);
+      return HttpResponse.json({
+        count: 2,
+        total_bytes: 4096,
+        sample_filenames: [`preview-${keepCount}.3mf`],
+        mode: 'count',
+        older_than_days: null,
+        keep_count: keepCount,
+      });
+    }),
+  );
+  return { saveRequests, previewCounts };
+}
 
 describe('SettingsPage', () => {
   beforeEach(() => {
@@ -107,6 +137,117 @@ describe('SettingsPage', () => {
         expect(screen.getByText('Network')).toBeInTheDocument();
         expect(screen.getByText('API Keys')).toBeInTheDocument();
       });
+    });
+
+    it('shows the count-based archive preview when count retention is selected', async () => {
+      let previewKeepCount: string | null = null;
+      let purgeSettings = { enabled: true, days: 365, mode: 'age', max_count: 100, purge_stats: false };
+      server.use(
+        http.get('/api/v1/archives/purge/settings', () => HttpResponse.json(purgeSettings)),
+        http.put('/api/v1/archives/purge/settings', async ({ request }) => {
+          purgeSettings = (await request.json()) as typeof purgeSettings;
+          return HttpResponse.json(purgeSettings);
+        }),
+        http.get('/api/v1/archives/purge/preview', ({ request }) => {
+          previewKeepCount = new URL(request.url).searchParams.get('keep_count');
+          return HttpResponse.json({
+            count: 2,
+            total_bytes: 4096,
+            sample_filenames: ['old-print-a.3mf', 'old-print-b.3mf'],
+            mode: 'count',
+            older_than_days: null,
+            keep_count: 100,
+          });
+        }),
+      );
+
+      render(<SettingsPage />);
+
+      const policySelect = await screen.findByLabelText('Retention policy');
+      fireEvent.change(policySelect, { target: { value: 'count' } });
+
+      expect(await screen.findByText('2 archive(s) would be removed at the next run.')).toBeInTheDocument();
+      expect(screen.getByText('old-print-a.3mf')).toBeInTheDocument();
+      await waitFor(() => expect(previewKeepCount).toBe('100'));
+    });
+
+    it('keeps intermediate count edits local and applies only the final previewed limit', async () => {
+      const { saveRequests, previewCounts } = mockArchiveCountRetention();
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      const input = await screen.findByLabelText('Maximum number of archive files to keep');
+      await screen.findByText('preview-100.3mf');
+      await user.clear(input);
+      expect(input).toHaveValue(null);
+      expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
+      expect(saveRequests).toEqual([]);
+
+      await user.type(input, '200');
+      fireEvent.blur(input);
+      await screen.findByText('preview-200.3mf');
+      expect(previewCounts).toContain(200);
+      expect(saveRequests).toEqual([]);
+
+      await user.click(screen.getByRole('button', { name: 'Apply', exact: true }));
+      await waitFor(() => expect(saveRequests).toEqual([
+        { enabled: true, days: 365, mode: 'count', max_count: 200, purge_stats: false },
+      ]));
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel', exact: true })).not.toBeInTheDocument());
+      expect(input).toHaveValue(200);
+      expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
+    });
+
+    it.each(['', '0', '1.5', '100001'])('rejects invalid count draft %j without saving or previewing it', async (value) => {
+      const { saveRequests, previewCounts } = mockArchiveCountRetention();
+      render(<SettingsPage />);
+
+      const input = await screen.findByLabelText('Maximum number of archive files to keep');
+      await screen.findByText('preview-100.3mf');
+      fireEvent.change(input, { target: { value } });
+      fireEvent.blur(input);
+
+      expect(screen.getByText('Enter a whole number from 1 to 100,000.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
+      expect(previewCounts).toEqual([100]);
+      expect(saveRequests).toEqual([]);
+    });
+
+    it('preserves the unapplied count draft when another archive setting is saved', async () => {
+      const { saveRequests } = mockArchiveCountRetention();
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      const input = await screen.findByLabelText('Maximum number of archive files to keep');
+      fireEvent.change(input, { target: { value: '200' } });
+      await screen.findByText('preview-200.3mf');
+      await user.click(screen.getByLabelText(/Also remove from statistics/));
+      await waitFor(() => expect(saveRequests).toHaveLength(1));
+      expect(saveRequests[0]).toMatchObject({ max_count: 100, purge_stats: true });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled());
+      expect(input).toHaveValue(200);
+
+      await user.click(screen.getByRole('button', { name: 'Apply', exact: true }));
+      await waitFor(() => expect(saveRequests).toHaveLength(2));
+      expect(saveRequests[1]).toMatchObject({ max_count: 200, purge_stats: true });
+    });
+
+    it('retains a failed count save as a draft and cancels without another write', async () => {
+      const { saveRequests } = mockArchiveCountRetention(true);
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      const input = await screen.findByLabelText('Maximum number of archive files to keep');
+      fireEvent.change(input, { target: { value: '200' } });
+      await screen.findByText('preview-200.3mf');
+      await user.click(screen.getByRole('button', { name: 'Apply', exact: true }));
+      await waitFor(() => expect(saveRequests).toHaveLength(1));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled());
+      expect(input).toHaveValue(200);
+
+      await user.click(screen.getByRole('button', { name: 'Cancel', exact: true }));
+      expect(input).toHaveValue(100);
+      expect(saveRequests).toHaveLength(1);
     });
 
     it('shows Administrators group without a duplicate Admin pill', async () => {

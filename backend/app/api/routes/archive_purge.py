@@ -25,7 +25,9 @@ from backend.app.schemas.archive_purge import (
     ArchivePurgeSettings,
 )
 from backend.app.services.archive_purge import (
+    MAX_AUTO_PURGE_COUNT,
     MAX_AUTO_PURGE_DAYS,
+    MIN_AUTO_PURGE_COUNT,
     MIN_AUTO_PURGE_DAYS,
     archive_purge_service,
 )
@@ -37,7 +39,12 @@ router = APIRouter(prefix="/archives", tags=["archives-purge"])
 
 @router.get("/purge/preview", response_model=ArchivePurgePreviewResponse)
 async def preview_archive_purge(
-    older_than_days: int = Query(ge=1, le=3650),
+    older_than_days: int | None = Query(default=None, ge=1, le=3650),
+    keep_count: int | None = Query(
+        default=None,
+        ge=MIN_AUTO_PURGE_COUNT,
+        le=MAX_AUTO_PURGE_COUNT,
+    ),
     purge_stats: bool = Query(
         False,
         description=(
@@ -51,8 +58,18 @@ async def preview_archive_purge(
     db: AsyncSession = Depends(get_db),
     _: User | None = Depends(require_permission_if_auth_enabled(Permission.ARCHIVES_PURGE)),
 ):
-    """Count + size of archives eligible for purge. Read-only."""
-    result = await archive_purge_service.preview_purge(db, older_than_days=older_than_days, purge_stats=purge_stats)
+    """Count + size of age- or count-based archive purge candidates. Read-only."""
+    if (older_than_days is None) == (keep_count is None):
+        raise HTTPException(status_code=422, detail="Specify exactly one of older_than_days or keep_count")
+    if keep_count is not None:
+        result = await archive_purge_service.preview_keep_count(db, keep_count=keep_count)
+    else:
+        assert older_than_days is not None
+        result = await archive_purge_service.preview_purge(
+            db,
+            older_than_days=older_than_days,
+            purge_stats=purge_stats,
+        )
     return ArchivePurgePreviewResponse(**result)
 
 
@@ -62,17 +79,25 @@ async def execute_archive_purge(
     db: AsyncSession = Depends(get_db),
     _: User | None = Depends(require_permission_if_auth_enabled(Permission.ARCHIVES_PURGE)),
 ):
-    """Bulk-delete archives older than the threshold.
+    """Bulk-delete archives selected by age or by a retained count.
 
     Soft-delete by default (Quick Stats preserved). Set ``purge_stats=true``
     in the body to also drop the contribution from /stats — irreversible
     in that mode, same as the single-archive route's ``?purge_stats=true``.
     """
-    deleted = await archive_purge_service.purge_older_than(
-        db,
-        older_than_days=body.older_than_days,
-        purge_stats=body.purge_stats,
-    )
+    if body.keep_count is not None:
+        deleted = await archive_purge_service.purge_to_count(
+            db,
+            keep_count=body.keep_count,
+            purge_stats=body.purge_stats,
+        )
+    else:
+        assert body.older_than_days is not None
+        deleted = await archive_purge_service.purge_older_than(
+            db,
+            older_than_days=body.older_than_days,
+            purge_stats=body.purge_stats,
+        )
     return ArchivePurgeResponse(deleted=deleted, purge_stats=body.purge_stats)
 
 
@@ -82,7 +107,13 @@ async def get_archive_purge_settings(
     _: User | None = Depends(require_permission_if_auth_enabled(Permission.ARCHIVES_PURGE)),
 ):
     cfg = await archive_purge_service.get_settings(db)
-    return ArchivePurgeSettings(enabled=cfg["enabled"], days=cfg["days"], purge_stats=cfg["purge_stats"])
+    return ArchivePurgeSettings(
+        enabled=cfg["enabled"],
+        days=cfg["days"],
+        mode=cfg["mode"],
+        max_count=cfg["max_count"],
+        purge_stats=cfg["purge_stats"],
+    )
 
 
 @router.put("/purge/settings", response_model=ArchivePurgeSettings)
@@ -96,7 +127,24 @@ async def update_archive_purge_settings(
             status_code=400,
             detail=f"days must be between {MIN_AUTO_PURGE_DAYS} and {MAX_AUTO_PURGE_DAYS}",
         )
+    if body.max_count < MIN_AUTO_PURGE_COUNT or body.max_count > MAX_AUTO_PURGE_COUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"max_count must be between {MIN_AUTO_PURGE_COUNT} and {MAX_AUTO_PURGE_COUNT}",
+        )
+    provided_fields = body.model_fields_set
     saved = await archive_purge_service.set_settings(
-        db, enabled=body.enabled, days=body.days, purge_stats=body.purge_stats
+        db,
+        enabled=body.enabled,
+        days=body.days,
+        mode=body.mode if "mode" in provided_fields else None,
+        max_count=body.max_count if "max_count" in provided_fields else None,
+        purge_stats=body.purge_stats,
     )
-    return ArchivePurgeSettings(enabled=saved["enabled"], days=saved["days"], purge_stats=saved["purge_stats"])
+    return ArchivePurgeSettings(
+        enabled=saved["enabled"],
+        days=saved["days"],
+        mode=saved["mode"],
+        max_count=saved["max_count"],
+        purge_stats=saved["purge_stats"],
+    )

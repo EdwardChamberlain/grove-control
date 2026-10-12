@@ -16,11 +16,14 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core import database as _database
 from backend.app.models.archive import PrintArchive
+from backend.app.models.print_log import PrintLogEntry
+from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 
@@ -28,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 AUTO_PURGE_ENABLED_KEY = "archive_auto_purge_enabled"
 AUTO_PURGE_DAYS_KEY = "archive_auto_purge_days"
+AUTO_PURGE_MODE_KEY = "archive_auto_purge_mode"
+AUTO_PURGE_MAX_COUNT_KEY = "archive_auto_purge_max_count"
 AUTO_PURGE_LAST_RUN_KEY = "archive_auto_purge_last_run"
 # #1390 follow-up: bulk and scheduled purge inherit the same "soft vs hard"
 # choice the single-archive delete already exposes (#1343). When False
@@ -43,6 +48,9 @@ DEFAULT_AUTO_PURGE_DAYS = 365
 # as ephemeral which is rarely what anyone wants.
 MIN_AUTO_PURGE_DAYS = 7
 MAX_AUTO_PURGE_DAYS = 3650
+DEFAULT_AUTO_PURGE_MAX_COUNT = 100
+MIN_AUTO_PURGE_COUNT = 1
+MAX_AUTO_PURGE_COUNT = 100_000
 
 
 def _age_cutoff(now: datetime, older_than_days: int) -> datetime:
@@ -60,6 +68,17 @@ def _last_activity_expr():
         PrintArchive.completed_at,
         PrintArchive.started_at,
         PrintArchive.created_at,
+    )
+
+
+def _unheld_archive_filter():
+    """Keep waiting/active reprint sources and the persisted plate-clear Archive."""
+    return ~exists().where(
+        PrintQueueItem.archive_id == PrintArchive.id,
+        PrintQueueItem.status.in_(("pending", "preheating", "dispatching", "printing")),
+    ) & ~exists().where(
+        Printer.awaiting_plate_clear.is_(True),
+        Printer.awaiting_plate_clear_archive_id == PrintArchive.id,
     )
 
 
@@ -112,10 +131,15 @@ class ArchivePurgeService:
             row.value = value
 
     async def get_settings(self, db: AsyncSession) -> dict:
-        """Return ``{enabled, days, purge_stats}``. Missing keys default to
-        disabled / 365d / soft-delete (Quick Stats preserved)."""
+        """Return the auto-purge policy and its settings.
+
+        Missing keys default to disabled / age-based / 365d / 100 archives /
+        soft-delete (Quick Stats preserved).
+        """
         enabled_raw = await self._read_setting(db, AUTO_PURGE_ENABLED_KEY)
         days_raw = await self._read_setting(db, AUTO_PURGE_DAYS_KEY)
+        mode_raw = await self._read_setting(db, AUTO_PURGE_MODE_KEY)
+        max_count_raw = await self._read_setting(db, AUTO_PURGE_MAX_COUNT_KEY)
         stats_raw = await self._read_setting(db, AUTO_PURGE_STATS_KEY)
 
         enabled = (enabled_raw or "false").lower() == "true"
@@ -124,16 +148,49 @@ class ArchivePurgeService:
         except (TypeError, ValueError):
             days = DEFAULT_AUTO_PURGE_DAYS
         days = max(MIN_AUTO_PURGE_DAYS, min(MAX_AUTO_PURGE_DAYS, days))
+        mode = mode_raw if mode_raw in ("age", "count") else "age"
+        try:
+            max_count = int(max_count_raw) if max_count_raw is not None else DEFAULT_AUTO_PURGE_MAX_COUNT
+        except (TypeError, ValueError):
+            max_count = DEFAULT_AUTO_PURGE_MAX_COUNT
+        max_count = max(MIN_AUTO_PURGE_COUNT, min(MAX_AUTO_PURGE_COUNT, max_count))
         purge_stats = (stats_raw or "false").lower() == "true"
-        return {"enabled": enabled, "days": days, "purge_stats": purge_stats}
+        return {
+            "enabled": enabled,
+            "days": days,
+            "mode": mode,
+            "max_count": max_count,
+            "purge_stats": purge_stats,
+        }
 
-    async def set_settings(self, db: AsyncSession, *, enabled: bool, days: int, purge_stats: bool = False) -> dict:
+    async def set_settings(
+        self,
+        db: AsyncSession,
+        *,
+        enabled: bool,
+        days: int,
+        mode: str | None = None,
+        max_count: int | None = None,
+        purge_stats: bool = False,
+    ) -> dict:
         clamped_days = max(MIN_AUTO_PURGE_DAYS, min(MAX_AUTO_PURGE_DAYS, int(days)))
+        current = await self.get_settings(db)
+        saved_mode = mode if mode in ("age", "count") else current["mode"]
+        saved_max_count = max_count if max_count is not None else current["max_count"]
+        saved_max_count = max(MIN_AUTO_PURGE_COUNT, min(MAX_AUTO_PURGE_COUNT, int(saved_max_count)))
         await self._write_setting(db, AUTO_PURGE_ENABLED_KEY, "true" if enabled else "false")
         await self._write_setting(db, AUTO_PURGE_DAYS_KEY, str(clamped_days))
+        await self._write_setting(db, AUTO_PURGE_MODE_KEY, saved_mode)
+        await self._write_setting(db, AUTO_PURGE_MAX_COUNT_KEY, str(saved_max_count))
         await self._write_setting(db, AUTO_PURGE_STATS_KEY, "true" if purge_stats else "false")
         await db.commit()
-        return {"enabled": enabled, "days": clamped_days, "purge_stats": purge_stats}
+        return {
+            "enabled": enabled,
+            "days": clamped_days,
+            "mode": saved_mode,
+            "max_count": saved_max_count,
+            "purge_stats": purge_stats,
+        }
 
     async def _get_last_run(self, db: AsyncSession) -> datetime | None:
         raw = await self._read_setting(db, AUTO_PURGE_LAST_RUN_KEY)
@@ -159,18 +216,27 @@ class ArchivePurgeService:
         if last is not None and (now - last) < timedelta(hours=24):
             return 0
 
-        deleted = await self.purge_older_than(
-            db,
-            older_than_days=cfg["days"],
-            purge_stats=cfg["purge_stats"],
-        )
+        if cfg["mode"] == "count":
+            deleted = await self.purge_to_count(
+                db,
+                keep_count=cfg["max_count"],
+                purge_stats=cfg["purge_stats"],
+            )
+        else:
+            deleted = await self.purge_older_than(
+                db,
+                older_than_days=cfg["days"],
+                purge_stats=cfg["purge_stats"],
+            )
         await self._stamp_last_run(db, now)
         if deleted:
             logger.info(
-                "Archive auto-purge: %s %d archive(s) (threshold=%d days, purge_stats=%s)",
+                "Archive auto-purge: %s %d archive(s) (mode=%s, days=%d, max_count=%d, purge_stats=%s)",
                 "hard-deleted" if cfg["purge_stats"] else "soft-deleted",
                 deleted,
+                cfg["mode"],
                 cfg["days"],
+                cfg["max_count"],
                 cfg["purge_stats"],
             )
         return deleted
@@ -202,7 +268,7 @@ class ArchivePurgeService:
         now = datetime.now(timezone.utc)
         cutoff = _age_cutoff(now, older_than_days)
         last_activity = _last_activity_expr()
-        clause = last_activity < cutoff
+        clause = (last_activity < cutoff) & (PrintArchive.status != "printing") & _unheld_archive_filter()
 
         count_stmt = select(func.count(PrintArchive.id)).where(clause)
         size_stmt = select(func.coalesce(func.sum(PrintArchive.file_size), 0)).where(clause)
@@ -225,8 +291,144 @@ class ArchivePurgeService:
             "count": count,
             "total_bytes": total_bytes,
             "sample_filenames": samples,
+            "mode": "age",
             "older_than_days": older_than_days,
+            "keep_count": None,
         }
+
+    async def preview_keep_count(
+        self,
+        db: AsyncSession,
+        keep_count: int,
+        sample_limit: int = 5,
+    ) -> dict:
+        """Count + size of the oldest archive files that exceed ``keep_count``.
+
+        Count retention ranks files by last print activity, then by
+        archive ID so equal timestamps always produce the same preview and
+        purge set. Soft-deleted rows no longer have files and do not count
+        toward the limit. Active prints and jobs holding a printer count toward
+        the limit, but their files are never removed if they are excess rows.
+        """
+        if keep_count < MIN_AUTO_PURGE_COUNT:
+            return {
+                "count": 0,
+                "total_bytes": 0,
+                "sample_filenames": [],
+                "mode": "count",
+                "older_than_days": None,
+                "keep_count": keep_count,
+            }
+
+        excess_ids = self._excess_count_ids(keep_count)
+        excess_filter = (
+            PrintArchive.id.in_(select(excess_ids.c.id))
+            & (PrintArchive.status != "printing")
+            & _unheld_archive_filter()
+        )
+
+        count_result = await db.execute(select(func.count(PrintArchive.id)).where(excess_filter))
+        count = int(count_result.scalar() or 0)
+        size_result = await db.execute(select(func.coalesce(func.sum(PrintArchive.file_size), 0)).where(excess_filter))
+        total_bytes = int(size_result.scalar() or 0)
+        sample_result = await db.execute(
+            select(PrintArchive.filename)
+            .where(excess_filter)
+            .order_by(_last_activity_expr().asc(), PrintArchive.id.asc())
+            .limit(sample_limit)
+        )
+        samples = [row[0] for row in sample_result.all()]
+
+        return {
+            "count": count,
+            "total_bytes": total_bytes,
+            "sample_filenames": samples,
+            "mode": "count",
+            "older_than_days": None,
+            "keep_count": keep_count,
+        }
+
+    async def purge_to_count(self, db: AsyncSession, keep_count: int, *, purge_stats: bool = False) -> int:
+        """Purge the oldest eligible archive files until ``keep_count`` remain.
+
+        Retention applies to files, so previously soft-deleted rows are
+        excluded from the count. Active prints and jobs holding a printer count
+        toward the limit but are never deleted, even among the oldest entries.
+        ``purge_stats`` controls whether linked log rows are also removed for
+        each selected archive.
+        """
+        if keep_count < MIN_AUTO_PURGE_COUNT:
+            return 0
+
+        excess_ids = self._excess_count_ids(keep_count)
+        result = await db.execute(
+            select(PrintArchive.id)
+            .where(
+                PrintArchive.id.in_(select(excess_ids.c.id)),
+                PrintArchive.status != "printing",
+                _unheld_archive_filter(),
+            )
+            .order_by(_last_activity_expr().asc(), PrintArchive.id.asc())
+        )
+        ids = [row[0] for row in result.all()]
+        deleted = await self._delete_archive_ids(ids, purge_stats=purge_stats)
+        if deleted:
+            logger.info(
+                "Archive purge: %s %d archive(s) (keep_count=%d, purge_stats=%s)",
+                "hard-deleted" if purge_stats else "soft-deleted",
+                deleted,
+                keep_count,
+                purge_stats,
+            )
+        return deleted
+
+    @staticmethod
+    def _excess_count_ids(keep_count: int):
+        """Return a subquery for the archives beyond the newest retained count."""
+        return (
+            select(PrintArchive.id)
+            .where(PrintArchive.deleted_at.is_(None))
+            .order_by(_last_activity_expr().desc(), PrintArchive.id.desc())
+            .offset(keep_count)
+            .subquery()
+        )
+
+    @staticmethod
+    async def _delete_archive_ids(ids: list[int], *, purge_stats: bool) -> int:
+        """Delete selected archives through the guarded archive transaction.
+
+        Recheck printer holds before touching files, jobs, or statistics.
+        """
+        if not ids:
+            return 0
+
+        deleted = 0
+        for archive_id in ids:
+            async with _database.async_session() as delete_db:
+                # Lock the Archive before checking its current references. SQLite
+                # takes a write lock; PostgreSQL locks this exact source row.
+                await delete_db.execute(
+                    update(PrintArchive).where(PrintArchive.id == archive_id).values(id=PrintArchive.id)
+                )
+                eligible = await delete_db.scalar(
+                    select(PrintArchive.id).where(
+                        PrintArchive.id == archive_id,
+                        PrintArchive.status != "printing",
+                        _unheld_archive_filter(),
+                    )
+                )
+                if eligible is None:
+                    await delete_db.rollback()
+                    continue
+                service = ArchiveService(delete_db)
+                if purge_stats:
+                    await delete_db.execute(delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
+                    removed = await service.delete_archive(archive_id)
+                else:
+                    removed = await service.soft_delete_archive(archive_id)
+                if removed:
+                    deleted += 1
+        return deleted
 
     async def purge_older_than(
         self,
@@ -262,7 +464,9 @@ class ArchivePurgeService:
         # a repeat sweeper run keeps re-touching the same rows. Hard-delete
         # mode doesn't filter — already-soft-deleted rows are eligible for
         # promotion to hard-delete when the user opts in.
-        select_stmt = select(PrintArchive.id).where(_last_activity_expr() < cutoff)
+        select_stmt = select(PrintArchive.id).where(
+            _last_activity_expr() < cutoff, PrintArchive.status != "printing", _unheld_archive_filter()
+        )
         if not purge_stats:
             select_stmt = select_stmt.where(PrintArchive.deleted_at.is_(None))
         id_result = await db.execute(select_stmt)
@@ -270,27 +474,7 @@ class ArchivePurgeService:
         if not ids:
             return 0
 
-        deleted = 0
-        for archive_id in ids:
-            async with _database.async_session() as delete_db:
-                service = ArchiveService(delete_db)
-                if purge_stats:
-                    # Hard-delete linked PrintLogEntry rows first so their
-                    # filament / cost contributions stop counting in /stats.
-                    # FK is ON DELETE SET NULL, so without this they'd
-                    # survive the archive row and keep showing up in totals
-                    # (#1343 / #1378 / #1390).
-                    from sqlalchemy import delete as sa_delete
-
-                    from backend.app.models.print_log import PrintLogEntry
-
-                    await delete_db.execute(sa_delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
-                    await delete_db.commit()
-                    if await service.delete_archive(archive_id):
-                        deleted += 1
-                else:
-                    if await service.soft_delete_archive(archive_id):
-                        deleted += 1
+        deleted = await self._delete_archive_ids(ids, purge_stats=purge_stats)
         if deleted:
             logger.info(
                 "Archive purge: %s %d archive(s) (older_than_days=%d, purge_stats=%s)",
