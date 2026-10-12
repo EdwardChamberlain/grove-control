@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 SAMPLE_SPOOL = {
     "id": 10,
@@ -28,6 +29,17 @@ SAMPLE_SPOOL = {
     "price": None,
     "extra": {},
 }
+
+
+@pytest.fixture
+def test_database_url(tmp_path):
+    """Give concurrent requests independent SQLite connections.
+
+    The default in-memory engine shares one connection across all sessions,
+    allowing one request's cleanup to roll back another request's slot write.
+    A per-test file keeps transactions separate, as in production.
+    """
+    return f"sqlite+aiosqlite:///{tmp_path / 'spoolman-slot-test.db'}"
 
 
 @pytest.fixture
@@ -73,6 +85,29 @@ def mock_client():
 
 
 class TestSlotAssignmentConcurrency:
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_read_session_cleanup_preserves_concurrent_assignment(self, test_engine, test_printer):
+        """Closing a read session must not roll back another session's slot write."""
+        from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+        async with sessions() as writer:
+            async with sessions() as reader:
+                await reader.execute(select(SpoolmanSlotAssignment))
+                writer.add(
+                    SpoolmanSlotAssignment(printer_id=test_printer.id, ams_id=0, tray_id=0, spoolman_spool_id=10)
+                )
+                await writer.flush()
+            # Request cleanup above rolls back the reader's transaction while
+            # the concurrent assignment is still waiting to commit.
+            await writer.commit()
+
+        async with sessions() as verifier:
+            rows = (await verifier.execute(select(SpoolmanSlotAssignment))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].spoolman_spool_id == 10
+
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_concurrent_assign_same_slot_idempotent(
