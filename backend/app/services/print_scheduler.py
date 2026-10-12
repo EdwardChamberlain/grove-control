@@ -1466,6 +1466,9 @@ class PrintScheduler:
                 await self._start_print(item_db, item)
             finally:
                 await self._clear_dispatch_claim(item_db, item_id)
+                from backend.app.core.websocket import ws_manager
+
+                await ws_manager.send_queue_work_changed()
 
     async def _claim_for_dispatch(
         self,

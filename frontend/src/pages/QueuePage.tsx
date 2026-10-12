@@ -1177,6 +1177,7 @@ export function QueuePage() {
     mutationFn: (id: number) => api.cancelQueueItem(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       showToast(t('queue.toast.cancelled'));
     },
     onError: () => showToast(t('queue.toast.cancelFailed'), 'error'),
@@ -1186,6 +1187,7 @@ export function QueuePage() {
     mutationFn: (id: number) => api.removeFromQueue(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       showToast(t('queue.toast.removed'));
     },
     onError: () => showToast(t('queue.toast.removeFailed'), 'error'),
@@ -1195,6 +1197,7 @@ export function QueuePage() {
     mutationFn: (id: number) => api.stopQueueItem(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       showToast(t('queue.toast.stopped'));
     },
     onError: () => showToast(t('queue.toast.stopFailed'), 'error'),
@@ -1204,6 +1207,7 @@ export function QueuePage() {
     mutationFn: (id: number) => api.skipQueueHeatSoak(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       showToast(t('heatSoak.skipped'));
     },
     onError: () => showToast(t('heatSoak.skipFailed'), 'error'),
@@ -1228,6 +1232,7 @@ export function QueuePage() {
       api.startQueueItem(id, { skipFilamentCheck }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       showToast(t('queue.toast.released'));
       setFilamentShortConfirm(null);
     },
@@ -1250,6 +1255,7 @@ export function QueuePage() {
     mutationFn: (items: { id: number; position: number }[]) => api.reorderQueue(items),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
     },
     onError: () => showToast(t('queue.toast.reorderFailed'), 'error'),
   });
@@ -1266,6 +1272,7 @@ export function QueuePage() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       showToast(t('queue.toast.historyCleared', { count }));
     },
     onError: () => showToast(t('queue.toast.clearHistoryFailed'), 'error'),
@@ -1275,6 +1282,7 @@ export function QueuePage() {
     mutationFn: (data: PrintQueueBulkUpdate) => api.bulkUpdateQueue(data),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       setSelectedItems([]);
       setShowBulkEditModal(false);
       showToast(result.message);
@@ -1291,6 +1299,7 @@ export function QueuePage() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       setSelectedItems([]);
       showToast(t('queue.toast.bulkCancelled', { count }));
     },
@@ -1301,6 +1310,7 @@ export function QueuePage() {
     mutationFn: (printerId: number) => api.resumeQueueAfterFailure(printerId),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
       setResumeConfirm(null);
       showToast(
         t('queue.toast.resumedAfterFailure', {

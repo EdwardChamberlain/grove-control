@@ -53,6 +53,10 @@ class ConnectionManager:
             }
         )
 
+    async def send_queue_work_changed(self):
+        """Notify clients that the committed printer queue-work summary changed."""
+        await self.broadcast({"type": "queue_work_changed"})
+
     async def send_print_start(self, printer_id: int, data: dict):
         """Notify clients that a print has started."""
         await self.broadcast(

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Restore the print workflow from `ee00437`, retaining queue-item retargeting
+  (#186), direct Queue upload (#188), frontend dependency security fixes
+  (#210), live Print/Queue labels (#213), and count-based Archive retention
+  (#199). The Files/Archive split (#189) and subsequent lifecycle changes are
+  excluded from this candidate.
+- Keep the existing Queue history, pending/skipped states, configured print
+  Auto Off cooldowns, and interrupted heat-soak shutdown recovery.
+- Archive retention protects waiting/active reprint sources and the persisted
+  plate-clear Archive. Count-policy changes require an explicit Apply after
+  preview; age-based retention remains the default.
+- Data migrated by the withdrawn development lifecycle is not downgraded.
+  Use a fresh test database or a compatible backup; see UPDATING.md.
+
 ## 1.0.0
 
 Grove Control 1.0.0 is the stable release line.

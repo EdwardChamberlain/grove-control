@@ -74,6 +74,12 @@ const selectToolbarDropdownOption = async (triggerName: RegExp, optionName: RegE
 };
 
 describe('PrintersPage', () => {
+  it('uses the shared queue-work summary when cached status has no queued work', async () => {
+    server.use(http.get('/api/v1/printers/queue-work', () => HttpResponse.json({ 1: true, 2: false })));
+    render(<PrintersPage />);
+    expect(await screen.findByRole('button', { name: 'Queue Job', exact: true })).toBeInTheDocument();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });

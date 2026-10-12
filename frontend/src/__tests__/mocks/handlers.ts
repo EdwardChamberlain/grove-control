@@ -216,6 +216,8 @@ export const handlers = [
   // Printers
   // ========================================================================
 
+  http.get('/api/v1/printers/queue-work', () => HttpResponse.json({})),
+
   http.get('/api/v1/printers/', () => {
     return HttpResponse.json(mockPrinters);
   }),

@@ -916,6 +916,9 @@ class VirtualPrinterInstance:
                         await db.flush()  # populate queue_item.id before logging
                         queue_item_ids.append(queue_item.id)
                     await db.commit()
+                    from backend.app.core.websocket import ws_manager
+
+                    await ws_manager.send_queue_work_changed()
                     # Track the freshly-committed queue items so
                     # `on_print_command` can retroactively stamp slicer-side
                     # fields if the MQTT `project_file` lands AFTER the

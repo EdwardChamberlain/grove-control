@@ -19,6 +19,27 @@ later. Docker Compose is the supported production install path.
 
 ## Before you upgrade
 
+### Restoration candidate
+
+The restoration candidate uses the `ee00437` print model with queue editing,
+direct Queue uploads, dependency security fixes, live Print/Queue labels, and
+count-based Archive retention. It excludes the Files/Archive split and the
+later lifecycle migrations. Production installations still on `ee00437` do
+not need a database downgrade.
+
+This candidate does not convert databases already migrated by the withdrawn
+development lifecycle. Test with a fresh database or a copy of a compatible
+production backup. Keep the original data intact. Use copied data for offline
+upgrade tests; use a dedicated printer or stop the production instance for
+hardware checks. Do not point two running Grove instances at the same printers.
+
+The previous development code is preserved on
+`archive/dev-before-restoration-2026-10-12`. Its presence does not make the
+restoration candidate production-qualified; complete the candidate checks
+before releasing it through `main`.
+
+### Backup
+
 1. In Grove Control, open **Settings → Backup** and use **Create Backup**.
    Download the ZIP and keep a copy outside the Docker volume or application
    directory until the upgraded installation has been verified.

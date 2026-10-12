@@ -256,10 +256,17 @@ export function useWebSocket() {
         break;
 
       case 'print_start':
+        queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
         // Refetch printer status immediately when print starts to get printable_objects_count
         if (message.printer_id !== undefined) {
           queryClient.invalidateQueries({ queryKey: ['printerStatus', message.printer_id] });
         }
+        break;
+
+      case 'queue_work_changed':
+        // Queue jobs can be created by another browser, the API, or the scheduler.
+        // The shared summary is one request for all cards, independent of ownership.
+        queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
         break;
 
       case 'missing_spool_assignment': {
@@ -292,6 +299,7 @@ export function useWebSocket() {
       }
 
       case 'print_complete':
+        queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
         // Don't invalidate printerStatus here - it causes re-render cascade and browser freeze
         // The printer_status websocket messages will naturally update the status
         debouncedInvalidate('archives');

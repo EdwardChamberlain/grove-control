@@ -18,6 +18,7 @@ from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_owners
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
+from backend.app.core.websocket import ws_manager
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
@@ -926,6 +927,7 @@ async def add_to_queue(
 
     try:
         await db.commit()
+        await ws_manager.send_queue_work_changed()
     except SQLAlchemyError:
         # Keep a compact queue-specific breadcrumb alongside the traceback
         # emitted by the HTTP exception boundary. IDs are enough to identify
@@ -1047,6 +1049,7 @@ async def bulk_update_queue_items(
         updated_count += 1
 
     await db.commit()
+    await ws_manager.send_queue_work_changed()
 
     logger.info("Bulk updated %s queue items, skipped %s", updated_count, skipped_count)
     return PrintQueueBulkUpdateResponse(
@@ -1284,6 +1287,7 @@ async def update_queue_item(
         setattr(item, field, value)
 
     await db.commit()
+    await ws_manager.send_queue_work_changed()
     await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
     logger.info("Updated queue item %s", item_id)
@@ -1321,6 +1325,7 @@ async def delete_queue_item(
         item = await lock_queue_item(db, item_id)
     await db.delete(item)
     await db.commit()
+    await ws_manager.send_queue_work_changed()
 
     from backend.app.services.print_scheduler import scheduler
 
@@ -1456,6 +1461,7 @@ async def resume_queue_after_failure(
         skipped_item.completed_at = None
 
     await db.commit()
+    await ws_manager.send_queue_work_changed()
 
     logger.info(
         "Resume after failure on printer %s: acknowledged %d failure(s), restored %d skipped item(s)",
@@ -1499,6 +1505,7 @@ async def cancel_queue_item(
     item.status = "cancelled"
     item.completed_at = datetime.now(timezone.utc)
     await db.commit()
+    await ws_manager.send_queue_work_changed()
 
     from backend.app.services.print_scheduler import scheduler
 
@@ -1583,6 +1590,7 @@ async def stop_queue_item(
     item.completed_at = datetime.now(timezone.utc)
     item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
     await db.commit()
+    await ws_manager.send_queue_work_changed()
 
     from backend.app.main import unregister_expected_print
 
@@ -1727,6 +1735,7 @@ async def start_queue_item(
     if user is not None and item.created_by_id is None:
         item.created_by_id = user.id
     await db.commit()
+    await ws_manager.send_queue_work_changed()
     await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
     logger.info(
