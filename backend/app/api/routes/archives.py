@@ -28,7 +28,7 @@ from backend.app.models.user import User
 from backend.app.schemas.archive import ArchiveResponse, ArchiveSlim, ArchiveStats, ArchiveUpdate
 from backend.app.schemas.print_log import PrintLogResponse
 from backend.app.schemas.slicer import SliceRequest
-from backend.app.services.archive import ArchiveService
+from backend.app.services.archive import ArchiveDeletionBlockedError, ArchiveService
 from backend.app.utils.http import build_content_disposition
 from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import (
@@ -2008,11 +2008,10 @@ async def delete_archive(
 ):
     """Delete an archive (soft by default; ``?purge_stats=true`` to hard-delete).
 
-    Both delete paths now cascade to related ``print_queue`` rows (#1734) —
-    hard delete via the ``ON DELETE CASCADE`` FK, soft delete via the
-    ``_delete_related_queue_items`` helper. A 409 guard blocks the delete
-    when any related queue item is currently mid-print so the dispatcher
-    doesn't lose its metadata trail under the running print.
+    Both delete paths remove related ``print_queue`` rows (#1734) — hard
+    delete through the PostgreSQL FK or SQLite archive trigger, soft delete
+    through ``_delete_related_queue_items``. A 409 guard blocks deletion while
+    a related queue item is active so dispatch retains its metadata trail.
     """
     user, can_modify_all = auth_result
 
@@ -2027,7 +2026,8 @@ async def delete_archive(
         if archive.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own archives")
 
-    # #1734: block delete when any related queue item is dispatching or printing.
+    # #1734: block delete when any related queue item is preheating, dispatching,
+    # or printing.
     # Both soft and hard delete are gated — an in-flight print needs its
     # backing archive to stay around for the metadata trail (filament,
     # plate, ams_mapping). The user can stop the print first, then retry.
@@ -2052,9 +2052,11 @@ async def delete_archive(
         from backend.app.models.print_log import PrintLogEntry
 
         await db.execute(sa_delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
-        await db.commit()
-
-        if not await service.delete_archive(archive_id):
+        try:
+            deleted = await service.delete_archive(archive_id)
+        except ArchiveDeletionBlockedError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if not deleted:
             raise HTTPException(404, "Archive not found")
         return {"status": "deleted", "purged_from_stats": True}
 

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from defusedxml import ElementTree as ET
 from sqlalchemy import and_, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -21,6 +22,10 @@ from backend.app.models.printer import Printer
 from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 
 logger = logging.getLogger(__name__)
+
+
+class ArchiveDeletionBlockedError(RuntimeError):
+    """Raised when an active queue item wins a race with archive deletion."""
 
 
 def _copy_and_fsync(src: Path, dst: Path, chunk_size: int = 1024 * 1024) -> None:
@@ -941,8 +946,8 @@ async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
     """Delete every queue item pointing at *archive_id* (#1734).
 
     Called from ``soft_delete_archive``. Hard-delete is covered by the
-    ``ON DELETE CASCADE`` on ``print_queue.archive_id`` — same end state
-    via the FK. Pre-#1734 this helper merely flipped pending rows to
+    declared ``ON DELETE CASCADE`` on PostgreSQL and a matching targeted
+    SQLite trigger. Pre-#1734 this helper merely flipped pending rows to
     ``status='cancelled'`` while leaving every other status alone and
     leaving the rows in the DB, which surprised users who expected the
     queue lines to disappear when their backing archive went away. Worse,
@@ -1484,46 +1489,10 @@ class ArchiveService:
         if not archive:
             return False
 
-        # Resolve the directory to delete BEFORE committing the DB change
-        dir_to_delete: Path | None = None
-
-        if archive.file_path and archive.file_path.strip():
-            file_path = settings.base_dir / archive.file_path
-            if file_path.exists():
-                archive_dir = file_path.parent
-
-                # Safety check 1: archive_dir must be inside archive_dir
-                try:
-                    archive_dir.resolve().relative_to(settings.archive_dir.resolve())
-                except ValueError:
-                    logger.error(
-                        f"SECURITY: Refusing to delete archive {archive_id} - "
-                        f"path {archive_dir} is outside archive directory {settings.archive_dir}"
-                    )
-                    await self.db.delete(archive)
-                    await self.db.commit()
-                    return True
-
-                # Safety check 2: archive_dir must be at least 1 level deep inside archive_dir
-                try:
-                    relative_path = archive_dir.resolve().relative_to(settings.archive_dir.resolve())
-                    if len(relative_path.parts) < 1:
-                        logger.error(
-                            f"SECURITY: Refusing to delete archive {archive_id} - "
-                            f"path {archive_dir} is not deep enough inside archive directory"
-                        )
-                        await self.db.delete(archive)
-                        await self.db.commit()
-                        return True
-                except ValueError:
-                    pass  # Already handled above
-
-                dir_to_delete = archive_dir
-        else:
-            logger.error(
-                f"SECURITY: Refusing to delete files for archive {archive_id} - "
-                f"file_path is empty or invalid: '{archive.file_path}'"
-            )
+        # Resolve the directory before committing the DB change. SQLite uses
+        # targeted archive/queue triggers (the global FK pragma stays off),
+        # while PostgreSQL uses the declared ON DELETE CASCADE constraint.
+        dir_to_delete = self._resolve_archive_dir_for_delete(archive)
 
         # NULL stale thumbnail_path on linked PrintLogEntries before the FK
         # SET-NULL cascade fires. The on-disk file is about to be removed by
@@ -1534,8 +1503,16 @@ class ArchiveService:
 
         # Delete database record FIRST — if the commit fails (e.g. database locked
         # during concurrent bulk deletes), the files stay on disk and nothing is lost.
-        await self.db.delete(archive)
-        await self.db.commit()
+        try:
+            await self.db.delete(archive)
+            await self.db.commit()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            if "cannot delete archive with active queue item" in str(exc).lower():
+                raise ArchiveDeletionBlockedError(
+                    "Cannot delete archive while a related queue item is preheating, being dispatched, or printing."
+                ) from exc
+            raise
 
         # Only delete files AFTER the DB commit succeeds to avoid orphaned records
         if dir_to_delete:
