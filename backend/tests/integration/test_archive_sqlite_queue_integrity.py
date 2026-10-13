@@ -4,13 +4,14 @@ import asyncio
 import logging
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.core.database import _ensure_sqlite_archive_queue_integrity, run_migrations
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.library import LibraryFile
+from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.services.archive import ArchiveDeletionBlockedError, ArchiveService
 
 
@@ -60,15 +61,54 @@ async def test_bulk_purge_with_statistics_cascades_queue_rows(
     archive = await archive_factory(printer.id, with_run=False)
     archive_id = archive.id
     archive.created_at = datetime.now(timezone.utc) - timedelta(days=400)
-    db_session.add(PrintQueueItem(archive_id=archive_id, printer_id=printer.id, position=1, status="pending"))
+    db_session.add(PrintQueueItem(archive_id=archive_id, printer_id=printer.id, position=1, status="completed"))
     await db_session.commit()
 
     deleted = await archive_purge_service.purge_older_than(db_session, 365, purge_stats=True)
 
     assert deleted == 1
+    db_session.expire_all()
     assert await db_session.get(PrintArchive, archive_id) is None
     remaining = await db_session.scalars(select(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id))
     assert list(remaining) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_archive_cascade_removes_queue_variants_before_queue_id_reuse(
+    db_session, archive_factory, printer_factory
+):
+    """A reused queue ID must not inherit a deleted job's file candidates."""
+    printer = await printer_factory()
+    old_archive = await archive_factory(printer.id, with_run=False)
+    library_file = LibraryFile(
+        filename="candidate.3mf",
+        file_path="library/candidate.3mf",
+        file_type="3mf",
+        file_size=1,
+    )
+    old_item = PrintQueueItem(archive_id=old_archive.id, printer_id=printer.id, position=1, status="completed")
+    old_item.variants.append(PrintQueueVariant(library_file=library_file, target_model="H2S", position=0))
+    db_session.add_all([library_file, old_item])
+    await db_session.commit()
+    old_item_id = old_item.id
+
+    assert await ArchiveService(db_session).delete_archive(old_archive.id) is True
+    db_session.expunge(old_item)
+
+    new_archive = await archive_factory(printer.id, with_run=False)
+    new_item = PrintQueueItem(archive_id=new_archive.id, printer_id=printer.id, position=1, status="pending")
+    db_session.add(new_item)
+    await db_session.commit()
+    await db_session.refresh(new_item)
+
+    assert new_item.id == old_item_id
+    assert (
+        await db_session.scalar(
+            select(func.count(PrintQueueVariant.id)).where(PrintQueueVariant.queue_item_id == new_item.id)
+        )
+        == 0
+    )
 
 
 @pytest.mark.asyncio

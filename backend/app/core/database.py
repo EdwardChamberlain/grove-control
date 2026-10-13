@@ -3933,13 +3933,21 @@ async def _ensure_sqlite_archive_queue_integrity(conn) -> None:
            BEGIN
              SELECT RAISE(ABORT, 'cannot delete archive with active queue item');
            END""",
-        """CREATE TRIGGER IF NOT EXISTS trg_print_archive_delete_queue
+        """CREATE TRIGGER trg_print_archive_delete_queue
            AFTER DELETE ON print_archives
            FOR EACH ROW
            BEGIN
+             DELETE FROM print_queue_variants
+             WHERE queue_item_id IN (
+               SELECT id FROM print_queue WHERE archive_id = OLD.id
+             );
              DELETE FROM print_queue WHERE archive_id = OLD.id;
            END""",
     )
+    # This trigger's body has evolved as the queue schema gained dependent
+    # rows. Replace it on startup so an installation with the earlier trigger
+    # definition receives the variant cleanup too.
+    await conn.execute(text("DROP TRIGGER IF EXISTS trg_print_archive_delete_queue"))
     for statement in statements:
         await conn.execute(text(statement))
 
