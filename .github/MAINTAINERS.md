@@ -122,8 +122,48 @@ To add more code owners:
    commit and publishes both of these GHCR tags:
    - `latest`
    - `X.Y.Z`, using the version in `VERSION`
+6. After the Docker Publish workflow completes successfully, Create GitHub
+   Release verifies that the GHCR publication job succeeded, creates the
+   lightweight Git tag `vX.Y.Z` at the deployed commit, and publishes a GitHub
+   Release with generated notes, the deployed commit SHA, and upgrade guidance.
+   Docker Publish uploads a 90-day metadata artifact after pushing the
+   image; it records the source branch, SHA, and version so the release workflow
+   can verify the image came from `main` even though Docker Publish itself runs
+   from the default branch. The Git tag stays matched to the image if `main`
+   advances before the downstream workflow runs.
 
-No manual Docker workflow dispatch or separate GitHub Release is required.
+The source tag convention is `vX.Y.Z`. This is separate from the bare `X.Y.Z`
+GHCR version tag; the development `:dev` publisher does not create stable tags
+or releases.
+
+### First release check
+
+Before the first public release, require the `Release Workflow Tests` check to
+pass. It exercises successful publication, version validation, release-note
+generation, tag conflicts, and reruns against a fake GitHub API, without
+creating a real tag or release. To inspect a real deployment candidate without
+publishing anything, manually run `Create GitHub Release` from `main` and enter
+the successful `Docker Publish` workflow run ID. The dry run checks the
+publisher workflow and image-push step, validates the deployed source branch,
+commit, and version, and prints the planned tag and upgrade guidance. GitHub
+generates release notes when publishing; the dry run uses read-only permission
+and does not call the release-notes API or write a tag or release.
+
+### Reruns and recovery
+
+If tag creation succeeds but release creation or update fails, rerun the failed
+`Create GitHub Release` workflow run while its publisher metadata artifact is
+available (90 days). It verifies that the existing `vX.Y.Z` tag still points
+to the deployed commit, then creates or updates the release. Repeated runs
+update the same release and do not create duplicate releases.
+If a version tag already points at another commit, the workflow stops without
+moving the tag or publishing a release. Treat that as a release-integrity
+failure: verify which commit was deployed and resolve the version before
+retrying; never force-move a published version tag.
+
+The GitHub Release body records the deployed full commit SHA and `VERSION`,
+links the stable GHCR tags, and points to the backup, upgrade, and database
+migration instructions in `UPDATING.md`.
 
 ## Dependabot (Optional)
 
