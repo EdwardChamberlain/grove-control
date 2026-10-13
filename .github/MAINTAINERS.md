@@ -127,8 +127,10 @@ To add more code owners:
    lightweight Git tag `vX.Y.Z` at the deployed commit, and publishes a GitHub
    Release with generated notes, the deployed commit SHA, and upgrade guidance.
    Docker Publish uploads a 90-day metadata artifact after pushing the
-   image; the release workflow uses its source SHA and version so the Git tag
-   matches the image even if `main` advances before the downstream workflow runs.
+   image; it records the source branch, SHA, and version so the release workflow
+   can verify the image came from `main` even though Docker Publish itself runs
+   from the default branch. The Git tag stays matched to the image if `main`
+   advances before the downstream workflow runs.
 
 The source tag convention is `vX.Y.Z`. This is separate from the bare `X.Y.Z`
 GHCR version tag; the development `:dev` publisher does not create stable tags
@@ -142,9 +144,10 @@ generation, tag conflicts, and reruns against a fake GitHub API, without
 creating a real tag or release. To inspect a real deployment candidate without
 publishing anything, manually run `Create GitHub Release` from `main` and enter
 the successful `Docker Publish` workflow run ID. The dry run checks the
-publisher workflow and image-push step, validates the deployed commit and
-version, and prints the planned tag and release notes; it never writes a tag or
-release.
+publisher workflow and image-push step, validates the deployed source branch,
+commit, and version, and prints the planned tag and upgrade guidance. GitHub
+generates release notes when publishing; the dry run uses read-only permission
+and does not call the release-notes API or write a tag or release.
 
 ### Reruns and recovery
 

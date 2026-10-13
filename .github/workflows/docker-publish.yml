@@ -84,12 +84,14 @@ jobs:
         env:
           DEPLOYED_SHA: ${{ steps.version.outputs.revision }}
           DEPLOYED_VERSION: ${{ steps.version.outputs.version }}
+          DEPLOYED_SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
           const metadata = {
             commit: process.env.DEPLOYED_SHA,
             version: process.env.DEPLOYED_VERSION,
+            source_branch: process.env.DEPLOYED_SOURCE_BRANCH,
           };
           fs.writeFileSync(
             `${process.env.RUNNER_TEMP}/stable-release.json`,

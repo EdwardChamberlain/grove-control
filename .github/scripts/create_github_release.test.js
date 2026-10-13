@@ -17,6 +17,8 @@ function createHarness({
   release = null,
   publishConclusion = "success",
   publisherHeadSha = COMMIT,
+  publisherHeadBranch = "dev",
+  sourceBranch = "main",
   releaseCreateConflict = false,
 } = {}) {
   const calls = [];
@@ -28,7 +30,7 @@ function createHarness({
     event: "workflow_run",
     status: "completed",
     conclusion: "success",
-    head_branch: "main",
+    head_branch: publisherHeadBranch,
     head_sha: publisherHeadSha,
     head_repository: { full_name: "EdwardChamberlain/grove-control" },
   };
@@ -147,7 +149,7 @@ function createHarness({
     core,
     github,
     publisherRun,
-    metadata: { commit: COMMIT, version: "1.0.0" },
+    metadata: { commit: COMMIT, version: "1.0.0", source_branch: sourceBranch },
     get tagCommit() {
       return currentTagCommit;
     },
@@ -177,6 +179,7 @@ test("creates the v-prefixed source tag at the deployed image commit from publis
   });
   assert.equal(harness.tagCommit, COMMIT);
   assert.equal(harness.release.tag_name, "v1.0.0");
+  assert.equal(harness.publisherRun.head_branch, "dev");
   assert.notEqual(harness.publisherRun.head_sha, result.commitSha);
 
   const createRef = harness.calls.find(([name]) => name === "createRef");
@@ -271,23 +274,46 @@ test("does not mutate GitHub during a successful non-production dry run", async 
   const harness = createHarness();
   harness.publisherRun.head_sha = OTHER_COMMIT;
   harness.context.eventName = "workflow_dispatch";
-  harness.context.payload = {};
+  harness.context.payload = { inputs: { docker_publish_run_id: String(PUBLISHER_RUN_ID) } };
 
   const result = await runRelease({
     github: harness.github,
     context: harness.context,
     core: harness.core,
     dryRun: true,
-    workflowRunId: `${PUBLISHER_RUN_ID}`,
     readMetadata: () => harness.metadata,
   });
 
   assert.equal(result.dryRun, true);
+  assert.equal(harness.calls.some(([name, args]) => name === "getWorkflowRun" && args.run_id === PUBLISHER_RUN_ID), true);
+  assert.equal(harness.calls.some(([name]) => name === "generateReleaseNotes"), false);
   assert.equal(harness.calls.some(([name]) => name === "createRef"), false);
   assert.equal(harness.calls.some(([name]) => name === "createRelease"), false);
   assert.equal(harness.calls.some(([name]) => name === "updateRelease"), false);
   const versionLookup = harness.calls.find(([name]) => name === "getContent");
   assert.equal(versionLookup[1].ref, COMMIT);
+  const releaseNotesInfo = harness.calls.find(
+    ([name, message]) => name === "info" && message.includes("GitHub will generate"),
+  );
+  assert.ok(releaseNotesInfo);
+  assert.match(releaseNotesInfo[1], /GitHub will generate release notes/);
+});
+
+test("refuses publisher metadata that does not identify main as the deployment source", async () => {
+  const harness = createHarness({ sourceBranch: "dev" });
+
+  await assert.rejects(
+    runRelease({
+      github: harness.github,
+      context: harness.context,
+      core: harness.core,
+      getHeadSha: () => COMMIT,
+      readVersion: () => "1.0.0",
+      readMetadata: () => harness.metadata,
+    }),
+    /publisher artifact was not built from main/,
+  );
+  assert.equal(harness.calls.some(([name]) => name === "createRef"), false);
 });
 
 test("refuses an unsuccessful publisher job even if the workflow run says success", async () => {

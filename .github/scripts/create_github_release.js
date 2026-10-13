@@ -36,7 +36,6 @@ async function getPublisherRun({ github, owner, repo, runId }) {
 async function verifyPublisherRun({ github, owner, repo, fullName, run }) {
   assert(run, "The Docker Publish workflow run is missing.");
   assert(run.event === "workflow_run", `Expected a workflow_run deployment, received ${run.event || "no event"}.`);
-  assert(run.head_branch === "main", `Expected a main deployment, received ${run.head_branch || "no branch"}.`);
   assert(run.status === "completed" && run.conclusion === "success", "Docker Publish did not complete successfully.");
   assert(COMMIT_PATTERN.test(run.head_sha || ""), "Docker Publish did not provide a valid workflow run SHA.");
   assert(run.workflow_id, "Docker Publish did not provide a workflow ID.");
@@ -217,7 +216,12 @@ async function runRelease({
   if (dryRun) {
     assert(context.eventName === "workflow_dispatch", "Dry-run mode is only available from workflow_dispatch.");
     assert(context.ref === "refs/heads/main", "Run the release dry run from main.");
-    publisherRun = await getPublisherRun({ github, owner, repo, runId: workflowRunId });
+    publisherRun = await getPublisherRun({
+      github,
+      owner,
+      repo,
+      runId: workflowRunId ?? context.payload.inputs?.docker_publish_run_id,
+    });
   } else {
     assert(context.eventName === "workflow_run", "Stable releases must follow a completed Docker Publish workflow.");
     publisherRun = context.payload.workflow_run;
@@ -230,6 +234,7 @@ async function runRelease({
   const deployedVersion = deployment.version || "";
   assert(COMMIT_PATTERN.test(deployedSha), "The publisher artifact did not contain a valid deployed commit SHA.");
   assert(VERSION_PATTERN.test(deployedVersion), `The publisher artifact did not contain a stable X.Y.Z version; got: ${deployedVersion || "empty"}.`);
+  assert(deployment.source_branch === "main", "The publisher artifact was not built from main.");
 
   if (!dryRun) {
     const checkedOutSha = getHeadSha().toLowerCase();
@@ -250,19 +255,23 @@ async function runRelease({
     `Refusing to move ${tag}: it already points to ${existingTagCommit}, not deployed commit ${deployedSha}.`,
   );
 
-  const { data: notes } = await github.rest.repos.generateReleaseNotes({
-    owner,
-    repo,
-    tag_name: tag,
-    target_commitish: deployedSha,
-  });
+  let generatedNotes = "GitHub will generate release notes when the release is published.";
+  if (!dryRun) {
+    const { data: notes } = await github.rest.repos.generateReleaseNotes({
+      owner,
+      repo,
+      tag_name: tag,
+      target_commitish: deployedSha,
+    });
+    generatedNotes = notes.body || "";
+  }
   const body = buildReleaseBody({
     owner,
     repo,
     tag,
     version,
     commitSha: deployedSha,
-    generatedNotes: notes.body,
+    generatedNotes,
   });
   const existingRelease = await getReleaseByTag({ github, owner, repo, tag });
 
