@@ -118,7 +118,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!loading && requiresSetup && !authEnabled) {
       const currentPath = window.location.pathname;
       // Only redirect if not already on setup page or camera page, and haven't redirected yet
-      if (currentPath !== '/setup' && !currentPath.startsWith('/camera/') && !hasRedirectedRef.current) {
+      if (
+        currentPath !== '/setup'
+        && !currentPath.startsWith('/camera/')
+        && !currentPath.startsWith('/integrations/orca')
+        && !hasRedirectedRef.current
+      ) {
         hasRedirectedRef.current = true;
         window.location.href = '/setup';
       }
