@@ -2,8 +2,8 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { AlertCircle, AlertTriangle, ChevronDown, ChevronUp, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PrintQueueItemCreate, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
-import { api } from '../../api/client';
+import type { PrintQueueItemCreate, PrintQueueItemCreateResponse, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
+import { ApiError, api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../Card';
 import { Button } from '../Button';
@@ -28,9 +28,42 @@ import type {
   AssignmentMode,
   PrintModalProps,
   PrintOptions,
+  PrintModalResult,
   ScheduleOptions,
 } from './types';
 import { DEFAULT_PRINT_OPTIONS, DEFAULT_SCHEDULE_OPTIONS } from './types';
+
+function isPositiveId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function readQueueReceipt(response: PrintQueueItemCreateResponse, expectedQuantity: number) {
+  const ids: number[] = [];
+  const addId = (id: unknown) => {
+    if (isPositiveId(id) && !ids.includes(id)) ids.push(id);
+  };
+  addId(response.id);
+  const reportedIds = response.created_queue_item_ids;
+  if (Array.isArray(reportedIds)) {
+    reportedIds.forEach(addId);
+    const complete = reportedIds.length === expectedQuantity
+      && reportedIds.every(isPositiveId)
+      && new Set(reportedIds).size === reportedIds.length
+      && reportedIds[0] === response.id;
+    return { queueItemIds: ids, certain: complete };
+  }
+  // Keep single-row compatibility with Grove servers predating this field.
+  return { queueItemIds: ids, certain: expectedQuantity === 1 && isPositiveId(response.id) };
+}
+
+function isUncertainQueueError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status >= 500 || error.status === 408 || error.status === 429;
+}
+
+function queueErrorOutcome(error: unknown): PrintModalResult['outcome'] {
+  return error instanceof ApiError && error.status === 401 ? 'session_expired' : 'failed';
+}
 
 /**
  * Unified PrintModal component that handles queue item creation and editing.
@@ -47,8 +80,13 @@ export function PrintModal({
   archiveName,
   queueItem,
   initialSelectedPrinterIds,
+  initialPlateId,
   onClose,
   onSuccess,
+  onResult,
+  cancelRequested = false,
+  cancelRequestedRef: hostCancelRequestedRef,
+  onSubmissionStateChange,
   projectId,
   variantFiles,
 }: PrintModalProps) {
@@ -114,6 +152,7 @@ export function PrintModal({
     if (editingItem?.plate_id != null) {
       return new Set([editingItem.plate_id]);
     }
+    if (initialPlateId != null) return new Set([initialPlateId]);
     return new Set();
   });
 
@@ -228,11 +267,16 @@ export function PrintModal({
 
   // Track initial values for clearing mappings on change (edit mode only)
   const [initialPrinterIds] = useState(() => (editingItem?.printer_id ? [editingItem.printer_id] : []));
-  const [initialPlateId] = useState(() => editingItem?.plate_id ?? null);
+  const [editingInitialPlateId] = useState(() => editingItem?.plate_id ?? null);
 
   // Submission state for multi-printer
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState({ current: 0, total: 0 });
+  const formCancelRequestedRef = useRef(cancelRequested);
+  useEffect(() => {
+    formCancelRequestedRef.current = cancelRequested;
+  }, [cancelRequested]);
+  const isCancelRequested = () => formCancelRequestedRef.current || !!hostCancelRequestedRef?.current;
 
   const [filamentWarningItems, setFilamentWarningItems] = useState<FilamentWarningItem[] | null>(null);
 
@@ -373,14 +417,24 @@ export function PrintModal({
   });
 
   // Fetch plates for library files
-  const { data: libraryPlatesData } = useQuery({
+  const {
+    data: libraryPlatesData,
+    isLoading: libraryPlatesLoading,
+    isError: libraryPlatesError,
+  } = useQuery({
     queryKey: ['library-file-plates', libraryFileId],
     queryFn: () => api.getLibraryFilePlates(libraryFileId!),
     enabled: isLibraryFile && !!libraryFileId,
+    retry: false,
   });
 
   // Combine plates data from either source
   const platesData = isLibraryFile ? libraryPlatesData : archivePlatesData;
+  const invalidInitialPlate = initialPlateId != null
+    && !!libraryPlatesData
+    && !libraryPlatesData.plates.some((plate) => plate.index === initialPlateId);
+  const initialPlateUnavailable = initialPlateId != null
+    && (libraryPlatesError || invalidInitialPlate);
 
   // Fetch filament requirements for archives
   const { data: archiveFilamentReqs, isError: archiveFilamentReqsError } = useQuery({
@@ -512,10 +566,11 @@ export function PrintModal({
 
   // Auto-select first plate when plates load (single or multi-plate)
   useEffect(() => {
+    if (initialPlateId != null) return;
     if (platesData?.plates && platesData.plates.length >= 1 && selectedPlates.size === 0) {
       setSelectedPlates(new Set([platesData.plates[0].index]));
     }
-  }, [platesData, selectedPlates.size]);
+  }, [initialPlateId, platesData, selectedPlates.size]);
 
   // Auto-select first printer when only one available
   useEffect(() => {
@@ -532,7 +587,7 @@ export function PrintModal({
     if (isEditing) {
       // For edit mode, clear mappings if printer selection or plate changed from initial
       const printersChanged = JSON.stringify(selectedPrinters.sort()) !== JSON.stringify(initialPrinterIds.sort());
-      if (printersChanged || selectedPlate !== initialPlateId) {
+      if (printersChanged || selectedPlate !== editingInitialPlateId) {
         setManualMappings({});
         setPerPrinterConfigs({});
         setInitialExpandApplied(new Set());
@@ -542,7 +597,7 @@ export function PrintModal({
       setPerPrinterConfigs({});
       setInitialExpandApplied(new Set());
     }
-  }, [isEditing, selectedPrinters, selectedPlate, initialPrinterIds, initialPlateId]);
+  }, [isEditing, selectedPrinters, selectedPlate, initialPrinterIds, editingInitialPlateId]);
 
   // A tray selected in the single-printer mapping is converted into a
   // type/colour profile override for the queue payload. That profile belongs
@@ -672,6 +727,11 @@ export function PrintModal({
   const handleSubmit = async (e?: React.FormEvent, options?: { skipFilamentCheck?: boolean }) => {
     e?.preventDefault();
 
+    if (initialPlateId != null && (libraryPlatesLoading || initialPlateUnavailable)) {
+      showToast(`Plate ${initialPlateId} is not available in this file`, 'error');
+      return;
+    }
+
     if (
       !options?.skipFilamentCheck &&
       !settings?.disable_filament_warnings &&
@@ -763,6 +823,7 @@ export function PrintModal({
     }
 
     setIsSubmitting(true);
+    onSubmissionStateChange?.(true);
     // Calculate total API calls: plates × printers (or 1 for model-based)
     const platesToQueue = selectedPlates.size > 1
       ? plates.filter(p => selectedPlates.has(p.index))
@@ -777,6 +838,9 @@ export function PrintModal({
       failed: 0,
       errors: [],
     };
+    const queueItemIds: number[] = [];
+    let uncertainOutcome = false;
+    let sessionExpired = false;
 
     // Get mapping for a specific printer (per-printer override or default)
     const getMappingForPrinter = (printerId: number): number[] | undefined => {
@@ -859,8 +923,14 @@ export function PrintModal({
     // every slice of the same job. The AMS mapping is likewise absent — the
     // scheduler computes it against the printer it actually picks.
     if (isCrossModel) {
+      if (isCancelRequested()) {
+        onResult?.({ outcome: 'cancelled', queueItemIds: [] });
+        setIsSubmitting(false);
+        onSubmissionStateChange?.(false);
+        return;
+      }
       try {
-        await api.addToQueue({
+        const response = await api.addToQueue({
           variants: candidates.map((c) => ({
             library_file_id: c.id,
             plate_id: candidatePlates[c.id] ?? null,
@@ -878,14 +948,39 @@ export function PrintModal({
           ...printOptions,
           project_id: projectId ?? undefined,
         });
+        const receipt = readQueueReceipt(response, quantity);
+        const hasDuplicateId = receipt.queueItemIds.some((id) => queueItemIds.includes(id));
+        receipt.queueItemIds.forEach((id) => {
+          if (!queueItemIds.includes(id)) queueItemIds.push(id);
+        });
+        if ((!receipt.certain && onResult) || hasDuplicateId) {
+          onResult?.({
+            outcome: 'uncertain',
+            queueItemIds,
+            message: 'Grove could not confirm every created queue item. Check the Grove queue before trying again.',
+          });
+          if (queueItemIds.length > 0) invalidateQueueState();
+          showToast('Grove could not confirm every created queue item. Check the queue before trying again.', 'error');
+          return;
+        }
+        onResult?.({ outcome: 'success', queueItemIds });
         showToast(t('printModal.variants.queued', { count: candidates.length }), 'success');
         invalidateQueueState();
         onSuccess?.();
         onClose();
       } catch (error) {
+        const outcome = isUncertainQueueError(error) ? 'uncertain' : queueErrorOutcome(error);
+        onResult?.({
+          outcome,
+          queueItemIds,
+          message: outcome === 'uncertain'
+            ? 'Grove could not confirm whether the request was accepted. Check the Grove queue before trying again.'
+            : (error instanceof Error ? error.message : String(error)),
+        });
         showToast(error instanceof Error ? error.message : String(error), 'error');
       } finally {
         setIsSubmitting(false);
+        onSubmissionStateChange?.(false);
       }
       return;
     }
@@ -929,6 +1024,7 @@ export function PrintModal({
         showToast(`Failed: ${(error as Error).message}`, 'error');
       } finally {
         setIsSubmitting(false);
+        onSubmissionStateChange?.(false);
       }
       return;
     }
@@ -985,79 +1081,117 @@ export function PrintModal({
       };
     };
 
+    let progressCounter = 0;
+    const submitQueueData = async (queueData: PrintQueueItemCreate, label: string) => {
+      if (isCancelRequested() || uncertainOutcome || sessionExpired) return;
+      progressCounter++;
+      setSubmitProgress({ current: progressCounter, total: totalCount });
+      try {
+        const response = await addToQueueMutation.mutateAsync(queueData);
+        const receipt = readQueueReceipt(response, queueData.quantity ?? 1);
+        const duplicateId = receipt.queueItemIds.some((id) => queueItemIds.includes(id));
+        receipt.queueItemIds.forEach((id) => {
+          if (!queueItemIds.includes(id)) queueItemIds.push(id);
+        });
+        if ((!receipt.certain && onResult) || duplicateId) {
+          uncertainOutcome = true;
+          results.errors.push(`${label}: Grove did not return a complete queue receipt`);
+          return;
+        }
+        results.success++;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (isUncertainQueueError(error)) {
+          uncertainOutcome = true;
+          results.errors.push(`${label}: ${detail}`);
+          return;
+        }
+        if (error instanceof ApiError && error.status === 401) sessionExpired = true;
+        results.failed++;
+        results.errors.push(`${label}: ${detail}`);
+      }
+    };
+
     // Model-based assignment
     if (assignmentMode === 'model') {
-      let progressCounter = 0;
       for (const plate of platesToQueue) {
-        progressCounter++;
-        setSubmitProgress({ current: progressCounter, total: totalCount });
+        if (isCancelRequested() || uncertainOutcome || sessionExpired) break;
         const plateId = plate ? plate.index : selectedPlate;
-
-        try {
-          const queueData = getQueueData(null, plateId);
-          const plateQuantity = quantityForPlate(plateId);
-          if (plateQuantity > 1) queueData.quantity = plateQuantity;
-          applyTopInsertion(queueData, null, plateQuantity);
-          await addToQueueMutation.mutateAsync(queueData);
-          results.success++;
-        } catch (error) {
-          results.failed++;
-          const plateName = plate ? (plate.name || `Plate ${plate.index}`) : '';
-          results.errors.push(plateName ? `${plateName}: ${(error as Error).message}` : (error as Error).message);
-        }
+        const queueData = getQueueData(null, plateId);
+        const plateQuantity = quantityForPlate(plateId);
+        if (plateQuantity > 1) queueData.quantity = plateQuantity;
+        applyTopInsertion(queueData, null, plateQuantity);
+        await submitQueueData(queueData, plate ? (plate.name || `Plate ${plate.index}`) : 'Queue request');
       }
     } else {
-      // Printer-based assignment: loop through plates × printers
-      let progressCounter = 0;
+      // Printer-based assignment: loop through plates × printers.
       for (const plate of platesToQueue) {
         const plateId = plate ? plate.index : selectedPlate;
-
-        for (let i = 0; i < selectedPrinters.length; i++) {
-          const printerId = selectedPrinters[i];
-          progressCounter++;
-          setSubmitProgress({ current: progressCounter, total: totalCount });
-
-          try {
-            const queueData = getQueueData(printerId, plateId);
-            const plateQuantity = quantityForPlate(plateId);
-            if (plateQuantity > 1) queueData.quantity = plateQuantity;
-            applyTopInsertion(queueData, printerId, plateQuantity);
-            await addToQueueMutation.mutateAsync(queueData);
-            results.success++;
-          } catch (error) {
-            results.failed++;
-            const printerName = printers?.find(p => p.id === printerId)?.name || `Printer ${printerId}`;
-            const plateName = plate ? (plate.name || `Plate ${plate.index}`) : '';
-            const label = plateName ? `${printerName} (${plateName})` : printerName;
-            results.errors.push(`${label}: ${(error as Error).message}`);
-          }
+        for (const printerId of selectedPrinters) {
+          if (isCancelRequested() || uncertainOutcome || sessionExpired) break;
+          const queueData = getQueueData(printerId, plateId);
+          const plateQuantity = quantityForPlate(plateId);
+          if (plateQuantity > 1) queueData.quantity = plateQuantity;
+          applyTopInsertion(queueData, printerId, plateQuantity);
+          const printerName = printers?.find((printer) => printer.id === printerId)?.name || `Printer ${printerId}`;
+          const plateName = plate ? (plate.name || `Plate ${plate.index}`) : '';
+          await submitQueueData(queueData, plateName ? `${printerName} (${plateName})` : printerName);
         }
+        if (isCancelRequested() || uncertainOutcome || sessionExpired) break;
       }
     }
 
     setIsSubmitting(false);
+    onSubmissionStateChange?.(false);
 
-    // Show result toast
-    if (results.failed === 0) {
+    const requestsRemaining = results.success + results.failed < totalCount;
+    const wasCancelled = isCancelRequested() && requestsRemaining;
+    let result: PrintModalResult;
+    if (uncertainOutcome) {
+      result = {
+        outcome: 'uncertain',
+        queueItemIds,
+        message: 'Grove could not confirm whether every queue request was accepted. Check the queue before trying again.',
+      };
+      onResult?.(result);
+      if (queueItemIds.length > 0) invalidateQueueState();
+      showToast(result.message!, 'error');
+      return;
+    }
+    if (sessionExpired && results.success === 0) {
+      result = { outcome: 'session_expired', queueItemIds, message: 'Your Grove session expired. Reconnect your Grove account.' };
+    } else if (wasCancelled && results.success === 0) {
+      result = { outcome: 'cancelled', queueItemIds };
+    } else if (results.success > 0 && (results.failed > 0 || wasCancelled)) {
+      result = { outcome: 'partial', queueItemIds };
+    } else if (results.success > 0 && results.failed === 0) {
+      result = { outcome: 'success', queueItemIds };
+    } else if (sessionExpired) {
+      result = { outcome: 'failed', queueItemIds, message: 'Your Grove session expired while creating queue items.' };
+    } else {
+      result = { outcome: 'failed', queueItemIds, message: results.errors[0] ?? 'Grove could not create the requested queue items.' };
+    }
+    onResult?.(result);
+
+    // Preserve the established modal behavior for ordinary Grove callers.
+    if (result.outcome === 'success') {
       if (results.success === 1) {
         showToast(
           assignmentMode === 'model'
-              ? `Queued for any ${targetModel}`
-              : t('queue.printQueued'),
+            ? `Queued for any ${targetModel}`
+            : t('queue.printQueued'),
         );
       } else {
-        showToast(
-          t('queue.itemsQueued', { count: results.success }),
-        );
+        showToast(t('queue.itemsQueued', { count: results.success }));
       }
       invalidateQueueState();
       onSuccess?.();
       onClose();
-    } else if (results.success === 0) {
-      showToast(`Failed: ${results.errors[0]}`, 'error');
-    } else {
+    } else if (result.outcome === 'partial') {
       showToast(`${results.success} succeeded, ${results.failed} failed`, 'error');
       invalidateQueueState();
+    } else if (result.outcome === 'failed') {
+      showToast(`Failed: ${result.message}`, 'error');
     }
   };
 
@@ -1065,6 +1199,7 @@ export function PrintModal({
 
   const canSubmit = useMemo(() => {
     if (isPending) return false;
+    if (initialPlateId != null && (libraryPlatesLoading || libraryPlatesError || invalidInitialPlate)) return false;
 
     // Need valid printer/model selection
     if (assignmentMode === 'printer' && selectedPrinters.length === 0) return false;
@@ -1104,6 +1239,10 @@ export function PrintModal({
     scheduleOptions.chamberHeatSoak,
     scheduleOptions.heatSoakTemperature,
     scheduleOptions.heatSoakMinutes,
+    initialPlateId,
+    libraryPlatesLoading,
+    libraryPlatesError,
+    invalidInitialPlate,
   ]);
 
   // Quantity only applies for single-printer or model-based assignment (not multi-printer)
@@ -1269,6 +1408,12 @@ export function PrintModal({
                 ? (plateIndex, value) => setPlateQuantities(prev => ({ ...prev, [plateIndex]: value }))
                 : undefined}
             />
+            {initialPlateUnavailable && initialPlateId != null && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-sm text-red-300">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>Plate {initialPlateId} is not available in this file. Close this form and reconnect from Orca with a valid plate selection.</span>
+              </div>
+            )}
 
             {/* Cross-model alternatives (#671) replace the printer picker entirely:
                 the user already answered "which printer" by choosing these files,
