@@ -1,6 +1,7 @@
 import type { ArchivePlatesResponse, LibraryFilePlatesResponse } from '../types/plates';
 
-const API_BASE = '/api/v1';
+const APP_BASE_PATH = document.querySelector('base')?.getAttribute('href')?.replace(/\/+$/, '') ?? '';
+const API_BASE = `${APP_BASE_PATH}/api/v1`;
 
 export class ApiError extends Error {
   status: number;

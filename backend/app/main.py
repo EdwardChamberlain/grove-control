@@ -12,8 +12,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, or_, select, text
 
@@ -7099,7 +7099,11 @@ def _frame_ancestors(default_value: str, extra_sources: tuple[str, ...] = ()) ->
 
 def _is_orca_print_request(request) -> bool:
     """Whether this request is the versioned Orca Print document route."""
-    if request.url.path != "/integrations/orca":
+    path = request.url.path.rstrip("/")
+    root_path = str(request.scope.get("root_path", "")).rstrip("/")
+    if root_path and path.startswith(root_path + "/"):
+        path = path[len(root_path) :]
+    if not path.endswith("/integrations/orca"):
         return False
     params = request.query_params
     request_id = params.get("request_id", "")
@@ -7136,7 +7140,8 @@ async def security_headers_middleware(request, call_next):
     if not _TRUSTED_FRAME_ORIGINS and not allow_orca_print_frame:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
     else:
-        response.headers.pop("X-Frame-Options", None)
+        if "X-Frame-Options" in response.headers:
+            del response.headers["X-Frame-Options"]
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     # Content-Security-Policy for the React SPA.
     # Notes:
@@ -7481,11 +7486,11 @@ if app_settings.static_dir.exists() and any(app_settings.static_dir.iterdir()):
 
 
 @app.get("/")
-async def serve_frontend():
+async def serve_frontend(request: Request):
     """Serve the React frontend."""
     index_file = app_settings.static_dir / "index.html"
     if index_file.exists():
-        return FileResponse(index_file, headers=_HTML_CACHE_HEADERS)
+        return _serve_frontend_index(index_file, request)
     return {
         "message": "Grove Control API",
         "docs": "/docs",
@@ -7504,6 +7509,38 @@ async def serve_frontend():
 # without ever knowing why. ``no-cache`` (revalidate every time, but a
 # 304 is cheap) is the correct setting for an SPA's entry HTML.
 _HTML_CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
+
+
+def _frontend_base_path(request: Request) -> str:
+    """Return the deployment path prefix for the integration and login pages."""
+    root_path = str(request.scope.get("root_path", "")).rstrip("/")
+    if root_path:
+        return root_path
+
+    path = request.url.path.rstrip("/")
+    # The bridge opens the integration page and OIDC returns to /login. These
+    # suffixes let path-preserving proxies work without an ASGI root_path;
+    # path-stripping proxies use root_path above.
+    for suffix in ("/integrations/orca", "/login"):
+        if path.endswith(suffix):
+            return path[: -len(suffix)]
+    return ""
+
+
+def _serve_frontend_index(index_file: Path, request: Request) -> HTMLResponse:
+    """Serve index.html with a base URL matching this deployment path."""
+    content = index_file.read_text(encoding="utf-8")
+    base_path = _frontend_base_path(request)
+    if base_path:
+        import html
+
+        href = html.escape(base_path.rstrip("/") + "/", quote=True)
+        base_tag = f'<base href="{href}" />'
+        if '<base href="/" />' in content:
+            content = content.replace('<base href="/" />', base_tag, 1)
+        else:
+            content = content.replace("<head>", f"<head>{base_tag}", 1)
+    return HTMLResponse(content=content, headers=_HTML_CACHE_HEADERS)
 
 
 @app.get("/health")
@@ -7596,8 +7633,8 @@ async def serve_gcode_viewer_file(file_path: str) -> FileResponse:
     return _gcode_viewer_response(file_path)
 
 
-@app.get("/integrations/orca")
-async def serve_orca_integration(
+async def _serve_orca_integration(
+    request: Request,
     mode: str | None = None,
     protocol_version: str | None = None,
     request_id: str | None = None,
@@ -7612,13 +7649,34 @@ async def serve_orca_integration(
 
     index_file = app_settings.static_dir / "index.html"
     if index_file.exists():
-        return FileResponse(index_file, headers=_HTML_CACHE_HEADERS)
+        return _serve_frontend_index(index_file, request)
     return {"error": "Frontend not built"}
+
+
+@app.get("/integrations/orca")
+async def serve_orca_integration(
+    request: Request,
+    mode: str | None = None,
+    protocol_version: str | None = None,
+    request_id: str | None = None,
+):
+    return await _serve_orca_integration(request, mode, protocol_version, request_id)
+
+
+@app.get("/{path_prefix:path}/integrations/orca", include_in_schema=False)
+async def serve_prefixed_orca_integration(
+    path_prefix: str,
+    request: Request,
+    mode: str | None = None,
+    protocol_version: str | None = None,
+    request_id: str | None = None,
+):
+    return await _serve_orca_integration(request, mode, protocol_version, request_id)
 
 
 # Catch-all route for React Router (must be last)
 @app.get("/{full_path:path}")
-async def serve_spa(full_path: str):
+async def serve_spa(full_path: str, request: Request):
     """Serve React app for client-side routing."""
     # Don't intercept API routes - raise proper 404 so FastAPI can handle redirects
     if full_path.startswith("api/"):
@@ -7628,6 +7686,6 @@ async def serve_spa(full_path: str):
 
     index_file = app_settings.static_dir / "index.html"
     if index_file.exists():
-        return FileResponse(index_file, headers=_HTML_CACHE_HEADERS)
+        return _serve_frontend_index(index_file, request)
 
     return {"error": "Frontend not built"}

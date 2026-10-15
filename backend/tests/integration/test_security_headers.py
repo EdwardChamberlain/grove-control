@@ -128,6 +128,13 @@ async def test_orca_print_route_allows_file_parent_only_for_print(async_client: 
     assert "object-src 'none';" in print_csp
     assert "frame-src 'self' http: https:;" in print_csp
 
+    prefixed_response = await async_client.get(
+        "/grove/integrations/orca?mode=print&protocol_version=1&request_id=opaque-123"
+    )
+    assert prefixed_response.status_code == 200
+    assert "X-Frame-Options" not in prefixed_response.headers
+    assert "frame-ancestors 'self' file:;" in prefixed_response.headers.get("Content-Security-Policy", "")
+
     connect_response = await async_client.get(
         "/integrations/orca?mode=connect&protocol_version=1&request_id=opaque-123"
     )
