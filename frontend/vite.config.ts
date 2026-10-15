@@ -74,15 +74,9 @@ function serveGcodeViewer() {
 }
 
 export default defineConfig({
-  // Default base ('/') emits absolute asset URLs (/assets/...). Required so
-  // deep SPA routes (camera popup at /camera/<id>, /projects/<id>, kiosk
-  // /kiosk, refresh on any nested route) resolve their <script>
-  // and <link> tags to /assets/... instead of /<route-prefix>/assets/...,
-  // which the SPA fallback would otherwise return as text/html and the
-  // browser would refuse to execute (#1221). The earlier `base: ''` partial
-  // fix for subpath reverse proxies (#1195, wontfix) is reverted — that
-  // audience uses NPM + Cloudflare Tunnel at a real domain per the
-  // documented workaround, which doesn't depend on this setting.
+  // Relative build assets are resolved from the document's deployment base.
+  // main.py sets that base for the integration and OIDC return pages.
+  base: './',
   plugins: [react(), serveGcodeViewer()],
   build: {
     outDir: '../static',
