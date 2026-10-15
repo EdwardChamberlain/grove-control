@@ -110,6 +110,9 @@ _PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/webhook/printer/{printer_id}/stop"),
         ("POST", "/api/v1/webhook/queue/add"),
         # ---- Static / SPA routes (not user data) ----
+        # Orca integration bootstrap serves only the SPA; all account and queue data uses authenticated APIs.
+        ("GET", "/integrations/orca"),
+        ("GET", "/{path_prefix:path}/integrations/orca"),
         ("GET", "/"),
         ("GET", "/manifest.json"),
         ("GET", "/sw-register.js"),

@@ -76,7 +76,8 @@ function applyApplianceLocale() {
   if (typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function') return;
   if (storage.getItem(APPLIANCE_CONSUMED_KEY)) return;
 
-  fetch('/api/v1/system/appliance')
+  const basePath = document.querySelector('base')?.getAttribute('href')?.replace(/\/+$/, '') ?? '';
+  fetch(basePath + '/api/v1/system/appliance')
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
       if (!data || typeof data.locale !== 'string') return;

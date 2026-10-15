@@ -217,11 +217,12 @@ function ApplicationRouter() {
 }
 
 function App() {
+  const basename = document.querySelector('base')?.getAttribute('href')?.replace(/\/+$/, '') || undefined;
   return (
     <ErrorBoundary>
       <ToastProvider>
         <QueryClientProvider client={queryClient}>
-          <BrowserRouter>
+          <BrowserRouter basename={basename}>
             <ApplicationRouter />
           </BrowserRouter>
         </QueryClientProvider>

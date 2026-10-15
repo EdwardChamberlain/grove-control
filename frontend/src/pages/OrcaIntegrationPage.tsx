@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { ColorCatalogProvider } from '../contexts/ColorCatalogContext';
@@ -495,6 +496,7 @@ function VerifiedPrintProviders({
 }
 
 export function OrcaIntegrationPage() {
+  const [queryClient] = useState(() => new QueryClient());
   const [searchParams] = useSearchParams();
   const mode = searchParams.get('mode');
   const protocolVersion = searchParams.get('protocol_version');
@@ -510,7 +512,11 @@ export function OrcaIntegrationPage() {
     return <StatusMessage>Invalid Orca integration request. Reopen the Grove action from Orca.</StatusMessage>;
   }
 
-  return mode === 'connect'
-    ? <ConnectApplication requestId={requestId} />
-    : <PrintMode requestId={requestId} />;
+  return (
+    <QueryClientProvider client={queryClient}>
+      {mode === 'connect'
+        ? <ConnectApplication requestId={requestId} />
+        : <PrintMode requestId={requestId} />}
+    </QueryClientProvider>
+  );
 }

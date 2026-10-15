@@ -638,6 +638,39 @@ describe('LoginPage', () => {
         expect(sessionStorage.getItem('auth_remember_me')).toBe('1');
       });
     });
+
+    it('preserves the Orca return URL through automatic OIDC sign-in', async () => {
+      server.use(
+        http.get('/api/v1/auth/advanced-auth/status', () =>
+          HttpResponse.json({
+            local_login_enabled: true,
+            autologin_provider_id: 42,
+          })
+        ),
+        http.get('/api/v1/auth/oidc/authorize/42', () =>
+          HttpResponse.json({ auth_url: 'https://flag.test/authorize?state=abc' })
+        )
+      );
+      window.history.replaceState({
+        usr: { from: { pathname: '/integrations/orca', search: '?mode=connect&protocol_version=1&request_id=orca-request' } },
+        key: 'default',
+        idx: 0,
+      }, '', '/login');
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        writable: true,
+        value: { ...window.location, href: 'http://localhost:3000/login' },
+      });
+
+      render(<LoginPage />);
+
+      await waitFor(() => {
+        expect(sessionStorage.getItem('auth_post_login_redirect')).toBe(
+          '/integrations/orca?mode=connect&protocol_version=1&request_id=orca-request'
+        );
+        expect(window.location.href).toBe('https://flag.test/authorize?state=abc');
+      });
+    });
   });
 
   // #1333: icon proxy — login page renders <img src> from /icon endpoint
