@@ -114,6 +114,55 @@ async def test_default_headers_strict(async_client: AsyncClient, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_orca_print_route_allows_file_parent_only_for_print(async_client: AsyncClient, monkeypatch):
+    from backend.app import main as main_module
+
+    monkeypatch.setattr(main_module, "_TRUSTED_FRAME_ORIGINS", ())
+    print_response = await async_client.get("/integrations/orca?mode=print&protocol_version=1&request_id=opaque-123")
+    assert print_response.status_code == 200
+    assert "X-Frame-Options" not in print_response.headers
+    print_csp = print_response.headers.get("Content-Security-Policy", "")
+    assert "frame-ancestors 'self' file:;" in print_csp
+    assert "default-src 'self';" in print_csp
+    assert "style-src 'self' 'unsafe-inline';" in print_csp
+    assert "object-src 'none';" in print_csp
+    assert "frame-src 'self' http: https:;" in print_csp
+
+    connect_response = await async_client.get(
+        "/integrations/orca?mode=connect&protocol_version=1&request_id=opaque-123"
+    )
+    assert connect_response.status_code == 200
+    assert connect_response.headers.get("X-Frame-Options") == "SAMEORIGIN"
+    assert "frame-ancestors 'none';" in connect_response.headers.get("Content-Security-Policy", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_orca_print_route_preserves_configured_frame_origins(async_client: AsyncClient, monkeypatch):
+    from backend.app import main as main_module
+
+    monkeypatch.setattr(main_module, "_TRUSTED_FRAME_ORIGINS", ("https://ha.example.com",))
+    response = await async_client.get("/integrations/orca?mode=print&protocol_version=1&request_id=opaque-123")
+    assert response.status_code == 200
+    assert "X-Frame-Options" not in response.headers
+    csp = response.headers.get("Content-Security-Policy", "")
+    assert "frame-ancestors 'self' https://ha.example.com file:;" in csp
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_orca_integration_route_rejects_invalid_envelopes(async_client: AsyncClient):
+    for query in (
+        "mode=other&protocol_version=1&request_id=x",
+        "mode=print&protocol_version=2&request_id=x",
+        "mode=print&protocol_version=1&request_id=",
+    ):
+        response = await async_client.get(f"/integrations/orca?{query}")
+        assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_trusted_origins_relaxes_csp_and_drops_xfo(async_client: AsyncClient, monkeypatch):
     """With env var set: X-Frame-Options is absent, frame-ancestors lists the origins."""
     from backend.app import main as main_module

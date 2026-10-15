@@ -34,11 +34,32 @@ export class ApiError extends Error {
 // (used by Remember Me and the ?token= kiosk bootstrap).
 let authToken: string | null =
   sessionStorage.getItem('auth_token') ?? localStorage.getItem('auth_token');
+let persistedAuthToken: string | null = authToken;
+let memoryAuthTokenActive = false;
 
-export type TokenPersistence = 'session' | 'persistent';
+export type TokenPersistence = 'session' | 'persistent' | 'memory';
 
 export function setAuthToken(token: string | null, persistence: TokenPersistence = 'session') {
+  if (persistence === 'memory') {
+    // Embedded integrations may receive a short-lived session from a native
+    // host. Keep it ahead of the normal browser token for this document only;
+    // neither sessionStorage nor localStorage is touched.
+    memoryAuthTokenActive = true;
+    authToken = token;
+    return;
+  }
+
+  if (token === null && memoryAuthTokenActive) {
+    // Expiry handling inside AuthProvider calls setAuthToken(null) without a
+    // persistence argument. While a bridge token is active, clear only that
+    // in-memory token and preserve any separately remembered browser account.
+    authToken = null;
+    return;
+  }
+
+  memoryAuthTokenActive = false;
   authToken = token;
+  persistedAuthToken = token;
   try {
     if (token) {
       sessionStorage.setItem('auth_token', token);
@@ -62,6 +83,13 @@ export function setAuthToken(token: string | null, persistence: TokenPersistence
 
 export function getAuthToken(): string | null {
   return authToken;
+}
+
+/** Restore the browser's pre-existing token after an embedded session ends. */
+export function clearMemoryAuthTokenOverride() {
+  if (!memoryAuthTokenActive) return;
+  memoryAuthTokenActive = false;
+  authToken = persistedAuthToken;
 }
 
 // Stream token for image/video URLs loaded via <img>/<video> tags
@@ -108,10 +136,11 @@ async function request<T>(
     'Content-Type': 'application/json',
     ...options.headers as Record<string, string>,
   };
+  const requestAuthToken = authToken;
 
   // Add auth token if available
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
+  if (requestAuthToken) {
+    headers['Authorization'] = `Bearer ${requestAuthToken}`;
   }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -161,7 +190,7 @@ async function request<T>(
         'Invalid API key',
         'API key has expired',
       ];
-      if (invalidTokenMessages.some(m => message.includes(m))) {
+      if (invalidTokenMessages.some(m => message.includes(m)) && authToken === requestAuthToken) {
         setAuthToken(null);
         // Notify AuthContext so the protected route guard re-evaluates and
         // redirects to /login on the same tab — without this, AuthContext.user
@@ -2202,7 +2231,13 @@ export interface PrintQueueItem {
   // Auto-print G-code injection
   gcode_injection?: boolean;
   cleanup_library_after_dispatch?: boolean;
+  /** Returned by POST /queue/; includes every row created for quantity. */
+  created_queue_item_ids?: number[];
 }
+
+export type PrintQueueItemCreateResponse = PrintQueueItem & {
+  created_queue_item_ids?: number[];
+};
 
 export interface PrintQueueItemCreate {
   printer_id?: number | null;  // null = unassigned
@@ -5133,7 +5168,7 @@ export const api = {
   },
   getQueueItem: (id: number) => request<PrintQueueItem>(`/queue/${id}`),
   addToQueue: (data: PrintQueueItemCreate) =>
-    request<PrintQueueItem>('/queue/', {
+    request<PrintQueueItemCreateResponse>('/queue/', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

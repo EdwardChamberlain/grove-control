@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, or_, select, text
@@ -7080,7 +7080,7 @@ def _parse_trusted_frame_origins() -> tuple[str, ...]:
 _TRUSTED_FRAME_ORIGINS: tuple[str, ...] = _parse_trusted_frame_origins()
 
 
-def _frame_ancestors(default_value: str) -> str:
+def _frame_ancestors(default_value: str, extra_sources: tuple[str, ...] = ()) -> str:
     """Compose the ``frame-ancestors`` CSP directive (#1191).
 
     ``default_value`` is the strict directive used when the operator has not
@@ -7090,8 +7090,25 @@ def _frame_ancestors(default_value: str) -> str:
     breaks even if an operator forgets to add their own origin to the list.
     """
     if _TRUSTED_FRAME_ORIGINS:
-        return "frame-ancestors 'self' " + " ".join(_TRUSTED_FRAME_ORIGINS) + ";"
+        sources = ("'self'", *_TRUSTED_FRAME_ORIGINS, *extra_sources)
+        return "frame-ancestors " + " ".join(sources) + ";"
+    if extra_sources:
+        return "frame-ancestors 'self' " + " ".join(extra_sources) + ";"
     return f"frame-ancestors {default_value};"
+
+
+def _is_orca_print_request(request) -> bool:
+    """Whether this request is the versioned Orca Print document route."""
+    if request.url.path != "/integrations/orca":
+        return False
+    params = request.query_params
+    request_id = params.get("request_id", "")
+    return (
+        params.get("mode") == "print"
+        and params.get("protocol_version") == "1"
+        and bool(request_id.strip())
+        and len(request_id) <= 256
+    )
 
 
 @app.middleware("http")
@@ -7115,8 +7132,11 @@ async def security_headers_middleware(request, call_next):
     # When operators have explicitly allowlisted trusted frame origins (#1191
     # — typically Home Assistant on a different port), drop X-Frame-Options
     # and let the CSP-side frame-ancestors directive govern embedding.
-    if not _TRUSTED_FRAME_ORIGINS:
+    allow_orca_print_frame = _is_orca_print_request(request)
+    if not _TRUSTED_FRAME_ORIGINS and not allow_orca_print_frame:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    else:
+        response.headers.pop("X-Frame-Options", None)
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     # Content-Security-Policy for the React SPA.
     # Notes:
@@ -7157,6 +7177,7 @@ async def security_headers_middleware(request, call_next):
             "base-uri 'self'; " + _frame_ancestors("'none'")
         )
     else:
+        frame_ancestors = _frame_ancestors("'none'", ("file:",) if allow_orca_print_frame else ())
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             f"script-src 'self' 'nonce-{csp_nonce}'; "
@@ -7167,7 +7188,7 @@ async def security_headers_middleware(request, call_next):
             "font-src 'self' data:; "
             "object-src 'none'; "
             "base-uri 'self'; "
-            "frame-src 'self' http: https:; " + _frame_ancestors("'none'")
+            "frame-src 'self' http: https:; " + frame_ancestors
         )
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -7573,6 +7594,26 @@ async def serve_gcode_viewer_index() -> FileResponse:
 @app.get("/gcode-viewer/{file_path:path}")
 async def serve_gcode_viewer_file(file_path: str) -> FileResponse:
     return _gcode_viewer_response(file_path)
+
+
+@app.get("/integrations/orca")
+async def serve_orca_integration(
+    mode: str | None = None,
+    protocol_version: str | None = None,
+    request_id: str | None = None,
+):
+    """Serve the dedicated Orca bridge entry page after validating its envelope."""
+    if mode not in ("connect", "print"):
+        raise HTTPException(status_code=400, detail="mode must be connect or print")
+    if protocol_version != "1":
+        raise HTTPException(status_code=400, detail="Unsupported Orca bridge protocol version")
+    if not request_id or not request_id.strip() or len(request_id) > 256:
+        raise HTTPException(status_code=400, detail="A valid Orca request_id is required")
+
+    index_file = app_settings.static_dir / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file, headers=_HTML_CACHE_HEADERS)
+    return {"error": "Frontend not built"}
 
 
 # Catch-all route for React Router (must be last)

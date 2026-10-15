@@ -5,7 +5,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { setAuthToken, getAuthToken, api, setStreamToken } from '../../api/client';
+import { setAuthToken, getAuthToken, clearMemoryAuthTokenOverride, api, setStreamToken } from '../../api/client';
 
 // Mock sessionStorage (H-5: tokens are stored in sessionStorage, not localStorage)
 const sessionStorageMock = {
@@ -73,6 +73,32 @@ describe('Auth Token Management', () => {
     expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('auth_token');
     expect(vi.mocked(localStorage.removeItem)).toHaveBeenCalledWith('auth_token');
     expect(getAuthToken()).toBeNull();
+  });
+
+  it('uses a bridged token in memory and restores the remembered browser token', () => {
+    setAuthToken('browser-account-token', 'persistent');
+    expect(localStorage.setItem).toHaveBeenCalledWith('auth_token', 'browser-account-token');
+    sessionStorageMock.setItem.mockClear();
+    sessionStorageMock.removeItem.mockClear();
+    vi.mocked(localStorage.setItem).mockClear();
+    vi.mocked(localStorage.removeItem).mockClear();
+
+    setAuthToken('orca-session-token', 'memory');
+    expect(getAuthToken()).toBe('orca-session-token');
+    expect(sessionStorageMock.setItem).not.toHaveBeenCalled();
+    expect(sessionStorageMock.removeItem).not.toHaveBeenCalled();
+    expect(localStorage.setItem).not.toHaveBeenCalled();
+    expect(localStorage.removeItem).not.toHaveBeenCalled();
+
+    // Auth expiry clears the active bridge token without touching browser storage.
+    setAuthToken(null);
+    expect(getAuthToken()).toBeNull();
+    expect(sessionStorageMock.store.auth_token).toBe('browser-account-token');
+    expect(localStorage.setItem).not.toHaveBeenCalled();
+    expect(localStorage.removeItem).not.toHaveBeenCalled();
+
+    clearMemoryAuthTokenOverride();
+    expect(getAuthToken()).toBe('browser-account-token');
   });
 
   it('setAuthToken keeps in-memory token when sessionStorage throws', () => {
