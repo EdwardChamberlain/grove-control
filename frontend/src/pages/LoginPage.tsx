@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { X, Mail, Shield, Smartphone, Key } from 'lucide-react';
-import { api, type LoginResponse, type OIDCProvider, type TokenPersistence } from '../api/client';
+import { api, type LoginResponse, type OIDCProvider, type TokenPersistence, withAppBasePath } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { sanitizeRedirectTarget } from '../utils/redirect';
@@ -687,7 +687,7 @@ export function LoginPage() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src={mode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png'}
+              src={withAppBasePath(mode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png')}
               alt="Grove Control"
               className="h-16"
             />

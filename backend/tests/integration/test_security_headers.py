@@ -145,6 +145,16 @@ async def test_orca_print_route_allows_file_parent_only_for_print(async_client: 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_path_preserving_proxy_prefix_reaches_api_route(async_client: AsyncClient):
+    response = await async_client.get("/grove/api/v1/auth/status")
+
+    assert response.status_code == 200
+    assert response.headers.get("content-type", "").startswith("application/json")
+    assert "auth_enabled" in response.json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_orca_print_route_preserves_configured_frame_origins(async_client: AsyncClient, monkeypatch):
     from backend.app import main as main_module
 

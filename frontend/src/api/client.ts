@@ -3,6 +3,12 @@ import type { ArchivePlatesResponse, LibraryFilePlatesResponse } from '../types/
 const APP_BASE_PATH = document.querySelector('base')?.getAttribute('href')?.replace(/\/+$/, '') ?? '';
 const API_BASE = `${APP_BASE_PATH}/api/v1`;
 
+/** Prefix a same-origin app path for deployments served below a proxy path. */
+export function withAppBasePath(path: string): string {
+  if (!APP_BASE_PATH || !path.startsWith('/') || path.startsWith('//')) return path;
+  return `${APP_BASE_PATH}${path}`;
+}
+
 export class ApiError extends Error {
   status: number;
   /** Stable error code from a structured backend detail (`{code, message}`).
@@ -107,6 +113,7 @@ export function getStreamToken(): string | null {
 
 /** Append the stream token to a URL if available (for <img>/<video> src). */
 export function withStreamToken(url: string): string {
+  url = withAppBasePath(url);
   if (!streamToken) return url;
   const sep = url.includes('?') ? '&' : '?';
   return `${url}${sep}token=${encodeURIComponent(streamToken)}`;

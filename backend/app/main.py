@@ -7398,6 +7398,88 @@ async def trace_id_middleware(request, call_next):
     return response
 
 
+_PREFIXED_APP_PATH_MARKERS = tuple(
+    sorted(
+        {
+            app_settings.api_prefix.rstrip("/"),
+            "/integrations/orca",
+            "/login",
+            "/assets",
+            "/img",
+            "/icons",
+            "/fonts",
+            "/gcode-viewer",
+            "/manifest.json",
+            "/sw-register.js",
+            "/sw.js",
+        },
+        key=len,
+        reverse=True,
+    )
+)
+
+
+def _prefixed_app_path(path: str) -> tuple[str, str, str] | None:
+    """Split a path-preserving proxy prefix from a known Grove route root."""
+    for marker in _PREFIXED_APP_PATH_MARKERS:
+        search_from = len(path)
+        while True:
+            index = path.rfind(marker, 0, search_from)
+            if index <= 0:
+                break
+            suffix = path[index:]
+            remainder = path[index + len(marker) :]
+            if not remainder or remainder.startswith("/"):
+                return path[:index].rstrip("/"), suffix, marker
+            search_from = index
+    return None
+
+
+@app.middleware("http")
+async def subpath_proxy_middleware(request, call_next):
+    """Route path-preserving subpath proxy requests to Grove's root routes.
+
+    The browser keeps the external prefix in its URL and uses it as the
+    document base. Strip that prefix only for recognized Grove mount points,
+    while retaining it as ASGI ``root_path`` for generated URLs and redirects.
+    Proxies that already set ``root_path`` are normalized the same way.
+    """
+    scope = request.scope
+    path = str(scope.get("path", ""))
+    root_path = str(scope.get("root_path", "")).rstrip("/")
+
+    prefix = root_path
+    suffix = path
+    marker = ""
+    if root_path and path == root_path:
+        suffix = "/"
+    elif root_path and path.startswith(root_path + "/"):
+        suffix = path[len(root_path) :]
+        prefixed = _prefixed_app_path(path)
+        if prefixed:
+            marker = prefixed[2]
+    elif not root_path:
+        prefixed = _prefixed_app_path(path)
+        if prefixed:
+            prefix, suffix, marker = prefixed
+
+    if prefix and suffix != path:
+        scope["root_path"] = prefix
+        scope["path"] = suffix
+        raw_path = scope.get("raw_path")
+        marker_bytes = marker.encode("ascii") if marker else b""
+        if isinstance(raw_path, bytes) and marker_bytes:
+            marker_index = raw_path.rfind(marker_bytes)
+            if marker_index >= 0:
+                scope["raw_path"] = raw_path[marker_index:]
+            else:
+                scope["raw_path"] = suffix.encode("utf-8")
+        else:
+            scope["raw_path"] = suffix.encode("utf-8")
+
+    return await call_next(request)
+
+
 # API routes
 app.include_router(auth.router, prefix=app_settings.api_prefix)
 app.include_router(mfa.router, prefix=app_settings.api_prefix)
