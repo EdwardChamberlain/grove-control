@@ -122,3 +122,23 @@ async def test_prefixed_login_shell_keeps_the_reverse_proxy_base(async_client: A
 
     assert response.status_code == 200
     assert '<base href="/grove/" />' in response.text
+
+
+@pytest.mark.asyncio
+async def test_path_preserving_proxy_prefix_serves_bundled_assets(async_client: AsyncClient, monkeypatch, tmp_path):
+    from starlette.routing import Mount
+    from starlette.staticfiles import StaticFiles
+
+    from backend.app import main as main_mod
+
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "orca.js").write_text("window.orcaBundleLoaded = true;")
+
+    asset_mount = Mount("/assets", app=StaticFiles(directory=str(assets_dir)))
+    monkeypatch.setattr(main_mod.app.router, "routes", [asset_mount, *main_mod.app.router.routes])
+
+    response = await async_client.get("/grove/assets/orca.js")
+
+    assert response.status_code == 200
+    assert response.text == "window.orcaBundleLoaded = true;"
