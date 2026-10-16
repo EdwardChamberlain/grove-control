@@ -146,6 +146,8 @@ class TestPrintQueueAPI:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
+        body = response.json()
+        assert body["created_queue_item_ids"] == [body["id"]]
         result = response.json()
         assert result["printer_id"] == printer.id
         assert result["archive_id"] == archive.id
@@ -2328,6 +2330,8 @@ class TestAbortedStatusNormalisation:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
+        body = response.json()
+        assert body["created_queue_item_ids"] == [body["id"]]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -2345,12 +2349,18 @@ class TestAbortedStatusNormalisation:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
+        body = response.json()
+        created_ids = body["created_queue_item_ids"]
+        assert len(created_ids) == 3
+        assert len(set(created_ids)) == 3
+        assert body["id"] == created_ids[0]
 
         # Verify all 3 items were created
         list_response = await async_client.get("/api/v1/queue/")
         items = list_response.json()
         queue_items = [i for i in items if i["archive_id"] == archive.id]
         assert len(queue_items) == 3
+        assert {item["id"] for item in queue_items} == set(created_ids)
         # All items should have the same settings
         for item in queue_items:
             assert item["printer_id"] == printer.id

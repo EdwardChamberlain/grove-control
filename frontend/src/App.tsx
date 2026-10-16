@@ -25,6 +25,7 @@ import { SetupPage } from './pages/SetupPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { GCodeViewerPage } from './pages/GCodeViewerPage';
 import { KioskPage } from './pages/KioskPage';
+import { OrcaIntegrationPage } from './pages/OrcaIntegrationPage';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStreamTokenSync } from './hooks/useCameraStreamToken';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -146,24 +147,16 @@ function SetupRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function App() {
+function AuthenticatedApplication() {
   return (
-    <ErrorBoundary>
-      <ToastProvider>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            {/* ThemeProvider sits inside AuthProvider so its initial
-                ``api.getSettings()`` fetch can wait for AuthContext to
-                resolve — otherwise it fires unconditionally on every
-                login page load and returns 401. ErrorBoundary uses
-                inline styles, so a missing theme on a crash screen is
-                not a regression. */}
-            <ThemeProvider>
-            <ColorCatalogProvider>
-            <SliceJobTrackerProvider>
+    <AuthProvider>
+      {/* ThemeProvider sits inside AuthProvider so its initial settings
+          fetch can wait for authentication to resolve. */}
+      <ThemeProvider>
+        <ColorCatalogProvider>
+          <SliceJobTrackerProvider>
             <StreamTokenSync />
-            <BrowserRouter>
-              <Routes>
+            <Routes>
                 {/* Setup page - only accessible if auth not enabled */}
                 <Route path="/setup" element={<SetupRoute><SetupPage /></SetupRoute>} />
 
@@ -204,12 +197,34 @@ function App() {
                   <Route path="external/:id" element={<ExternalLinkPage />} />
                   <Route path="camera-tokens" element={<Navigate to="/settings?tab=apikeys#card-camera-tokens" replace />} />
                 </Route>
-              </Routes>
-            </BrowserRouter>
-            </SliceJobTrackerProvider>
-            </ColorCatalogProvider>
-            </ThemeProvider>
-          </AuthProvider>
+            </Routes>
+          </SliceJobTrackerProvider>
+        </ColorCatalogProvider>
+      </ThemeProvider>
+    </AuthProvider>
+  );
+}
+
+function ApplicationRouter() {
+  const location = useLocation();
+  // Orca's hosted form owns its authentication boundary and deliberately
+  // bypasses the browser application's remembered account until it verifies
+  // the session supplied by the native bridge.
+  if (location.pathname === '/integrations/orca' || location.pathname === '/integrations/orca/') {
+    return <OrcaIntegrationPage />;
+  }
+  return <AuthenticatedApplication />;
+}
+
+function App() {
+  const basename = document.querySelector('base')?.getAttribute('href')?.replace(/\/+$/, '') || undefined;
+  return (
+    <ErrorBoundary>
+      <ToastProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter basename={basename}>
+            <ApplicationRouter />
+          </BrowserRouter>
         </QueryClientProvider>
       </ToastProvider>
     </ErrorBoundary>
