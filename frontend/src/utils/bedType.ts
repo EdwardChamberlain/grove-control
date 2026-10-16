@@ -4,6 +4,8 @@
 // labels for the same physical plate, so this map normalises both spellings
 // to a single icon.
 
+import { withAppBasePath } from '../api/client';
+
 const ICON_BASE = '/img/bed';
 
 interface BedTypeInfo {
@@ -26,5 +28,6 @@ const BED_TYPE_MAP: Record<string, BedTypeInfo> = {
 
 export function getBedTypeInfo(bedType: string | null | undefined): BedTypeInfo | null {
   if (!bedType) return null;
-  return BED_TYPE_MAP[bedType.trim().toLowerCase()] ?? null;
+  const info = BED_TYPE_MAP[bedType.trim().toLowerCase()];
+  return info ? { ...info, icon: withAppBasePath(info.icon) } : null;
 }
