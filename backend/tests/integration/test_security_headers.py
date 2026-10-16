@@ -153,6 +153,12 @@ async def test_path_preserving_proxy_prefix_reaches_api_route(async_client: Asyn
     assert "auth_enabled" in response.json()
 
 
+def test_unprefixed_api_login_path_is_not_treated_as_proxy_prefix():
+    from backend.app.main import _prefixed_app_path
+
+    assert _prefixed_app_path("/api/v1/auth/login") is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_orca_print_route_preserves_configured_frame_origins(async_client: AsyncClient, monkeypatch):
