@@ -125,20 +125,27 @@ async def test_prefixed_login_shell_keeps_the_reverse_proxy_base(async_client: A
 
 
 @pytest.mark.asyncio
-async def test_path_preserving_proxy_prefix_serves_bundled_assets(async_client: AsyncClient, monkeypatch, tmp_path):
-    from starlette.routing import Mount
-    from starlette.staticfiles import StaticFiles
+async def test_path_preserving_proxy_prefix_normalizes_asset_path():
+    from starlette.requests import Request
+    from starlette.responses import Response
 
     from backend.app import main as main_mod
 
-    assets_dir = tmp_path / "assets"
-    assets_dir.mkdir()
-    (assets_dir / "orca.js").write_text("window.orcaBundleLoaded = true;")
+    scope = {
+        "type": "http",
+        "path": "/grove/assets/orca.js",
+        "raw_path": b"/grove/assets/orca.js",
+        "root_path": "",
+    }
+    request = Request(scope)
 
-    asset_mount = Mount("/assets", app=StaticFiles(directory=str(assets_dir)))
-    monkeypatch.setattr(main_mod.app.router, "routes", [asset_mount, *main_mod.app.router.routes])
+    async def dispatch(normalized_request):
+        assert normalized_request.scope["root_path"] == "/grove"
+        assert normalized_request.scope["path"] == "/assets/orca.js"
+        assert normalized_request.scope["raw_path"] == b"/assets/orca.js"
+        return Response("window.orcaBundleLoaded = true;")
 
-    response = await async_client.get("/grove/assets/orca.js")
+    response = await main_mod.subpath_proxy_middleware(request, dispatch)
 
     assert response.status_code == 200
     assert response.text == "window.orcaBundleLoaded = true;"

@@ -7412,7 +7412,8 @@ _PREFIXED_APP_PATH_MARKERS = tuple(
             "/manifest.json",
             "/sw-register.js",
             "/sw.js",
-        },
+        }
+        - {""},
         key=len,
         reverse=True,
     )
@@ -7421,6 +7422,12 @@ _PREFIXED_APP_PATH_MARKERS = tuple(
 
 def _prefixed_app_path(path: str) -> tuple[str, str, str] | None:
     """Split a path-preserving proxy prefix from a known Grove route root."""
+    # A normal Grove route may contain another marker later in its path. For
+    # example, ``/api/v1/auth/login`` must stay on the API router instead of
+    # being interpreted as a proxy prefix ending in ``/api/v1/auth``.
+    if any(path == marker or path.startswith(marker + "/") for marker in _PREFIXED_APP_PATH_MARKERS):
+        return None
+
     for marker in _PREFIXED_APP_PATH_MARKERS:
         search_from = len(path)
         while True:
