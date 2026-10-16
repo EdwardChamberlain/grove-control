@@ -148,4 +148,4 @@ async def test_path_preserving_proxy_prefix_normalizes_asset_path():
     response = await main_mod.subpath_proxy_middleware(request, dispatch)
 
     assert response.status_code == 200
-    assert response.text == "window.orcaBundleLoaded = true;"
+    assert response.body.decode() == "window.orcaBundleLoaded = true;"
