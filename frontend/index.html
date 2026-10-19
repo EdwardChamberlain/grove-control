@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <!-- L-4: Restrict Referer header to origin-only on cross-origin navigation so
          sensitive tokens in query parameters are not leaked to third-party servers. -->
@@ -17,15 +18,15 @@
     <meta name="apple-mobile-web-app-title" content="Grove Control" />
 
     <!-- Manifest -->
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="manifest.json" />
 
     <!-- Favicons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/img/grove_control_favicon_32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/img/grove_control_favicon_16.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/img/grove_control_apple_touch_icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="img/grove_control_favicon_32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="img/grove_control_favicon_16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="img/grove_control_apple_touch_icon.png" />
 
     <!-- Splash screens for iOS -->
-    <link rel="apple-touch-startup-image" href="/img/grove_control_pwa_icon_512.png" />
+    <link rel="apple-touch-startup-image" href="img/grove_control_pwa_icon_512.png" />
   </head>
   <body>
     <div id="root"></div>
@@ -34,6 +35,6 @@
     <!-- Service Worker Registration.
          Kept as an external file so the CSP `script-src 'self'` covers it
          without needing 'unsafe-inline' or per-build hashes. -->
-    <script src="/sw-register.js"></script>
+    <script src="sw-register.js"></script>
   </body>
 </html>

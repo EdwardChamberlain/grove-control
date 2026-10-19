@@ -2376,6 +2376,80 @@ describe('PrintModal', () => {
     });
   });
 
+  describe('hosted plate selection', () => {
+    const filePlates = {
+      is_multi_plate: true,
+      plates: [
+        { index: 1, name: 'Plate 1', has_thumbnail: false, thumbnail_url: null, objects: [], filaments: [], print_time_seconds: 10, filament_used_grams: 1 },
+        { index: 2, name: 'Plate 2', has_thumbnail: false, thumbnail_url: null, objects: [], filaments: [], print_time_seconds: 20, filament_used_grams: 2 },
+      ],
+    };
+
+    beforeEach(() => {
+      server.use(
+        http.get('/api/v1/library/files/:id', () => HttpResponse.json({
+          id: 5,
+          filename: 'part.3mf',
+          file_type: '3mf',
+          created_by_id: 7,
+        })),
+        http.get('/api/v1/library/files/:id/plates', () => HttpResponse.json(filePlates)),
+        http.get('/api/v1/library/files/:id/filament-requirements', () => HttpResponse.json({ filaments: [] })),
+        http.post('/api/v1/queue/', () => HttpResponse.json({
+          id: 61,
+          status: 'pending',
+          created_queue_item_ids: [61],
+        })),
+      );
+    });
+
+    it('submits the supplied plate without selecting another plate', async () => {
+      let submitted: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          submitted = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 61, status: 'pending', created_queue_item_ids: [61] });
+        }),
+      );
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          libraryFileId={5}
+          archiveName="part.3mf"
+          initialSelectedPrinterIds={[1]}
+          initialPlateId={2}
+          onClose={mockOnClose}
+        />
+      );
+
+      await screen.findByText('Plate 2');
+      await user.click(document.querySelector('button[type="submit"]') as HTMLElement);
+      await waitFor(() => expect(submitted).not.toBeNull());
+      expect(submitted?.plate_id).toBe(2);
+    });
+
+    it('blocks submission when the supplied plate is unavailable', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          libraryFileId={5}
+          archiveName="part.3mf"
+          initialSelectedPrinterIds={[1]}
+          initialPlateId={3}
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Plate 3 is not available/);
+      const submit = document.querySelector('button[type="submit"]') as HTMLButtonElement;
+      expect(submit.disabled).toBe(true);
+      await user.click(submit);
+      expect(mockOnSuccess).not.toHaveBeenCalled();
+    });
+  });
+
   describe('batch quantity', () => {
     it('shows quantity input in create mode', () => {
       render(
@@ -2454,6 +2528,71 @@ describe('PrintModal', () => {
       await user.tripleClick(input);
       await user.keyboard('5');
       expect(input.value).toBe('5');
+    });
+
+    it('reports every created row for a quantity submission', async () => {
+      const onResult = vi.fn();
+      server.use(
+        http.post('/api/v1/queue/', () => HttpResponse.json({
+          id: 41,
+          status: 'pending',
+          created_queue_item_ids: [41, 42, 43],
+        })),
+      );
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onResult={onResult}
+        />
+      );
+
+      const input = await screen.findByLabelText('Quantity');
+      await user.tripleClick(input);
+      await user.keyboard('3');
+      await user.click(document.querySelector('button[type="submit"]') as HTMLElement);
+
+      await waitFor(() => {
+        expect(onResult).toHaveBeenCalledWith({
+          outcome: 'success',
+          queueItemIds: [41, 42, 43],
+        });
+      });
+    });
+
+    it('reports an uncertain result when a successful batch response omits row IDs', async () => {
+      const onResult = vi.fn();
+      server.use(
+        http.post('/api/v1/queue/', () => HttpResponse.json({ id: 51, status: 'pending' })),
+      );
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onResult={onResult}
+        />
+      );
+
+      const input = await screen.findByLabelText('Quantity');
+      await user.tripleClick(input);
+      await user.keyboard('3');
+      await user.click(document.querySelector('button[type="submit"]') as HTMLElement);
+
+      await waitFor(() => {
+        expect(onResult).toHaveBeenCalledWith(expect.objectContaining({
+          outcome: 'uncertain',
+          queueItemIds: [51],
+        }));
+      });
+      expect(mockOnSuccess).not.toHaveBeenCalled();
     });
   });
 

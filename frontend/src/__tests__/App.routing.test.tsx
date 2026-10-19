@@ -45,6 +45,21 @@ describe('App route smoke coverage', () => {
     expect(screen.getByLabelText(/Username/i)).toBeInTheDocument();
   });
 
+  it('matches the Orca route when Grove is served below a reverse-proxy path', async () => {
+    const base = document.querySelector('base') ?? document.createElement('base');
+    const originalBase = base.getAttribute('href');
+    base.setAttribute('href', '/grove/');
+    if (!base.isConnected) document.head.append(base);
+
+    try {
+      renderAt('/grove/integrations/orca?mode=invalid&protocol_version=1&request_id=orca-test');
+      expect(await screen.findByText(/Invalid Orca integration request/i)).toBeInTheDocument();
+    } finally {
+      if (originalBase === null) base.remove();
+      else base.setAttribute('href', originalBase);
+    }
+  });
+
   it('renders the setup route when auth is disabled', async () => {
     renderAt('/setup');
 

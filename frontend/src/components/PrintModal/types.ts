@@ -31,10 +31,20 @@ export interface PrintModalProps {
   queueItem?: PrintQueueItem;
   /** Pre-select specific printers when opening the modal */
   initialSelectedPrinterIds?: number[];
+  /** Pre-select an exact 1-based plate index for hosted integrations. */
+  initialPlateId?: number | null;
   /** Handler for closing the modal */
   onClose: () => void;
   /** Handler for successful operation */
   onSuccess?: () => void;
+  /** Detailed create result for integrations that need a complete receipt. */
+  onResult?: (result: PrintModalResult) => void;
+  /** Native cancellation requested while one queue request may be in flight. */
+  cancelRequested?: boolean;
+  /** Synchronous cancellation signal for hosts coordinating native messages. */
+  cancelRequestedRef?: { current: boolean };
+  /** Lets an embedding host distinguish an idle form from an active POST. */
+  onSubmissionStateChange?: (active: boolean) => void;
   /** Project ID to associate the resulting archive with (only when triggered from project view) */
   projectId?: number;
   /** Delete a transient LibraryFile after a single queue item dispatches.
@@ -52,6 +62,13 @@ export interface PrintModalProps {
    * plate preview reads from it.
    */
   variantFiles?: VariantCandidate[];
+}
+
+export interface PrintModalResult {
+  outcome: 'success' | 'partial' | 'uncertain' | 'failed' | 'cancelled' | 'session_expired';
+  /** Every queue row confirmed by a valid POST response, including quantity rows. */
+  queueItemIds: number[];
+  message?: string;
 }
 
 /**

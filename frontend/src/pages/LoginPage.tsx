@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { X, Mail, Shield, Smartphone, Key } from 'lucide-react';
-import { api, type LoginResponse, type OIDCProvider, type TokenPersistence } from '../api/client';
+import { api, type LoginResponse, type OIDCProvider, type TokenPersistence, withAppBasePath } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { sanitizeRedirectTarget } from '../utils/redirect';
@@ -121,6 +121,13 @@ export function LoginPage() {
     return consumePostLoginRedirect() ?? '/';
   }
 
+  const stashPostLoginRedirectFromState = useCallback((): void => {
+    const fromState = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
+    if (fromState?.pathname) {
+      stashPostLoginRedirect(fromState.pathname + (fromState.search ?? ''));
+    }
+  }, [location.state]);
+
   // Credentials step state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -181,12 +188,15 @@ export function LoginPage() {
     );
     Promise.race([api.getOIDCAuthorizeUrl(providerId), timeoutPromise])
       .then((result) => {
+        // The provider round-trip drops React Router state, so retain deep-link
+        // destinations such as the Orca connect page before leaving Grove.
+        stashPostLoginRedirectFromState();
         window.location.href = (result as { auth_url: string }).auth_url;
       })
       .catch(() => {
         setAutologinFailed(true);
       });
-  }, [advancedAuthStatus, searchParams]);
+  }, [advancedAuthStatus, location.state, searchParams, stashPostLoginRedirectFromState]);
 
   const localLoginEnabled = advancedAuthStatus?.local_login_enabled !== false;
   const showAutologinBanner = autologinFailed && advancedAuthStatus?.autologin_provider_id != null;
@@ -375,10 +385,7 @@ export function LoginPage() {
       // Stash the post-login destination from router state so it survives the
       // provider round-trip (window.location.href kills React state). If the
       // user landed on /login directly, fromState is absent and we don't stash.
-      const fromState = (location.state as { from?: { pathname?: string; search?: string } } | null)?.from;
-      if (fromState?.pathname) {
-        stashPostLoginRedirect(`${fromState.pathname}${fromState.search ?? ''}`);
-      }
+      stashPostLoginRedirectFromState();
       window.location.href = data.auth_url;
     },
     onError: (error: Error) => {
@@ -680,7 +687,7 @@ export function LoginPage() {
         <div className="text-center">
           <div className="flex items-center justify-center mb-6">
             <img
-              src={mode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png'}
+              src={withAppBasePath(mode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png')}
               alt="Grove Control"
               className="h-16"
             />
