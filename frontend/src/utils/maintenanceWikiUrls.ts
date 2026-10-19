@@ -28,14 +28,10 @@ export function getMaintenanceWikiUrl(typeName: string, printerModel: string | n
   // X2D pages are published by Bambu Lab.
   const isSteelRod = isP2S || isX2D;
 
-  // Vision Encoder tasks apply to H2 printers and use the Motion Accuracy
-  // Calibration guide, which also covers preparing and cleaning the plate.
-  const normalizedTypeName = typeName.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  if (isH2 && normalizedTypeName.includes('vision encoder')) {
-    return 'https://wiki.bambulab.com/en/h2/manual/motion-accuracy';
-  }
-
   switch (typeName) {
+    case 'Vision Encoder Calibration':
+      return 'https://wiki.bambulab.com/en/h2/manual/motion-accuracy';
+
     case 'Lubricate Steel Rods':
       if (isSteelRod) return 'https://wiki.bambulab.com/en/p2s/maintenance/lubricate-x-y-z-axis';
       return null;

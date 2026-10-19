@@ -97,17 +97,15 @@ describe('getMaintenanceWikiUrl', () => {
     });
   });
 
-  describe('Vision Encoder maintenance tasks (#230)', () => {
-    it('links H2 Vision Encoder tasks to the Motion Accuracy Calibration guide', () => {
-      const url = 'https://wiki.bambulab.com/en/h2/manual/motion-accuracy';
-
-      expect(getMaintenanceWikiUrl('Clean Vision Encoder Plate', 'H2D')).toBe(url);
-      expect(getMaintenanceWikiUrl('Vision Encoder', 'H2C')).toBe(url);
-      expect(getMaintenanceWikiUrl('Check Vision-Encoder Plate', 'H2S')).toBe(url);
-    });
-
-    it('does not link Vision Encoder tasks for printers outside the H2 series', () => {
-      expect(getMaintenanceWikiUrl('Clean Vision Encoder Plate', 'X1C')).toBeNull();
+  describe('Vision Encoder Calibration (#230)', () => {
+    // Match the models and stored codes that receive this task from the API.
+    it.each([
+      'H2D', 'H2D Pro', 'H2C', 'H2S', 'X2D',
+      'O1D', 'O1E', 'O2D', 'O1C', 'O1C2', 'O1S', 'N6',
+    ])('links the assigned calibration task for %s', (model) => {
+      expect(getMaintenanceWikiUrl('Vision Encoder Calibration', model)).toBe(
+        'https://wiki.bambulab.com/en/h2/manual/motion-accuracy',
+      );
     });
   });
 
