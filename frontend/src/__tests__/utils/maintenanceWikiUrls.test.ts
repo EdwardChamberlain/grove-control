@@ -97,6 +97,18 @@ describe('getMaintenanceWikiUrl', () => {
     });
   });
 
+  describe('Vision Encoder Calibration (#230)', () => {
+    // Match the models and stored codes that receive this task from the API.
+    it.each([
+      'H2D', 'H2D Pro', 'H2C', 'H2S', 'X2D',
+      'O1D', 'O1E', 'O2D', 'O1C', 'O1C2', 'O1S', 'N6',
+    ])('links the assigned calibration task for %s', (model) => {
+      expect(getMaintenanceWikiUrl('Vision Encoder Calibration', model)).toBe(
+        'https://wiki.bambulab.com/en/h2/manual/motion-accuracy',
+      );
+    });
+  });
+
   describe('model name normalisation', () => {
     it('matches X2D regardless of hyphens or spaces', () => {
       expect(getMaintenanceWikiUrl('Lubricate Steel Rods', 'x-2d')).toBe(

@@ -29,6 +29,9 @@ export function getMaintenanceWikiUrl(typeName: string, printerModel: string | n
   const isSteelRod = isP2S || isX2D;
 
   switch (typeName) {
+    case 'Vision Encoder Calibration':
+      return 'https://wiki.bambulab.com/en/h2/manual/motion-accuracy';
+
     case 'Lubricate Steel Rods':
       if (isSteelRod) return 'https://wiki.bambulab.com/en/p2s/maintenance/lubricate-x-y-z-axis';
       return null;
