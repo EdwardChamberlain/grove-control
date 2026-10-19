@@ -97,6 +97,20 @@ describe('getMaintenanceWikiUrl', () => {
     });
   });
 
+  describe('Vision Encoder maintenance tasks (#230)', () => {
+    it('links H2 Vision Encoder tasks to the Motion Accuracy Calibration guide', () => {
+      const url = 'https://wiki.bambulab.com/en/h2/manual/motion-accuracy';
+
+      expect(getMaintenanceWikiUrl('Clean Vision Encoder Plate', 'H2D')).toBe(url);
+      expect(getMaintenanceWikiUrl('Vision Encoder', 'H2C')).toBe(url);
+      expect(getMaintenanceWikiUrl('Check Vision-Encoder Plate', 'H2S')).toBe(url);
+    });
+
+    it('does not link Vision Encoder tasks for printers outside the H2 series', () => {
+      expect(getMaintenanceWikiUrl('Clean Vision Encoder Plate', 'X1C')).toBeNull();
+    });
+  });
+
   describe('model name normalisation', () => {
     it('matches X2D regardless of hyphens or spaces', () => {
       expect(getMaintenanceWikiUrl('Lubricate Steel Rods', 'x-2d')).toBe(
