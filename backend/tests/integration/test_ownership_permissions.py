@@ -365,10 +365,6 @@ class TestArchiveOwnershipPermissions(TestOwnershipPermissionsSetup):
         assert response.status_code == 403
 
     # ========================================================================
-    # Legacy reprint endpoint
-    # ========================================================================
-
-    # ========================================================================
     # Queue route — archives:reprint_* gate (#1625)
     # ========================================================================
     # The unified /queue/ route replaced the removed /reprint endpoint; the

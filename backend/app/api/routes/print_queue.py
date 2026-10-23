@@ -157,7 +157,7 @@ def _assert_can_queue_archive(archive: PrintArchive, current_user: User | None) 
       it — Landon's PoC enumerated this on admin's archives as operator1. Gate
       on ARCHIVES_READ_ALL OR ownership. 404 (not 403) so we don't leak "this
       id exists but you can't queue it" for enumeration.
-    * Reprint perm gate (#1625): the legacy ``/archives/{id}/reprint`` endpoint
+    * Reprint perm gate (#1625): the removed ``/archives/{id}/reprint`` endpoint
       required ARCHIVES_REPRINT_OWN/ALL, and every route that replaces it must
       keep that gate or an operator with QUEUE_CREATE could reprint via a
       direct API call even when explicitly denied reprint perm. Mirrors the
