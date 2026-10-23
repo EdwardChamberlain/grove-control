@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Remove the retired `POST /archives/{id}/reprint` endpoint, which only returned
+  `410 Gone`. Reprint an archive by creating a queue item with `POST /queue/`;
+  nothing in the frontend called the old route (#193).
 - Restore the print workflow from `ee00437`, retaining queue-item retargeting
   (#186), direct Queue upload (#188), frontend dependency security fixes
   (#210), live Print/Queue labels (#213), and count-based Archive retention

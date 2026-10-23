@@ -368,29 +368,10 @@ class TestArchiveOwnershipPermissions(TestOwnershipPermissionsSetup):
     # Legacy reprint endpoint
     # ========================================================================
 
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_reprint_endpoint_is_gone_for_all_callers(
-        self, async_client: AsyncClient, auth_setup, archive_factory, printer_factory, db_session
-    ):
-        """Direct archive reprint no longer exists; callers must use the queue."""
-        printer = await printer_factory()
-        archive = await archive_factory(
-            printer.id,
-            created_by_id=auth_setup["operator2_user"]["id"],
-        )
-
-        response = await async_client.post(
-            f"/api/v1/archives/{archive.id}/reprint?printer_id={printer.id}",
-            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
-        )
-
-        assert response.status_code == 410
-
     # ========================================================================
     # Queue route — archives:reprint_* gate (#1625)
     # ========================================================================
-    # The unified /queue/ route replaced the legacy /reprint endpoint; the
+    # The unified /queue/ route replaced the removed /reprint endpoint; the
     # reprint permission gate must move with it. Without these checks a
     # caller with QUEUE_CREATE + ARCHIVES_READ_OWN could reprint their own
     # archives even if explicitly denied ARCHIVES_REPRINT_OWN.

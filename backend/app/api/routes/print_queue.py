@@ -686,7 +686,7 @@ async def add_to_queue(
             and archive.created_by_id != actor.id
         ):
             raise HTTPException(404, "Archive not found")
-        # Reprint perm gate (#1625): the legacy /archives/{id}/reprint endpoint
+        # Reprint perm gate (#1625): the removed /archives/{id}/reprint endpoint
         # required ARCHIVES_REPRINT_OWN/ALL; the unified queue route must keep
         # that gate or an operator with QUEUE_CREATE could reprint via direct
         # API call even if explicitly denied reprint perm. Mirrors the
