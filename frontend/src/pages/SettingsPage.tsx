@@ -122,6 +122,7 @@ const AUTOSAVE_SETTING_KEYS = [
   'default_timelapse',
   'default_nozzle_offset_cali',
   'require_plate_clear',
+  'door_cycle_clears_plate',
   'queue_max_concurrent_uploads',
   'nozzle_temp_presets',
   'bed_temp_presets',
@@ -147,6 +148,7 @@ function comparableAutosaveValue(settings: AppSettings, key: AutosaveSettingKey)
     case 'default_layer_inspect':
     case 'default_timelapse':
     case 'require_plate_clear':
+    case 'door_cycle_clears_plate':
       return settings[key] ?? false;
     case 'drying_presets':
     case 'ams_humidity_thresholds':
@@ -4534,6 +4536,26 @@ export function SettingsPage() {
                     type="checkbox"
                     checked={localSettings.require_plate_clear ?? false}
                     onChange={(e) => updateSetting('require_plate_clear', e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+                </label>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex-1 mr-4">
+                  <p className="text-sm text-white">
+                    {t('settings.doorCycleClearsPlate', 'Door open-close marks plate clear')}
+                  </p>
+                  <p className="text-xs text-bambu-gray mt-1">
+                    {t('settings.doorCycleClearsPlateDescription', 'When a printer is waiting for plate-clear, opening and then closing its door marks the plate as cleared. Only works on printers with a door sensor.')}
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    aria-label={t('settings.doorCycleClearsPlate', 'Door open-close marks plate clear')}
+                    checked={localSettings.door_cycle_clears_plate ?? false}
+                    onChange={(e) => updateSetting('door_cycle_clears_plate', e.target.checked)}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>

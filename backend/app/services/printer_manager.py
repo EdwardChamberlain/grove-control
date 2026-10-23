@@ -302,6 +302,11 @@ class PrinterManager:
         # Exact archive associated with each awaiting plate-clear gate (#43).
         # This is persisted on Printer so the completion card survives restarts.
         self._awaiting_plate_clear_archive_id: dict[int, int] = {}
+        # Door open→close cycle tracking for "door cycle marks plate clear" (#238).
+        # Last observed door state per printer (None = not yet observed since
+        # connect), and printers whose door opened while the gate was raised.
+        self._door_last_open: dict[int, bool] = {}
+        self._door_opened_while_awaiting: set[int] = set()
 
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
@@ -348,6 +353,9 @@ class PrinterManager:
         UI without it. Centralised here so every current AND future caller is
         covered without each one having to remember to broadcast.
         """
+        # Any gate change needs a fresh door open→close to count (#238): a door
+        # opened before this print finished is not an acknowledgement of it.
+        self._door_opened_while_awaiting.discard(printer_id)
         if awaiting:
             self._awaiting_plate_clear.add(printer_id)
             # A new terminal event starts a new gate. The exact archive is
@@ -361,6 +369,33 @@ class PrinterManager:
         if self._loop and self._loop.is_running():
             self._schedule_async(self._persist_awaiting_plate_clear(printer_id, awaiting))
             self._schedule_async(self._broadcast_status_change(printer_id))
+
+    def observe_door_state(self, printer_id: int, door_open: bool) -> bool:
+        """Track door edges and report a completed open→close cycle (#238).
+
+        Returns True only when the door closes after having been opened while
+        the printer was awaiting plate-clear. The caller decides whether the
+        user has enabled the door-cycle setting before clearing the gate.
+        """
+        prev = self._door_last_open.get(printer_id)
+        self._door_last_open[printer_id] = door_open
+        if not self.is_awaiting_plate_clear(printer_id):
+            self._door_opened_while_awaiting.discard(printer_id)
+            return False
+        if prev is None or prev == door_open:
+            return False
+        if door_open:
+            self._door_opened_while_awaiting.add(printer_id)
+            return False
+        if printer_id in self._door_opened_while_awaiting:
+            self._door_opened_while_awaiting.discard(printer_id)
+            return True
+        return False
+
+    def reset_door_tracking(self, printer_id: int) -> None:
+        """Forget door history, e.g. on disconnect, so a stale value can't form a cycle."""
+        self._door_last_open.pop(printer_id, None)
+        self._door_opened_while_awaiting.discard(printer_id)
 
     def set_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None) -> None:
         """Associate the exact completed archive with an outstanding plate-clear gate."""

@@ -2016,6 +2016,8 @@ export default {
     plateClear: 'プレートクリア確認',
     requirePlateClear: 'プレートクリア確認を必須にする',
     requirePlateClearDescription: '有効にすると、スケジューラーは完了したプリンターでキューの印刷を開始する前に、プリンターごとのプレートクリア確認を待ちます。無効にすると、プリンターカード上のプレート状態バッジと「プレートをクリア済みにする」ボタンも非表示になります。',
+    doorCycleClearsPlate: 'ドアの開閉でプレートのクリアを確認',
+    doorCycleClearsPlateDescription: 'プリンターがプレートのクリア確認を待っているとき、ドアを開けてから閉めるとプレートがクリアされたものとして扱われます。ドアセンサー搭載のプリンターでのみ動作します。',
     gcodeInjection: 'G-codeインジェクション',
     gcodeInjectionDescription: 'Farmloop、SwapMod、AutoClear、Printflow 3Dなどの自動印刷システム用に、印刷の開始と終了時にカスタムG-codeを挿入します。スニペットはプリンターモデルごとに設定し、キューアイテム��「G-codeを挿入」を有効にすると適用されます。',
     gcodeInjectionNoPrinters: 'プリンターが見つかりません。G-codeスニペットを設定するにはプリンターを追加してください。',

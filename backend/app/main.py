@@ -1145,6 +1145,24 @@ async def _maybe_notify_printer_offline(printer_id: int) -> None:
         _printer_offline_notify_tasks.pop(printer_id, None)
 
 
+async def _maybe_clear_plate_from_door_cycle(printer_id: int) -> None:
+    """Clear the plate-clear gate after a door open→close, if enabled (#238)."""
+    from backend.app.api.routes.settings import get_setting
+
+    try:
+        async with async_session() as db:
+            enabled = await get_setting(db, "door_cycle_clears_plate")
+    except Exception as e:
+        logging.getLogger(__name__).warning("Failed to read door_cycle_clears_plate for printer %s: %s", printer_id, e)
+        return
+    if (enabled or "").lower() != "true":
+        return
+    if not printer_manager.is_awaiting_plate_clear(printer_id):
+        return
+    logging.getLogger(__name__).info("[#238] Printer %s door opened and closed; marking plate clear", printer_id)
+    printer_manager.set_awaiting_plate_clear(printer_id, False)
+
+
 async def on_printer_status_change(printer_id: int, state: PrinterState):
     """Handle printer status changes - broadcast via WebSocket."""
     # Connected-edge reconciliation (#1542 follow-up). When the printer
@@ -1220,6 +1238,15 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
                 printer_id,
             )
             pending.cancel()
+
+    # Door open→close marks plate clear (#238). Edge tracking is in-memory and
+    # cheap; the setting is only read when a full cycle completes while the
+    # printer is awaiting plate-clear.
+    if state.connected:
+        if printer_manager.observe_door_state(printer_id, state.door_open):
+            await _maybe_clear_plate_from_door_cycle(printer_id)
+    else:
+        printer_manager.reset_door_tracking(printer_id)
 
     # Only broadcast if something meaningful changed (reduce WebSocket spam)
     # Include rounded temperatures to detect meaningful temp changes (within 1 degree)
