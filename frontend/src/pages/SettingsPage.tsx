@@ -212,7 +212,7 @@ registerSettingsSearch({ labelKey: 'settings.providers', tab: 'notifications', k
 registerSettingsSearch({ labelKey: 'settings.messageTemplates', tab: 'notifications', keywords: 'message templates notification text edit', anchor: 'card-templates' });
 registerSettingsSearch({ labelKey: 'settings.defaultPrintOptions', labelFallback: 'Default Print Options', tab: 'queue', keywords: 'print bed leveling flow calibration vibration first layer timelapse', anchor: 'card-print-options' });
 registerSettingsSearch({ labelKey: 'settings.tempFanPresetsTitle', labelFallback: 'Temperature & Fan Presets', tab: 'queue', keywords: 'temperature fan presets nozzle bed chamber quick buttons popover', anchor: 'card-temp-fan-presets' });
-registerSettingsSearch({ labelKey: 'settings.plateClear', labelFallback: 'Plate-Clear Confirmation', tab: 'queue', keywords: 'plate clear confirm auto queue', anchor: 'card-plate' });
+registerSettingsSearch({ labelKey: 'settings.plateClear', labelFallback: 'Plate-Clear Confirmation', tab: 'queue', keywords: 'plate clear confirm auto queue door sensor', anchor: 'card-plate' });
 registerSettingsSearch({ labelKey: 'settings.concurrentUploadsTitle', labelFallback: 'Concurrent Uploads', tab: 'queue', keywords: 'concurrent parallel upload transfer ftp queue fleet', anchor: 'card-concurrent-uploads' });
 registerSettingsSearch({ labelKey: 'settings.gcodeInjection', labelFallback: 'G-code Injection', tab: 'queue', keywords: 'gcode injection start end autoprint farmloop swapmod autoclear printflow', anchor: 'card-gcode' });
 registerSettingsSearch({ labelKey: 'settings.slicerCard', labelFallback: 'Slicer', tab: 'queue', keywords: 'slicer orcaslicer bambustudio orca bambu api sidecar url docker preferred', anchor: 'card-slicer' });
@@ -4541,7 +4541,7 @@ export function SettingsPage() {
                   <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
                 </label>
               </div>
-              <div className="flex items-center justify-between">
+              <div className={`flex items-center justify-between ${localSettings.require_plate_clear ? '' : 'opacity-50'}`}>
                 <div className="flex-1 mr-4">
                   <p className="text-sm text-white">
                     {t('settings.doorCycleClearsPlate', 'Door open-close marks plate clear')}
@@ -4550,10 +4550,11 @@ export function SettingsPage() {
                     {t('settings.doorCycleClearsPlateDescription', 'When a printer is waiting for plate-clear, opening and then closing its door marks the plate as cleared. Only works on printers with a door sensor.')}
                   </p>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
+                <label className={`relative inline-flex items-center ${localSettings.require_plate_clear ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                   <input
                     type="checkbox"
                     aria-label={t('settings.doorCycleClearsPlate', 'Door open-close marks plate clear')}
+                    disabled={!localSettings.require_plate_clear}
                     checked={localSettings.door_cycle_clears_plate ?? false}
                     onChange={(e) => updateSetting('door_cycle_clears_plate', e.target.checked)}
                     className="sr-only peer"

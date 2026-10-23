@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import traceback
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -292,6 +292,7 @@ class PrinterManager:
         self._on_bed_temp_update: Callable[[int, float], None] | None = None
         self._on_drying_complete: Callable[[int, int], None] | None = None
         self._on_tray_change: Callable[[int, int, int], None] | None = None
+        self._on_door_cycle: Callable[[int], Awaitable[None]] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         # Track who started the current print (Issue #206)
         self._current_print_user: dict[int, dict] = {}  # {printer_id: {"user_id": int, "username": str}}
@@ -303,10 +304,10 @@ class PrinterManager:
         # This is persisted on Printer so the completion card survives restarts.
         self._awaiting_plate_clear_archive_id: dict[int, int] = {}
         # Door open→close cycle tracking for "door cycle marks plate clear" (#238).
-        # Last observed door state per printer (None = not yet observed since
-        # connect), and printers whose door opened while the gate was raised.
+        # Last observed door state per printer (missing = not yet observed since
+        # connect), and printers whose door opened after printing stopped.
         self._door_last_open: dict[int, bool] = {}
-        self._door_opened_while_awaiting: set[int] = set()
+        self._door_opened_since_print: set[int] = set()
 
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
@@ -353,9 +354,12 @@ class PrinterManager:
         UI without it. Centralised here so every current AND future caller is
         covered without each one having to remember to broadcast.
         """
-        # Any gate change needs a fresh door open→close to count (#238): a door
-        # opened before this print finished is not an acknowledgement of it.
-        self._door_opened_while_awaiting.discard(printer_id)
+        # Clearing the gate by hand consumes any door opening in progress (#238),
+        # so the next gate needs its own open→close. Raising the gate keeps it:
+        # the door may have opened in the moment between the print finishing
+        # and this flag being set.
+        if not awaiting:
+            self._door_opened_since_print.discard(printer_id)
         if awaiting:
             self._awaiting_plate_clear.add(printer_id)
             # A new terminal event starts a new gate. The exact archive is
@@ -370,32 +374,59 @@ class PrinterManager:
             self._schedule_async(self._persist_awaiting_plate_clear(printer_id, awaiting))
             self._schedule_async(self._broadcast_status_change(printer_id))
 
-    def observe_door_state(self, printer_id: int, door_open: bool) -> bool:
+    def observe_door_state(self, printer_id: int, door_open: bool, printing: bool = False) -> bool:
         """Track door edges and report a completed open→close cycle (#238).
 
-        Returns True only when the door closes after having been opened while
-        the printer was awaiting plate-clear. The caller decides whether the
-        user has enabled the door-cycle setting before clearing the gate.
+        A door opening counts once printing has stopped, even if the
+        plate-clear gate isn't raised yet. Returns True when the door then
+        closes while the printer is awaiting plate-clear. The caller decides
+        whether the door-cycle setting is enabled before clearing the gate.
         """
         prev = self._door_last_open.get(printer_id)
         self._door_last_open[printer_id] = door_open
-        if not self.is_awaiting_plate_clear(printer_id):
-            self._door_opened_while_awaiting.discard(printer_id)
+        if printing:
+            # An opening during a print is not an acknowledgement of its plate.
+            self._door_opened_since_print.discard(printer_id)
             return False
         if prev is None or prev == door_open:
             return False
         if door_open:
-            self._door_opened_while_awaiting.add(printer_id)
+            self._door_opened_since_print.add(printer_id)
             return False
-        if printer_id in self._door_opened_while_awaiting:
-            self._door_opened_while_awaiting.discard(printer_id)
-            return True
-        return False
+        if printer_id not in self._door_opened_since_print:
+            return False
+        self._door_opened_since_print.discard(printer_id)
+        return self.is_awaiting_plate_clear(printer_id)
 
     def reset_door_tracking(self, printer_id: int) -> None:
         """Forget door history, e.g. on disconnect, so a stale value can't form a cycle."""
         self._door_last_open.pop(printer_id, None)
-        self._door_opened_while_awaiting.discard(printer_id)
+        self._door_opened_since_print.discard(printer_id)
+
+    def set_door_cycle_callback(self, callback: Callable[[int], Awaitable[None]]) -> None:
+        """Set the handler run when a door open→close completes while awaiting plate-clear."""
+        self._on_door_cycle = callback
+
+    def _on_mqtt_state_change(self, printer_id: int, state: PrinterState) -> None:
+        """Handle a state push from the MQTT thread.
+
+        The door fields are copied here, at push time: ``state`` is the
+        client's live object and later pushes keep changing it, so reading it
+        when the scheduled task runs could miss a quick open→close (#238).
+        """
+        if self._loop and self._loop.is_running():
+            printing = (state.state or "").upper() in self.ACTIVE_PRINT_STATES
+            self._schedule_async(self._handle_door_update(printer_id, state.connected, state.door_open, printing))
+        if self._on_status_change:
+            self._schedule_async(self._on_status_change(printer_id, state))
+
+    async def _handle_door_update(self, printer_id: int, connected: bool, door_open: bool, printing: bool) -> None:
+        """Apply one door snapshot and run the door-cycle handler on a completed cycle."""
+        if not connected:
+            self.reset_door_tracking(printer_id)
+            return
+        if self.observe_door_state(printer_id, door_open, printing) and self._on_door_cycle:
+            await self._on_door_cycle(printer_id)
 
     def set_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None) -> None:
         """Associate the exact completed archive with an outstanding plate-clear gate."""
@@ -615,8 +646,7 @@ class PrinterManager:
         printer_id = printer.id
 
         def on_state_change(state: PrinterState):
-            if self._on_status_change:
-                self._schedule_async(self._on_status_change(printer_id, state))
+            self._on_mqtt_state_change(printer_id, state)
 
         def on_print_start(data: dict):
             if self._on_print_start:
@@ -692,6 +722,7 @@ class PrinterManager:
             del self._clients[printer_id]
         self._models.pop(printer_id, None)  # Clean up model cache
         self._printer_info.pop(printer_id, None)  # Clean up printer info cache
+        self.reset_door_tracking(printer_id)
 
     def disconnect_all(self, timeout: float = 0):
         """Disconnect from all printers."""
@@ -781,6 +812,7 @@ class PrinterManager:
             client = self._clients[printer_id]
             if client.mark_power_off():
                 logger.info("Marking printer %s as offline (smart plug power off)", printer_id)
+                self.reset_door_tracking(printer_id)
                 # Trigger the status change callback to broadcast via WebSocket
                 if self._on_status_change:
                     self._schedule_async(self._on_status_change(printer_id, client.state))

@@ -1268,7 +1268,7 @@ export interface AppSettings {
   // Plate-clear confirmation
   require_plate_clear: boolean;
   // Door open→close marks the plate clear (#238)
-  door_cycle_clears_plate?: boolean;
+  door_cycle_clears_plate: boolean;
   // Shortest job first scheduling
   queue_shortest_first: boolean;
   // Maximum independent printer uploads/sessions in flight

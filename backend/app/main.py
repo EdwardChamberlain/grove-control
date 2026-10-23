@@ -1239,15 +1239,6 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
             )
             pending.cancel()
 
-    # Door open→close marks plate clear (#238). Edge tracking is in-memory and
-    # cheap; the setting is only read when a full cycle completes while the
-    # printer is awaiting plate-clear.
-    if state.connected:
-        if printer_manager.observe_door_state(printer_id, state.door_open):
-            await _maybe_clear_plate_from_door_cycle(printer_id)
-    else:
-        printer_manager.reset_door_tracking(printer_id)
-
     # Only broadcast if something meaningful changed (reduce WebSocket spam)
     # Include rounded temperatures to detect meaningful temp changes (within 1 degree)
     temps = state.temperatures or {}
@@ -6657,6 +6648,7 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     printer_manager.set_event_loop(loop)
     printer_manager.set_status_change_callback(on_printer_status_change)
+    printer_manager.set_door_cycle_callback(_maybe_clear_plate_from_door_cycle)
     printer_manager.set_print_start_callback(on_print_start)
     printer_manager.set_print_complete_callback(on_print_complete)
     printer_manager.set_print_running_observed_callback(on_print_running_observed)
