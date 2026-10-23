@@ -61,6 +61,7 @@ from backend.app.schemas.library import (
     FolderTreeItem,
     FolderUpdate,
     TagSummary,
+    TemporaryFilesSettings,
     ZipExtractError,
     ZipExtractResponse,
     ZipExtractResult,
@@ -73,6 +74,14 @@ from backend.app.services.filament_requirements import (
 )
 from backend.app.services.plate_thumbnail import inject_plate_thumbnails_if_missing
 from backend.app.services.stl_thumbnail import MIN_USABLE_STL_BYTES, generate_stl_thumbnail
+from backend.app.services.temporary_files import (
+    TEMPORARY_FOLDER_KEY,
+    ensure_temporary_folder,
+    get_retention_days as get_temporary_retention_days,
+    get_temporary_folder_id,
+    outside_system_folders,
+    set_retention_days as set_temporary_retention_days,
+)
 from backend.app.utils.filename import InvalidFilenameError, validate_print_filename
 from backend.app.utils.threemf_tools import (
     extract_embedded_presets_from_3mf,
@@ -109,6 +118,12 @@ def _ensure_library_file_visible(
     if library_file.created_by_id is None or library_file.created_by_id != user.id:
         raise HTTPException(404, "File not found")
     return library_file
+
+
+def _reject_system_folder(folder: LibraryFolder | None, action: str) -> None:
+    """Refuse user writes into, or changes to, a Grove-managed folder (#237)."""
+    if folder is not None and folder.system_key is not None:
+        raise HTTPException(status_code=400, detail=f"{folder.name} is managed by Grove; {action}")
 
 
 def get_library_dir() -> Path:
@@ -254,8 +269,9 @@ def _resolve_upload_destination(target_folder: LibraryFolder | None, filename: s
     folders (403), missing/inaccessible/non-writable external paths (400), and
     filename collisions on the external mount (409). See #1112 — previously
     uploads to writable external folders were silently misrouted to the
-    internal library dir.
+    internal library dir. Grove-managed folders reject uploads (400, #237).
     """
+    _reject_system_folder(target_folder, "files can't be uploaded into it")
     if target_folder is not None and target_folder.is_external:
         if target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot upload to a read-only external folder")
@@ -739,7 +755,7 @@ async def _backfill_external_stl_thumbnails(folder_ids: list[int]) -> None:
 async def list_folders(
     response: Response,
     db: AsyncSession = Depends(get_db),
-    _: tuple[User | None, bool] = Depends(
+    auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
             Permission.LIBRARY_READ_ALL,
             Permission.LIBRARY_READ_OWN,
@@ -758,6 +774,7 @@ async def list_folders(
         .order_by(LibraryFolder.name)
     )
     rows = result.all()
+    user, can_read_all = auth_result
 
     # Get file counts per folder
     file_counts_result = await db.execute(
@@ -766,6 +783,22 @@ async def list_folders(
         .group_by(LibraryFile.folder_id)
     )
     file_counts = dict(file_counts_result.all())
+
+    # Temporary Files shows each user only their own uploads (#237), so its
+    # badge counts only those too.
+    temporary_folder_id = next((f.id for f, _, _ in rows if f.system_key == TEMPORARY_FOLDER_KEY), None)
+    retention_days = None
+    if temporary_folder_id is not None:
+        retention_days = await get_temporary_retention_days(db)
+        if user is not None and not can_read_all:
+            own_count = await db.execute(
+                select(func.count(LibraryFile.id)).where(
+                    LibraryFile.folder_id == temporary_folder_id,
+                    LibraryFile.deleted_at.is_(None),
+                    LibraryFile.created_by_id == user.id,
+                )
+            )
+            file_counts[temporary_folder_id] = own_count.scalar() or 0
 
     # Latest immediate-child file activity per folder (#1770). Sibling of the
     # file_counts subquery — same WHERE clause, MAX(updated_at) instead of
@@ -796,6 +829,9 @@ async def list_folders(
             is_external=folder.is_external,
             external_path=folder.external_path,
             external_readonly=folder.external_readonly,
+            is_system=folder.is_system,
+            system_key=folder.system_key,
+            retention_days=retention_days if folder.id == temporary_folder_id else None,
             file_count=file_counts.get(folder.id, 0),
             latest_activity_at=latest_activity_at,
             children=[],
@@ -942,8 +978,10 @@ async def create_folder(
     # Verify parent exists if specified
     if data.parent_id is not None:
         parent_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == data.parent_id))
-        if not parent_result.scalar_one_or_none():
+        parent = parent_result.scalar_one_or_none()
+        if not parent:
             raise HTTPException(status_code=404, detail="Parent folder not found")
+        _reject_system_folder(parent, "folders can't be created in it")
 
     # Verify project exists if specified
     project_name = None
@@ -998,7 +1036,7 @@ async def create_folder(
 async def get_folder(
     folder_id: int,
     db: AsyncSession = Depends(get_db),
-    _: tuple[User | None, bool] = Depends(
+    auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
             Permission.LIBRARY_READ_ALL,
             Permission.LIBRARY_READ_OWN,
@@ -1019,15 +1057,17 @@ async def get_folder(
 
     folder, project_name, archive_name = row
 
-    # Get file count + latest file activity (#1770) in one trip
+    # Get file count + latest file activity (#1770) in one trip. Temporary
+    # Files counts only the caller's own uploads, matching list_folders (#237).
+    count_filters = [LibraryFile.folder_id == folder_id, LibraryFile.deleted_at.is_(None)]
+    user, can_read_all = auth_result
+    if folder.system_key == TEMPORARY_FOLDER_KEY and user is not None and not can_read_all:
+        count_filters.append(LibraryFile.created_by_id == user.id)
     agg_result = await db.execute(
         select(
             func.count(LibraryFile.id),
             func.max(LibraryFile.updated_at),
-        ).where(
-            LibraryFile.folder_id == folder_id,
-            LibraryFile.deleted_at.is_(None),
-        )
+        ).where(*count_filters)
     )
     file_count, latest_file = agg_result.one()
     file_count = file_count or 0
@@ -1045,6 +1085,8 @@ async def get_folder(
         external_path=folder.external_path,
         external_readonly=folder.external_readonly,
         external_show_hidden=folder.external_show_hidden,
+        is_system=folder.is_system,
+        system_key=folder.system_key,
         file_count=file_count,
         latest_activity_at=latest_activity_at,
         created_at=folder.created_at,
@@ -1135,6 +1177,7 @@ async def update_folder(
 
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    _reject_system_folder(folder, "it can't be renamed, moved or linked")
 
     if data.name is not None:
         folder.name = data.name
@@ -1146,6 +1189,8 @@ async def update_folder(
 
         # Check for circular reference in ancestors
         if data.parent_id != 0:  # 0 means move to root
+            target_parent = await db.get(LibraryFolder, data.parent_id)
+            _reject_system_folder(target_parent, "folders can't be moved into it")
             current_id = data.parent_id
             while current_id is not None:
                 if current_id == folder_id:
@@ -1241,6 +1286,7 @@ async def delete_folder(
 
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
+    _reject_system_folder(folder, "it can't be deleted")
 
     # External folders: only remove DB records, never delete files from external path
     is_ext = folder.is_external
@@ -1480,8 +1526,10 @@ async def create_external_folder(
     # Verify parent exists if specified
     if data.parent_id is not None:
         parent_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == data.parent_id))
-        if not parent_result.scalar_one_or_none():
+        parent = parent_result.scalar_one_or_none()
+        if not parent:
             raise HTTPException(status_code=404, detail="Parent folder not found")
+        _reject_system_folder(parent, "folders can't be created in it")
 
     folder = LibraryFolder(
         name=data.name,
@@ -1868,6 +1916,9 @@ async def list_files(
                  intentionally bypassed — tags are cross-cutting and the user
                  wants "every file with this tag" regardless of where it lives.
                  ``recursive`` becomes irrelevant in that case.
+
+    Files in Temporary Files (#237) appear only when that folder is listed
+    directly, so they stay out of All Files, search, tags and projects.
     """
     if internal_only and external_only:
         raise HTTPException(
@@ -1918,6 +1969,10 @@ async def list_files(
         query = query.where(LibraryFile.is_external.is_(False))
     elif external_only:
         query = query.where(LibraryFile.is_external.is_(True))
+
+    temporary_folder_id = await get_temporary_folder_id(db)
+    if tag_ids or folder_id is None or folder_id != temporary_folder_id:
+        query = query.where(outside_system_folders())
 
     query = query.order_by(LibraryFile.filename)
     result = await db.execute(query)
@@ -1999,11 +2054,17 @@ async def upload_file(
     file: UploadFile = File(...),
     folder_id: int | None = None,
     generate_stl_thumbnails: bool = Query(default=True),
+    temporary: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
     api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
-    """Upload a file to the library."""
+    """Upload a file to the library.
+
+    ``temporary=true`` is for direct uploads made only to queue a job (printer
+    card, Queue → Add Job). They land in the Grove-managed Temporary Files
+    folder instead of ``folder_id`` (#237).
+    """
     try:
         if not file.filename:
             raise HTTPException(status_code=400, detail="Filename is required")
@@ -2023,7 +2084,10 @@ async def upload_file(
 
         # Verify folder exists if specified
         target_folder = None
-        if folder_id is not None:
+        if temporary:
+            if folder_id is not None:
+                raise HTTPException(status_code=400, detail="folder_id can't be combined with temporary=true")
+        elif folder_id is not None:
             folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
             target_folder = folder_result.scalar_one_or_none()
             if not target_folder:
@@ -2129,6 +2193,9 @@ async def upload_file(
                 except OSError:
                     pass
 
+        if temporary:
+            folder_id = (await ensure_temporary_folder(db)).id
+
         # Create database entry (managed files store relative paths for portability;
         # external files store the absolute mount path — same shape as scan produces)
         library_file = LibraryFile(
@@ -2194,6 +2261,7 @@ async def extract_zip_file(
         target_folder = folder_result.scalar_one_or_none()
         if not target_folder:
             raise HTTPException(status_code=404, detail="Target folder not found")
+        _reject_system_folder(target_folder, "files can't be extracted into it")
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot extract ZIP to a read-only external folder")
         if target_folder.is_external:
@@ -4259,7 +4327,11 @@ async def slice_library_file(
     # Capture inputs the bg task needs — the request DB session is closed
     # before the background task runs.
     model_bytes = src_path.read_bytes()
+    # Slice output is something the user chose to keep, so a source in
+    # Temporary Files sends its output to the root of Files instead (#237).
     folder_id = lib_file.folder_id
+    if folder_id is not None and folder_id == await get_temporary_folder_id(db):
+        folder_id = None
     source_lib_file_id = lib_file.id
     # API-keyed callers get the key's owner from the auth gate. Fall back to the
     # API key's owner so cloud-preset resolution can read the stored cloud_token
@@ -4487,8 +4559,11 @@ async def update_file(
         else:
             # Verify folder exists
             folder_result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == data.folder_id))
-            if not folder_result.scalar_one_or_none():
+            target_folder = folder_result.scalar_one_or_none()
+            if not target_folder:
                 raise HTTPException(status_code=404, detail="Folder not found")
+            if target_folder.id != file.folder_id:
+                _reject_system_folder(target_folder, "files can't be moved into it")
             file.folder_id = data.folder_id
 
     if data.project_id is not None:
@@ -4767,6 +4842,7 @@ async def move_files(
         target_folder = folder_result.scalar_one_or_none()
         if not target_folder:
             raise HTTPException(status_code=404, detail="Folder not found")
+        _reject_system_folder(target_folder, "files can't be moved into it")
         if target_folder.is_external and target_folder.external_readonly:
             raise HTTPException(status_code=403, detail="Cannot move files to a read-only external folder")
 
@@ -4899,6 +4975,7 @@ async def bulk_delete(
 
         result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
         folder = result.scalar_one_or_none()
+        _reject_system_folder(folder, "it can't be deleted")
         if folder:
             # Count files that will be deleted, including files in nested
             # subfolders. Queue references must be released before the folder
@@ -4922,6 +4999,33 @@ async def bulk_delete(
     return BulkDeleteResponse(deleted_files=deleted_files, deleted_folders=deleted_folders)
 
 
+# ============ Temporary Files (#237) ============
+
+
+@router.get("/temporary-files/settings", response_model=TemporaryFilesSettings)
+async def get_temporary_files_settings(
+    db: AsyncSession = Depends(get_db),
+    _: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.LIBRARY_READ_ALL,
+            Permission.LIBRARY_READ_OWN,
+        )
+    ),
+):
+    """How long unused uploads stay in Temporary Files."""
+    return TemporaryFilesSettings(retention_days=await get_temporary_retention_days(db))
+
+
+@router.put("/temporary-files/settings", response_model=TemporaryFilesSettings)
+async def update_temporary_files_settings(
+    data: TemporaryFilesSettings,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_PURGE)),
+):
+    """Set the Temporary Files retention window (clamped to 1–365 days)."""
+    return TemporaryFilesSettings(retention_days=await set_temporary_retention_days(db, data.retention_days))
+
+
 # ============ Stats Endpoint ============
 
 
@@ -4940,7 +5044,8 @@ async def get_library_stats(
     # Stats exclude trashed files — users see counts/sizes for what's actually in the library.
     # Without LIBRARY_READ_ALL the stats reflect only the caller's own files —
     # match what the file list endpoint shows so the numbers stay consistent.
-    file_filters = [LibraryFile.deleted_at.is_(None)]
+    # Grove-managed Temporary Files are not part of the user's library (#237).
+    file_filters = [LibraryFile.deleted_at.is_(None), outside_system_folders()]
     if user is not None and not can_read_all:
         file_filters.append(LibraryFile.created_by_id == user.id)
 
@@ -4949,7 +5054,9 @@ async def get_library_stats(
     total_files = total_files_result.scalar() or 0
 
     # Total folders (folders are shared org structure, not per-user — count all)
-    total_folders_result = await db.execute(select(func.count(LibraryFolder.id)))
+    total_folders_result = await db.execute(
+        select(func.count(LibraryFolder.id)).where(LibraryFolder.system_key.is_(None))
+    )
     total_folders = total_folders_result.scalar() or 0
 
     # Total size

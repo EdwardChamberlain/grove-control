@@ -691,7 +691,7 @@ export default {
     developerModeWarning: '개발자 LAN 모드가 활성화되지 않음: {{names}}. 일부 기능이 작동하지 않을 수 있습니다.',
     howToEnable: '활성화 방법',
     incompatibleFile: '이 파일은 {{slicedFor}}용으로 슬라이싱되었지만, 이 프린터는 {{printerModel}}입니다',
-    directUploadLibraryNote: '업로드한 파일은 대기열에 추가하기 전에 파일 관리자에 저장됩니다.',
+    directUploadLibraryNote: '업로드한 파일은 프린터로 전송될 때까지 임시 파일에 보관됩니다.',
     dropNotPrintable: '.gcode 및 .gcode.3mf 파일만 인쇄할 수 있습니다',
     dropToPrint: '놓아서 인쇄',
     cannotPrint: '프린터 사용 중',
@@ -3228,6 +3228,8 @@ export default {
     size: '크기',
     free: '여유',
     allFiles: '모든 파일',
+    temporaryFiles: '임시 파일',
+    temporaryFilesDescription: '이 폴더는 Grove가 관리합니다. 프린터 카드나 대기열 → 작업 추가에서 업로드한 파일은 프린터로 전송될 때까지, 사용하지 않으면 {{days}}일 동안 여기에 보관됩니다. 파일을 보관하려면 다른 폴더로 옮기세요.',
     allExternal: '외부',
     externalIsEmpty: '외부 파일 없음',
     externalEmptyDescription: '연결된 외부 폴더의 파일이 여기에 표시됩니다.',
@@ -4136,7 +4138,6 @@ export default {
     emptySlotReset: '필라멘트가 할당되지 않음'
   },
   printModal: {
-    directUploadRetained: '여러 번 인쇄하는 데 사용하므로 이 파일은 파일 관리자에 남습니다.',
     variants: {
       editNote: '이 대안은 대기열에 추가할 때 정해집니다. 변경하려면 취소 후 다시 추가하세요.',
       title: '프린터 대안',

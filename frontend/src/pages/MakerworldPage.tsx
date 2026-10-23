@@ -566,7 +566,7 @@ export function MakerworldPage() {
                 >
                   <option value="">{t('makerworld.folderAuto')}</option>
                   {(foldersQuery.data ?? [])
-                    .filter((f) => !(f.is_external && f.external_readonly))
+                    .filter((f) => !f.is_system && !(f.is_external && f.external_readonly))
                     .flatMap((f) => flattenFolderTree(f))
                     .map(({ folder, depth }) => (
                       <option key={folder.id} value={folder.id}>

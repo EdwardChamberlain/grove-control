@@ -29,6 +29,7 @@ from backend.app.core.database import async_session
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.settings import Settings
+from backend.app.services.temporary_files import outside_system_folders
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +94,11 @@ def _purge_filter(cutoff: datetime, include_never_printed: bool):
         age_clause = or_(last_printed_old, never_printed_old)
     else:
         age_clause = last_printed_old
+    # Temporary Files has its own sweep (#237); keep it out of purge previews.
     return and_(
         LibraryFile.deleted_at.is_(None),
         LibraryFile.is_external.is_(False),
+        outside_system_folders(),
         age_clause,
     )
 

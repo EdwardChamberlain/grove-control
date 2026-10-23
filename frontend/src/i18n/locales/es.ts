@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'El modo desarrollador LAN no está activado en: {{names}}. Es posible que algunas funciones no funcionen.',
     howToEnable: 'Cómo activarlo',
     incompatibleFile: 'Este archivo se laminó para {{slicedFor}}, pero esta impresora es una {{printerModel}}',
-    directUploadLibraryNote: 'El archivo subido se guarda en el Administrador de archivos antes de ponerlo en cola.',
+    directUploadLibraryNote: 'El archivo subido se guarda en Archivos temporales hasta que se envía a una impresora.',
     dropNotPrintable: 'Solo se pueden imprimir archivos .gcode y .gcode.3mf',
     dropToPrint: 'Suelte para imprimir',
     cannotPrint: 'Impresora ocupada',
@@ -3415,6 +3415,8 @@ export default {
     size: 'Tamaño',
     free: 'Libre',
     allFiles: 'Todos los archivos',
+    temporaryFiles: 'Archivos temporales',
+    temporaryFilesDescription: 'Grove gestiona esta carpeta. Los archivos subidos desde una tarjeta de impresora o desde Cola → Añadir trabajo se quedan aquí hasta que se envían a una impresora, o {{days}} días si no se usan. Mueve un archivo fuera para conservarlo.',
     allExternal: 'Externos',
     externalIsEmpty: 'Sin archivos externos',
     externalEmptyDescription: 'Los archivos de tus carpetas externas vinculadas aparecerán aquí.',
@@ -4366,7 +4368,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: 'El archivo permanecerá en el Administrador de archivos porque se usa para varias impresiones.',
     variants: {
       editNote: 'Estas alternativas se fijaron al poner el trabajo en cola. Cancela y vuelve a encolar para cambiarlas.',
       title: 'Alternativas de impresora',

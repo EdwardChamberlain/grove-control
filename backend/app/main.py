@@ -122,6 +122,7 @@ from backend.app.services.spoolman_tracking import (
     store_print_data as _store_spoolman_print_data,
 )
 from backend.app.services.tasmota import tasmota_service
+from backend.app.services.temporary_files import temporary_files_service
 from backend.app.utils.fts_routing import extruder_for_inlet
 
 
@@ -6845,6 +6846,9 @@ async def lifespan(app: FastAPI):
     # Start the library trash sweeper (#1008)
     await library_trash_service.start_scheduler()
 
+    # Create Temporary Files, migrate abandoned direct uploads and start its sweeper (#237)
+    await temporary_files_service.start_scheduler()
+
     # Start the archive auto-purge sweeper (#1008 follow-up)
     await archive_purge_service.start_scheduler()
 
@@ -6897,6 +6901,7 @@ async def lifespan(app: FastAPI):
     github_backup_service.stop_scheduler()
     local_backup_service.stop_scheduler()
     library_trash_service.stop_scheduler()
+    temporary_files_service.stop_scheduler()
     archive_purge_service.stop_scheduler()
     obico_detection_service.stop()
     stop_ams_history_recording()

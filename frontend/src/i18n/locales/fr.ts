@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'Le mode développeur LAN n\'est pas activé sur : {{names}}. Certaines fonctionnalités peuvent ne pas fonctionner.',
     howToEnable: 'Comment activer',
     incompatibleFile: 'Ce fichier a été tranché pour {{slicedFor}}, mais cette imprimante est une {{printerModel}}',
-    directUploadLibraryNote: 'Le fichier importé est ajouté au gestionnaire de fichiers avant sa mise en file d’attente.',
+    directUploadLibraryNote: 'Le fichier importé est conservé dans Fichiers temporaires jusqu’à son envoi à une imprimante.',
     dropNotPrintable: 'Seuls les fichiers .gcode et .gcode.3mf peuvent être imprimés',
     dropToPrint: 'Déposer pour imprimer',
     cannotPrint: 'Imprimante occupée',
@@ -3402,6 +3402,8 @@ export default {
     size: 'Taille',
     free: 'Libre',
     allFiles: 'Tous les fichiers',
+    temporaryFiles: 'Fichiers temporaires',
+    temporaryFilesDescription: 'Grove gère ce dossier. Les fichiers importés depuis une carte d’imprimante ou File d’attente → Ajouter une tâche restent ici jusqu’à leur envoi à une imprimante, ou {{days}} jours s’ils ne sont pas utilisés. Déplacez un fichier pour le conserver.',
     allExternal: 'Externes',
     externalIsEmpty: 'Aucun fichier externe',
     externalEmptyDescription: 'Les fichiers de vos dossiers externes liés apparaîtront ici.',
@@ -4348,7 +4350,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: 'Ce fichier restera dans le gestionnaire de fichiers, car il est utilisé pour plusieurs impressions.',
     variants: {
       editNote: 'Ces alternatives ont été définies lors de la mise en file. Annulez et remettez en file pour les modifier.',
       title: 'Alternatives d\'imprimante',

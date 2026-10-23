@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'Der Entwickler-LAN-Modus ist nicht aktiviert auf: {{names}}. Einige Funktionen funktionieren möglicherweise nicht.',
     howToEnable: 'Aktivieren',
     incompatibleFile: 'Diese Datei wurde für {{slicedFor}} geslicet, aber dieser Drucker ist ein {{printerModel}}',
-    directUploadLibraryNote: 'Die hochgeladene Datei wird vor dem Einreihen im Dateimanager gespeichert.',
+    directUploadLibraryNote: 'Die hochgeladene Datei bleibt in „Temporäre Dateien“, bis sie an einen Drucker gesendet wird.',
     dropNotPrintable: 'Nur .gcode- und .gcode.3mf-Dateien können gedruckt werden',
     dropToPrint: 'Zum Drucken ablegen',
     cannotPrint: 'Drucker beschäftigt',
@@ -3413,6 +3413,8 @@ export default {
     size: 'Größe',
     free: 'Frei',
     allFiles: 'Alle Dateien',
+    temporaryFiles: 'Temporäre Dateien',
+    temporaryFilesDescription: 'Grove verwaltet diesen Ordner. Uploads von einer Druckerkarte oder über Warteschlange → Auftrag hinzufügen bleiben hier, bis sie an einen Drucker gesendet werden, oder {{days}} Tage, wenn sie nicht verwendet werden. Verschiebe eine Datei, um sie zu behalten.',
     allExternal: 'Extern',
     externalIsEmpty: 'Keine externen Dateien',
     externalEmptyDescription: 'Dateien aus deinen verknüpften externen Ordnern erscheinen hier.',
@@ -4359,7 +4361,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: 'Diese Datei bleibt im Dateimanager, da sie für mehrere Drucke verwendet wird.',
     variants: {
       editNote: 'Diese Alternativen wurden beim Einreihen festgelegt. Zum Ändern abbrechen und neu einreihen.',
       title: 'Drucker-Alternativen',

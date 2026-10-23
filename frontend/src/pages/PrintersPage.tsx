@@ -2815,7 +2815,6 @@ function SinglePrinterCockpit({
         initialSelectedPrinterIds={[printer.id]}
         onClose={() => setPrintAfterUpload(null)}
         onSuccess={() => setPrintAfterUpload(null)}
-        cleanupLibraryAfterDispatch
       />
     )}
     {reprintEntry?.archive_id && (
@@ -4117,7 +4116,7 @@ function PrinterCard({
 
     setIsDropUploading(true);
     try {
-      const result = await api.uploadLibraryFile(file, null);
+      const result = await api.uploadLibraryFile(file, null, true, true);
 
       // Check printer compatibility if sliced_for_model is available in metadata
       const slicedFor = (result.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
@@ -5567,7 +5566,6 @@ function PrinterCard({
           initialSelectedPrinterIds={[printer.id]}
           onClose={() => setPrintAfterUpload(null)}
           onSuccess={() => setPrintAfterUpload(null)}
-          cleanupLibraryAfterDispatch
         />
       )}
 

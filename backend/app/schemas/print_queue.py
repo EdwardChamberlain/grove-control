@@ -130,9 +130,6 @@ class PrintQueueItemCreate(BaseModel):
     quantity: int = 1
     # Project to associate the resulting archive with
     project_id: int | None = None
-    # Direct printer-card uploads are temporary library files. The scheduler
-    # deletes them after creating the durable archive copy.
-    cleanup_library_after_dispatch: bool = False
     # Cross-model alternatives (#671): several sliced files, one job, whichever
     # printer frees up first. Mutually exclusive with printer_id (a specific
     # printer defeats the purpose) and with archive_id/library_file_id (the
@@ -280,6 +277,8 @@ class PrintQueueItemResponse(BaseModel):
 
     # Auto-print G-code injection
     gcode_injection: bool = False
+    # Legacy (pre-#237): set on direct-upload rows created before Temporary
+    # Files existed. New rows never set it; removal is now by folder.
     cleanup_library_after_dispatch: bool = False
 
     # H2C dual-nozzle-rack slicer pick (#1780). Surface for any future

@@ -751,7 +751,7 @@ export default {
     developerModeWarning: 'Developer LAN mode is not enabled on: {{names}}. Some features may not work.',
     howToEnable: 'How to enable',
     incompatibleFile: 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}',
-    directUploadLibraryNote: 'The uploaded file is added to File Manager before you queue it.',
+    directUploadLibraryNote: 'The uploaded file is kept in Temporary Files until it is sent to a printer.',
     dropNotPrintable: 'Only .gcode and .gcode.3mf files can be printed',
     dropToPrint: 'Drop to print',
     cannotPrint: 'Printer busy',
@@ -3437,6 +3437,8 @@ export default {
     size: 'Size',
     free: 'Free',
     allFiles: 'All Files',
+    temporaryFiles: 'Temporary Files',
+    temporaryFilesDescription: 'Grove manages this folder. Uploads from a printer card or Queue → Add Job stay here until they are sent to a printer, or for {{days}} days if unused. Move a file out to keep it.',
     allExternal: 'External',
     externalIsEmpty: 'No external files',
     externalEmptyDescription: 'Files in your linked external folders will appear here.',
@@ -4392,7 +4394,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: 'This upload will stay in File Manager because it is used for multiple prints.',
     variants: {
       editNote: 'These alternatives were set when the job was queued. Cancel and re-queue to change them.',
       title: 'Printer alternatives',

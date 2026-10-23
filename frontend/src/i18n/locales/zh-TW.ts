@@ -737,7 +737,7 @@ export default {
     developerModeWarning: '以下印表機未啟用開發者區域網路模式：{{names}}。某些功能可能無法使用。',
     howToEnable: '如何啟用',
     incompatibleFile: '此檔案是為 {{slicedFor}} 切片的，但該印表機是 {{printerModel}}',
-    directUploadLibraryNote: '上傳的檔案會先儲存到檔案管理員，再加入佇列。',
+    directUploadLibraryNote: '上傳的檔案會保存在暫存檔案中，直到傳送到印表機。',
     dropNotPrintable: '只能列印 .gcode 和 .gcode.3mf 檔案',
     dropToPrint: '拖放以列印',
     cannotPrint: '印表機忙碌',
@@ -3400,6 +3400,8 @@ export default {
     size: '大小',
     free: '剩餘',
     allFiles: '所有檔案',
+    temporaryFiles: '暫存檔案',
+    temporaryFilesDescription: '此資料夾由 Grove 管理。從印表機卡片或「佇列 → 新增工作」上傳的檔案會保留在這裡，直到傳送到印表機；如未使用，則保留 {{days}} 天。將檔案移出即可保留。',
     allExternal: '外部',
     externalIsEmpty: '沒有外部檔案',
     externalEmptyDescription: '已連結的外部資料夾中的檔案將顯示於此。',
@@ -4346,7 +4348,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: '此檔案將用於多次列印，因此會保留在檔案管理員中。',
     variants: {
       editNote: '這些備選在工作加入佇列時確定。如需變更，請取消後重新加入佇列。',
       title: '印表機備選',

@@ -44,9 +44,11 @@ interface FileUploadModalProps {
   initialFiles?: File[];
   /** Optional actions shown above the drop zone. */
   beforeDropZone?: ReactNode;
+  /** Upload into the Grove-managed Temporary Files folder instead of folderId (#237). */
+  temporary?: boolean;
 }
 
-export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, autoUpload, validateFile, accept, singleFile = false, dropZoneHint, initialFiles, beforeDropZone }: FileUploadModalProps) {
+export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, autoUpload, validateFile, accept, singleFile = false, dropZoneHint, initialFiles, beforeDropZone, temporary = false }: FileUploadModalProps) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -100,7 +102,7 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
             error: result.errors.length > 0 ? t('fileManager.zipFilesFailed', '{{count}} files failed', { count: result.errors.length }) : undefined,
           });
         } else {
-          const result = await api.uploadLibraryFile(uf.file, folderId, generateStlThumbnails);
+          const result = await api.uploadLibraryFile(uf.file, folderId, generateStlThumbnails, temporary);
           updateFileStatus(uf.file, { status: 'success' });
           const error = onFileUploaded?.(result);
           if (error) {

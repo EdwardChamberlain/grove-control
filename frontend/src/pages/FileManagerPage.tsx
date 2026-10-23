@@ -548,6 +548,82 @@ function LinkFolderModal({ folder, onClose, onLink, isLoading, t }: LinkFolderMo
 }
 
 // Folder Tree Item
+interface TemporaryFilesFolderItemProps {
+  folder: LibraryFolderTree;
+  selected: boolean;
+  onSelect: (id: number) => void;
+  t: TFunction;
+}
+
+/** Grove-managed Temporary Files (#237): pinned above the tree, no actions. */
+function TemporaryFilesFolderItem({ folder, selected, onSelect, t }: TemporaryFilesFolderItemProps) {
+  return (
+    <div
+      data-testid="temporary-files-folder"
+      className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
+        selected ? 'bg-bambu-green/20 text-bambu-green' : 'hover:bg-bambu-dark text-white'
+      }`}
+      onClick={() => onSelect(folder.id)}
+      title={t('fileManager.temporaryFilesDescription', { days: folder.retention_days ?? 7 })}
+    >
+      <Clock className="w-4 h-4 text-bambu-gray flex-shrink-0" />
+      <span className="flex-1 min-w-0 truncate text-sm">{t('fileManager.temporaryFiles')}</span>
+      {folder.file_count > 0 && (
+        <span className="flex-shrink-0 text-xs text-bambu-gray">{folder.file_count}</span>
+      )}
+    </div>
+  );
+}
+
+interface TemporaryFilesRetentionProps {
+  retentionDays: number;
+  t: TFunction;
+}
+
+/** Inline retention editor for Temporary Files (#237), shown to library:purge holders. */
+function TemporaryFilesRetention({ retentionDays, t }: TemporaryFilesRetentionProps) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [draft, setDraft] = useState(String(retentionDays));
+  useEffect(() => setDraft(String(retentionDays)), [retentionDays]);
+  const parsed = Number.parseInt(draft, 10);
+  const valid = Number.isInteger(parsed) && parsed >= 1 && parsed <= 365;
+
+  const saveMutation = useMutation({
+    mutationFn: (days: number) => api.updateTemporaryFilesSettings({ retention_days: days }),
+    onSuccess: (res) => {
+      showToast(t('libraryTrash.toast.retentionSaved', { days: res.retention_days }), 'success');
+      queryClient.invalidateQueries({ queryKey: ['library-folders'] });
+    },
+    onError: (e: Error) => showToast(e.message || t('libraryTrash.toast.retentionFailed'), 'error'),
+  });
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <label htmlFor="temporary-retention-days" className="text-sm">
+        {t('libraryTrash.retentionLabel')}
+      </label>
+      <input
+        id="temporary-retention-days"
+        type="number"
+        min={1}
+        max={365}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        className="w-20 rounded border border-bambu-dark-tertiary bg-bambu-dark px-2 py-1 text-sm text-white"
+      />
+      <span className="text-sm">{t('libraryTrash.days')}</span>
+      <Button
+        variant="secondary"
+        onClick={() => saveMutation.mutate(parsed)}
+        disabled={saveMutation.isPending || !valid || parsed === retentionDays}
+      >
+        {t('common.save')}
+      </Button>
+    </div>
+  );
+}
+
 interface FolderTreeItemProps {
   folder: LibraryFolderTree;
   selectedFolderId: number | null;
@@ -1113,6 +1189,14 @@ export function FileManagerPage() {
     queryKey: ['library-folders'],
     queryFn: () => api.getLibraryFolders(),
   });
+  // Temporary Files (#237) is pinned on its own and never offered as a
+  // destination, so the regular tree and pickers only see the user's folders.
+  const temporaryFolder = useMemo(
+    () => folders?.find((f) => f.system_key === 'temporary_files') ?? null,
+    [folders],
+  );
+  const userFolders = useMemo(() => folders?.filter((f) => !f.is_system), [folders]);
+  const isTemporarySelected = temporaryFolder !== null && selectedFolderId === temporaryFolder.id;
 
   // Recursive folder tree sort (#1770). Applies the same comparator to the
   // top-level list AND to each level of `children`, so sort order is uniform
@@ -1147,8 +1231,8 @@ export function FileManagerPage() {
       });
       return sorted.map((f) => ({ ...f, children: sortLevel(f.children) }));
     };
-    return sortLevel(folders);
-  }, [folders, folderSortField, folderSortDirection]);
+    return sortLevel(userFolders ?? []);
+  }, [folders, userFolders, folderSortField, folderSortDirection]);
 
   // Trash count for the header badge (#1008). Empty/error are silently treated
   // as zero so a broken trash endpoint doesn't break the File Manager.
@@ -1587,7 +1671,7 @@ export function FileManagerPage() {
   // behind it.
   const canUpload = hasPermission('library:upload');
   const { isDraggingOver, dragHandlers } = usePageFileDrop({
-    disabled: !canUpload || showUploadModal,
+    disabled: !canUpload || showUploadModal || isTemporarySelected,
     onFiles: (files) => {
       setDroppedFiles(files);
       setShowUploadModal(true);
@@ -1708,7 +1792,7 @@ export function FileManagerPage() {
           <Button
             variant="secondary"
             onClick={() => setShowNewFolderModal(true)}
-            disabled={!hasPermission('library:upload')}
+            disabled={!hasPermission('library:upload') || isTemporarySelected}
             title={!hasPermission('library:upload') ? t('fileManager.noPermissionCreateFolder') : undefined}
           >
             <FolderPlus className="w-4 h-4 mr-2" />
@@ -1749,7 +1833,7 @@ export function FileManagerPage() {
           )}
           <Button
             onClick={() => setShowUploadModal(true)}
-            disabled={!hasPermission('library:upload')}
+            disabled={!hasPermission('library:upload') || isTemporarySelected}
             title={!hasPermission('library:upload') ? t('fileManager.noPermissionUpload') : undefined}
           >
             <Upload className="w-4 h-4 mr-2" />
@@ -1818,6 +1902,11 @@ export function FileManagerPage() {
             <option value="__top:internal">📁 {t('fileManager.allFiles')}</option>
             {folders?.some((f) => f.is_external) && (
               <option value="__top:external">🔗 {t('fileManager.allExternal')}</option>
+            )}
+            {temporaryFolder && (
+              <option value={temporaryFolder.id}>
+                🕒 {t('fileManager.temporaryFiles')} {temporaryFolder.file_count > 0 ? `(${temporaryFolder.file_count})` : ''}
+              </option>
             )}
             {sortedFolders && (() => {
               // Flatten folder tree for mobile selector
@@ -1999,6 +2088,17 @@ export function FileManagerPage() {
               </div>
             )}
 
+            {temporaryFolder && (
+              <div className="mt-1 mb-1 pb-1 border-b border-bambu-dark-tertiary">
+                <TemporaryFilesFolderItem
+                  folder={temporaryFolder}
+                  selected={isTemporarySelected}
+                  onSelect={setSelectedFolderId}
+                  t={t}
+                />
+              </div>
+            )}
+
             {/* Folder tree — re-key on the collapse toggle so flipping it
                 remounts every FolderTreeItem, which re-reads defaultExpanded
                 and makes the preference take effect immediately. */}
@@ -2025,7 +2125,21 @@ export function FileManagerPage() {
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* Markdown description panel (#1268) — auto-hides if the folder
               has no README/description.md so non-users pay no UI cost. */}
-          {selectedFolderId !== null && <FolderReadmePanel folderId={selectedFolderId} />}
+          {isTemporarySelected && temporaryFolder && (
+            <div
+              data-testid="temporary-files-banner"
+              className="mb-3 flex items-start gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200"
+            >
+              <Clock className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <span>{t('fileManager.temporaryFilesDescription', { days: temporaryFolder.retention_days ?? 7 })}</span>
+                {hasPermission('library:purge') && (
+                  <TemporaryFilesRetention retentionDays={temporaryFolder.retention_days ?? 7} t={t} />
+                )}
+              </div>
+            </div>
+          )}
+          {selectedFolderId !== null && !isTemporarySelected && <FolderReadmePanel folderId={selectedFolderId} />}
           {/* Tag filter rail (#1268). Lists every catalog tag as a togglable
               chip — active chips are filled green and show an X, inactive
               chips are outlined and toggle ON when clicked. Clicking an active
@@ -2354,7 +2468,7 @@ export function FileManagerPage() {
               </p>
               <Button
                 onClick={() => setShowUploadModal(true)}
-                disabled={!hasPermission('library:upload')}
+                disabled={!hasPermission('library:upload') || isTemporarySelected}
                 title={!hasPermission('library:upload') ? t('fileManager.noPermissionUpload') : undefined}
               >
                 <Plus className="w-4 h-4 mr-2" />
@@ -2677,9 +2791,9 @@ export function FileManagerPage() {
         />
       )}
 
-      {showMoveModal && folders && (
+      {showMoveModal && userFolders && (
         <MoveFilesModal
-          folders={folders}
+          folders={userFolders}
           selectedFiles={selectedFiles}
           currentFolderId={selectedFolderId}
           onClose={() => setShowMoveModal(false)}

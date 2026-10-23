@@ -46,6 +46,7 @@ from backend.app.services.printer_manager import (
     supports_drying_while_printing,
 )
 from backend.app.services.smart_plug_manager import smart_plug_manager
+from backend.app.services.temporary_files import get_temporary_folder_id, should_remove_after_dispatch
 from backend.app.utils.filename import derive_remote_filename
 from backend.app.utils.local_time import utcnow_naive
 from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model
@@ -834,17 +835,31 @@ class PrintScheduler:
             dispatch_ids: list[int] = []
             waiting_reason_changed = False
 
-            # A direct printer-card upload consumes its transient library row.
-            # Do not let two concurrent workers archive/delete the same row.
-            # Ordinary library prints only read the row and may still fan out.
+            # A File in Temporary Files (#237), or a legacy direct upload, may
+            # be removed by its dispatch. Do not let two concurrent workers
+            # archive/delete the same row; a second job sharing the source
+            # waits one tick, by which time the first has decided whether
+            # the File is still needed. Ordinary library prints only read
+            # the row and may still fan out.
+            temporary_folder_id = await get_temporary_folder_id(db)
             dispatch_libs: set[int] = set()
             consumed_libs: set[int] = set()
+
+            def _consumes_library_row(candidate: PrintQueueItem) -> bool:
+                if candidate.cleanup_library_after_dispatch:
+                    return True
+                library_file = getattr(candidate, "library_file", None)
+                return (
+                    temporary_folder_id is not None
+                    and library_file is not None
+                    and library_file.folder_id == temporary_folder_id
+                )
 
             def _library_row_conflict(candidate: PrintQueueItem) -> bool:
                 library_id = candidate.library_file_id
                 if library_id is None:
                     return False
-                if candidate.cleanup_library_after_dispatch:
+                if _consumes_library_row(candidate):
                     return library_id in dispatch_libs
                 return library_id in consumed_libs
 
@@ -853,7 +868,7 @@ class PrintScheduler:
                 if library_id is None:
                     return
                 dispatch_libs.add(library_id)
-                if candidate.cleanup_library_after_dispatch:
+                if _consumes_library_row(candidate):
                     consumed_libs.add(library_id)
 
             for item in items:
@@ -3682,9 +3697,16 @@ class PrintScheduler:
                 )
                 if archive:
                     item.archive_id = archive.id
-                    if item.cleanup_library_after_dispatch and not library_file.is_external:
+                    # Temporary Files (#237) are removed once no other live job
+                    # needs them; Archive already holds its own copy, so a
+                    # Temporary source always uploads from that copy.
+                    temporary_folder_id = await get_temporary_folder_id(db)
+                    if temporary_folder_id is not None and library_file.folder_id == temporary_folder_id:
+                        file_path = settings.base_dir / archive.file_path
+                        filename = archive.filename
+                    if await should_remove_after_dispatch(db, item, library_file, temporary_folder_id):
                         item.library_file_id = None
-                        cleanup_disk_paths.append(file_path)
+                        cleanup_disk_paths.append(lib_path if lib_path.is_absolute() else settings.base_dir / lib_path)
                         if library_file.thumbnail_path:
                             thumb_path = Path(library_file.thumbnail_path)
                             if not thumb_path.is_absolute():

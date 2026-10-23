@@ -2260,7 +2260,6 @@ export function QueuePage() {
           archiveName={uploadedQueueFile.filename}
           onClose={() => setUploadedQueueFile(null)}
           onSuccess={() => setUploadedQueueFile(null)}
-          cleanupLibraryAfterDispatch
         />
       )}
 

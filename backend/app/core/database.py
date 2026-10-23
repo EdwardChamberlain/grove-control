@@ -1811,6 +1811,13 @@ async def run_migrations(conn):
     await _safe_execute(conn, "ALTER TABLE library_folders ADD COLUMN external_readonly BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE library_folders ADD COLUMN external_show_hidden BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE library_folders ADD COLUMN external_path VARCHAR(500)")
+    # #237: Grove-managed system folders (Temporary Files). The unique index
+    # keeps a startup race from creating two folders for the same key.
+    await _safe_execute(conn, "ALTER TABLE library_folders ADD COLUMN system_key VARCHAR(32)")
+    await _safe_execute(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_library_folders_system_key ON library_folders (system_key)",
+    )
 
     # Migration: Add plate_detection_enabled column to printers
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN plate_detection_enabled BOOLEAN DEFAULT 0")
