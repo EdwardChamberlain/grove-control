@@ -1901,6 +1901,8 @@ export default {
     plateClear: '플레이트 비움 확인',
     requirePlateClear: '플레이트 비움 확인 필요',
     requirePlateClearDescription: '활성화하면 스케줄러가 완료된 작업이 있는 프린터에서 대기 중인 인쇄를 시작하기 전에 프린터별 플레이트 비움 확인을 기다립니다.',
+    doorCycleClearsPlate: '도어 열고 닫기로 플레이트 비움 확인',
+    doorCycleClearsPlateDescription: '프린터가 플레이트 비움 확인을 기다리는 동안 도어를 열었다가 닫으면 플레이트가 비워진 것으로 표시됩니다. 도어 센서가 있는 프린터에서만 작동합니다.',
     gcodeInjection: 'G코드 주입',
     gcodeInjectionDescription: '자동 인쇄 시스템을 위한 인쇄 시작 및/또는 종료 시 주입할 사용자 지정 G코드를 설정하세요.',
     gcodeInjectionNoPrinters: '프린터가 없습니다. G코드 스니펫을 설정하려면 프린터를 추가하세요.',

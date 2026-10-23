@@ -2017,6 +2017,8 @@ export default {
     plateClear: 'Druckplatte-Bestätigung',
     requirePlateClear: 'Druckplatte-Bestätigung erforderlich',
     requirePlateClearDescription: 'Wenn aktiviert, wartet der Scheduler auf eine Druckplatten-Bestätigung pro Drucker, bevor geplante Drucke auf Druckern mit abgeschlossenen Aufträgen gestartet werden. Wenn dies deaktiviert ist, werden auch das Druckplatten-Status-Badge und die Schaltfläche "Druckplatte als freigegeben markieren" auf den Druckerkarten ausgeblendet.',
+    doorCycleClearsPlate: 'Tür öffnen und schließen bestätigt freie Druckplatte',
+    doorCycleClearsPlateDescription: 'Wenn ein Drucker auf die Druckplatten-Bestätigung wartet, gilt das Öffnen und anschließende Schließen der Tür als Bestätigung, dass die Platte frei ist. Funktioniert nur bei Druckern mit Türsensor.',
     gcodeInjection: 'G-Code-Injektion',
     gcodeInjectionDescription: 'Konfigurieren Sie benutzerdefinierten G-code, der am Anfang und/oder Ende von Drucken für Auto-Print-Systeme wie Farmloop, SwapMod, AutoClear und Printflow 3D eingefügt wird. Snippets werden pro Druckermodell konfiguriert und angewendet, wenn "G-code einfügen" bei einem Warteschlangen-Element aktiviert ist.',
     gcodeInjectionNoPrinters: 'Keine Drucker gefunden. Fügen Sie Drucker hinzu, um G-code-Snippets zu konfigurieren.',

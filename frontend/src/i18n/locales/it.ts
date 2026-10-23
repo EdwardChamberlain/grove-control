@@ -2017,6 +2017,8 @@ export default {
     plateClear: 'Conferma piatto libero',
     requirePlateClear: 'Richiedi conferma piatto libero',
     requirePlateClearDescription: 'Quando questa opzione è abilitata, lo scheduler attende una conferma per stampante che il piatto sia libero prima di avviare le stampe in coda su stampanti con lavori completati. Disabilitandola vengono nascosti anche il badge di stato del piatto e il pulsante "Segna il piatto come liberato" sulle schede stampante.',
+    doorCycleClearsPlate: 'Aprire e chiudere lo sportello segna il piatto come libero',
+    doorCycleClearsPlateDescription: 'Quando una stampante è in attesa della conferma di piatto libero, aprire e poi chiudere lo sportello segna il piatto come liberato. Funziona solo sulle stampanti con sensore dello sportello.',
     gcodeInjection: 'Iniezione G-code',
     gcodeInjectionDescription: 'Configura G-code personalizzato da iniettare all\'inizio e/o alla fine delle stampe per sistemi di stampa automatica come Farmloop, SwapMod, AutoClear e Printflow 3D. Gli snippet sono configurati per modello di stampante e applicati quando "Inietta G-code" è abilitato su un elemento della coda.',
     gcodeInjectionNoPrinters: 'Nessuna stampante trovata. Aggiungi stampanti per configurare gli snippet G-code.',
