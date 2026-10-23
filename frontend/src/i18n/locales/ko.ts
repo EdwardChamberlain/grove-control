@@ -3664,6 +3664,7 @@ export default {
     runningToast: '{{name}} 슬라이싱 중 — {{elapsed}}',
     runningWithProgress: '{{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     completedToast: '{{name}} 슬라이싱 완료',
+    viewInFiles: '파일에서 보기',
     failedToast: '{{name}} 슬라이싱 실패: {{detail}}',
     tier: {
       local: '가져온 것',

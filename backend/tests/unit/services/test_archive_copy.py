@@ -117,9 +117,8 @@ class TestThreeMFParserErrorVisibility:
         self,
         tmp_path: Path,
     ) -> None:
-        """slice_and_persist_as_archive uses parsed_metadata.filament_type/color
-        to populate the new archive's filament list. The parser must filter
-        out filaments whose used_g==0 — otherwise the resulting archive card
+        """Sliced-output metadata feeds the filament list shown on cards. The
+        parser must filter out filaments whose used_g==0 — otherwise the card
         shows every project-wide AMS slot (16+ swatches) for what was
         actually a 2-color print on a single plate.
         """
