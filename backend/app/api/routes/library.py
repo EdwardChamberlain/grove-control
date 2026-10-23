@@ -83,6 +83,7 @@ from backend.app.services.temporary_files import (
     set_retention_days as set_temporary_retention_days,
 )
 from backend.app.utils.filename import InvalidFilenameError, validate_print_filename
+from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import (
     extract_embedded_presets_from_3mf,
     extract_nozzle_mapping_from_3mf,
@@ -4274,6 +4275,122 @@ async def slice_and_persist_as_archive(
         filament_used_g=filament_g,
         filament_used_mm=filament_mm,
         used_embedded_settings=used_embedded_settings,
+    )
+
+
+async def copy_archive_to_library(
+    db: AsyncSession,
+    *,
+    archive,  # PrintArchive — hint kept loose to avoid cyclic import
+    folder_id: int | None,
+    current_user_id: int | None,
+) -> FileUploadResponse:
+    """Copy an Archive entry's 3MF and thumbnail into Files as a new
+    ``LibraryFile`` in ``folder_id`` (``None`` = root).
+
+    Always copies the bytes: the new file never points at the Archive's own
+    storage, so Archive retention or deletion can't affect it. The Archive row
+    is not modified. ``duplicate_of`` is set when Files already holds a file
+    with the same content hash; the copy is still created.
+    """
+    from backend.app.services.archive import ThreeMFParser
+
+    if not archive.file_path:
+        raise HTTPException(status_code=400, detail="Archive entry has no 3MF to save")
+    src_path = safe_join_under(Path(app_settings.base_dir), archive.file_path)
+    if not src_path.is_file():
+        raise HTTPException(status_code=404, detail="Archive file missing on disk")
+
+    filename = archive.filename or src_path.name
+    if not filename.lower().endswith(".3mf"):
+        filename = f"{filename}.3mf"
+
+    target_folder = None
+    if folder_id is not None:
+        target_folder = (
+            await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
+        ).scalar_one_or_none()
+        if not target_folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+    dest_path, is_external = _resolve_upload_destination(target_folder, filename)
+    thumb_dest: Path | None = None
+    try:
+        shutil.copyfile(src_path, dest_path)
+        file_hash = calculate_file_hash(dest_path)
+        duplicate_of = (
+            await db.execute(
+                select(LibraryFile.id)
+                .where(LibraryFile.file_hash == file_hash, LibraryFile.deleted_at.is_(None))
+                .limit(1)
+            )
+        ).scalar()
+
+        # Thumbnail: copy the Archive's own image when it has one, otherwise
+        # fall back to whatever the 3MF embeds.
+        parsed: dict = {}
+        try:
+            parsed = ThreeMFParser(str(dest_path)).parse()
+        except Exception as exc:
+            logger.warning("Failed to parse archived 3MF %s for Files copy: %s", filename, exc)
+        thumbs_dir = get_library_thumbnails_dir()
+        archive_thumb = (
+            safe_join_under(Path(app_settings.base_dir), archive.thumbnail_path, http=False)
+            if archive.thumbnail_path
+            else None
+        )
+        if archive_thumb is not None and archive_thumb.is_file():
+            thumb_dest = (
+                thumbs_dir / f"{uuid.uuid4().hex}{archive_thumb.suffix.lower() or '.png'}"
+            )  # SEC-PATH-OK: uuid + suffix of a DB-stored archive thumbnail path
+            shutil.copyfile(archive_thumb, thumb_dest)
+        elif parsed.get("_thumbnail_data"):
+            thumb_dest = (
+                thumbs_dir / f"{uuid.uuid4().hex}{parsed.get('_thumbnail_ext', '.png')}"
+            )  # SEC-PATH-OK: uuid + parser-chosen image extension
+            thumb_dest.write_bytes(parsed["_thumbnail_data"])
+
+        cleaned = _clean_3mf_metadata(parsed)
+        metadata: dict = dict(_without_print_name(cleaned) or {}) if isinstance(cleaned, dict) else {}
+        for key, value in (
+            ("print_time_seconds", archive.print_time_seconds),
+            ("filament_used_g", archive.filament_used_grams),
+            ("filament_type", archive.filament_type),
+            ("filament_color", archive.filament_color),
+            ("sliced_for_model", archive.sliced_for_model),
+        ):
+            if value is not None:
+                metadata[key] = value
+        metadata["saved_from_archive_id"] = archive.id
+
+        new_file = LibraryFile(
+            folder_id=folder_id,
+            is_external=is_external,
+            filename=filename,
+            file_path=_stored_file_path(dest_path, is_external),
+            file_type=classify_file_type(filename),
+            file_size=dest_path.stat().st_size,
+            file_hash=file_hash,
+            thumbnail_path=to_relative_path(thumb_dest) if thumb_dest else None,
+            file_metadata=metadata,
+            created_by_id=current_user_id,
+        )
+        db.add(new_file)
+        await db.commit()
+    except BaseException:
+        dest_path.unlink(missing_ok=True)
+        if thumb_dest is not None:
+            thumb_dest.unlink(missing_ok=True)
+        raise
+
+    return FileUploadResponse(
+        id=new_file.id,
+        filename=new_file.filename,
+        file_type=new_file.file_type,
+        file_size=new_file.file_size,
+        thumbnail_path=new_file.thumbnail_path,
+        duplicate_of=duplicate_of,
+        metadata=new_file.file_metadata,
     )
 
 

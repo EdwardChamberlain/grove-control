@@ -795,7 +795,16 @@ export default {
       exportDownloaded: '내보내기 다운로드됨',
       exportFailed: '내보내기 실패'
     },
+    saveToFiles: {
+      title: '파일에 저장',
+      confirm: '저장',
+      saved: '{{name}}을(를) 파일에 저장했습니다',
+      savedDuplicate: '{{name}}을(를) 파일에 저장했습니다 — 같은 내용의 파일이 이미 있습니다',
+      viewInFiles: '파일에서 보기',
+      failed: '파일에 저장하지 못했습니다',
+    },
     menu: {
+      saveToFiles: '파일에 저장',
       print: '인쇄',
       openInBambuStudio: '슬라이서에서 열기',
       slice: '슬라이스',
@@ -835,6 +844,7 @@ export default {
       printLog: '인쇄 기록'
     },
     permission: {
+      noSaveToFiles: '파일에 업로드할 권한이 없습니다',
       noReprint: '이 아카이브를 재인쇄할 권한이 없습니다',
       noAddToQueue: '대기열에 추가할 권한이 없습니다',
       noUpdateArchives: '아카이브를 업데이트할 권한이 없습니다',

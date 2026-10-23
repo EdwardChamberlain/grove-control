@@ -837,7 +837,16 @@ export default {
       exportDownloaded: 'Exportación descargada',
       exportFailed: 'Error en la exportación',
     },
+    saveToFiles: {
+      title: 'Guardar en Archivos',
+      confirm: 'Guardar',
+      saved: '{{name}} guardado en Archivos',
+      savedDuplicate: '{{name}} guardado en Archivos: ya existe un archivo con el mismo contenido',
+      viewInFiles: 'Ver en Archivos',
+      failed: 'No se pudo guardar en Archivos',
+    },
     menu: {
+      saveToFiles: 'Guardar en Archivos',
       print: 'Imprimir',
       openInBambuStudio: 'Abrir en el laminador',
       slice: 'Laminar',
@@ -877,6 +886,7 @@ export default {
       delete: 'Eliminar',
     },
     permission: {
+      noSaveToFiles: 'No tienes permiso para subir a Archivos',
       noReprint: 'No tiene permiso para reimprimir este archivo',
       noAddToQueue: 'No tiene permiso para añadir a la cola',
       noUpdateArchives: 'No tiene permiso para actualizar archivos',
