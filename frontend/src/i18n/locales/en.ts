@@ -851,7 +851,16 @@ export default {
       exportDownloaded: 'Export downloaded',
       exportFailed: 'Export failed',
     },
+    saveToFiles: {
+      title: 'Save to Files',
+      confirm: 'Save',
+      saved: 'Saved {{name}} to Files',
+      savedDuplicate: 'Saved {{name}} to Files — a file with the same content already exists',
+      viewInFiles: 'View in Files',
+      failed: 'Failed to save to Files',
+    },
     menu: {
+      saveToFiles: 'Save to Files',
       print: 'Print',
       openInBambuStudio: 'Open in Slicer',
       slice: 'Slice',
@@ -891,6 +900,7 @@ export default {
       delete: 'Delete',
     },
     permission: {
+      noSaveToFiles: 'You do not have permission to upload to Files',
       noReprint: 'You do not have permission to reprint this archive',
       noAddToQueue: 'You do not have permission to add to queue',
       noUpdateArchives: 'You do not have permission to update archives',

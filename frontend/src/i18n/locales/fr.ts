@@ -837,7 +837,16 @@ export default {
       exportDownloaded: 'Export téléchargé',
       exportFailed: 'Échec export',
     },
+    saveToFiles: {
+      title: 'Enregistrer dans Fichiers',
+      confirm: 'Enregistrer',
+      saved: '{{name}} enregistré dans Fichiers',
+      savedDuplicate: '{{name}} enregistré dans Fichiers — un fichier au contenu identique existe déjà',
+      viewInFiles: 'Voir dans Fichiers',
+      failed: 'Échec de l\'enregistrement dans Fichiers',
+    },
     menu: {
+      saveToFiles: 'Enregistrer dans Fichiers',
       print: 'Imprimer',
       openInBambuStudio: 'Ouvrir dans le Slicer',
       slice: 'Découper',
@@ -877,6 +886,7 @@ export default {
       delete: 'Supprimer',
     },
     permission: {
+      noSaveToFiles: 'Vous n\'avez pas l\'autorisation d\'ajouter à Fichiers',
       noReprint: 'Pas d\'autorisation de réimpression',
       noAddToQueue: 'Pas d\'autorisation pour la file',
       noUpdateArchives: 'Pas d\'autorisation de mise à jour',

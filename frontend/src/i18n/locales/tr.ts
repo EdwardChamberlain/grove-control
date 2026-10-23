@@ -837,7 +837,16 @@ export default {
       exportDownloaded: 'Dışa aktarma indirildi',
       exportFailed: 'Dışa aktarma başarısız',
     },
+    saveToFiles: {
+      title: 'Dosyalara kaydet',
+      confirm: 'Kaydet',
+      saved: '{{name}} Dosyalara kaydedildi',
+      savedDuplicate: '{{name}} Dosyalara kaydedildi — aynı içeriğe sahip bir dosya zaten var',
+      viewInFiles: 'Dosyalarda görüntüle',
+      failed: 'Dosyalara kaydedilemedi',
+    },
     menu: {
+      saveToFiles: 'Dosyalara kaydet',
       print: 'Yazdır',
       openInBambuStudio: 'Dilimleyicide Aç',
       slice: 'Dilimle',
@@ -877,6 +886,7 @@ export default {
       delete: 'Sil',
     },
     permission: {
+      noSaveToFiles: 'Dosyalara yükleme izniniz yok',
       noReprint: 'Bu arşivi yeniden yazdırma izniniz yok',
       noAddToQueue: 'Kuyruğa ekleme izniniz yok',
       noUpdateArchives: 'Arşivleri güncelleme izniniz yok',
