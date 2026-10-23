@@ -313,6 +313,9 @@ export function SettingsPage() {
     setLightStyle, setLightBackground, setLightAccent,
   } = useTheme();
   const [localSettings, setLocalSettings] = useState<AppSettings | null>(null);
+  // The door-cycle option only matters while plate-clear confirmation is on,
+  // but stays usable while it is enabled so it can always be turned off (#238).
+  const doorCycleToggleDisabled = !localSettings?.require_plate_clear && !localSettings?.door_cycle_clears_plate;
   // Transient typed strings for the per-filament humidity threshold inputs
   // (#1605). Committed back to localSettings.ams_humidity_thresholds on blur
   // so intermediate values ("", "3", "5") are not eaten by the [5, 95] clamp
@@ -4541,7 +4544,7 @@ export function SettingsPage() {
                   <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
                 </label>
               </div>
-              <div className={`flex items-center justify-between ${localSettings.require_plate_clear ? '' : 'opacity-50'}`}>
+              <div className={`flex items-center justify-between ${doorCycleToggleDisabled ? 'opacity-50' : ''}`}>
                 <div className="flex-1 mr-4">
                   <p className="text-sm text-white">
                     {t('settings.doorCycleClearsPlate', 'Door open-close marks plate clear')}
@@ -4550,11 +4553,11 @@ export function SettingsPage() {
                     {t('settings.doorCycleClearsPlateDescription', 'When a printer is waiting for plate-clear, opening and then closing its door marks the plate as cleared. Only works on printers with a door sensor.')}
                   </p>
                 </div>
-                <label className={`relative inline-flex items-center ${localSettings.require_plate_clear ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                <label className={`relative inline-flex items-center ${doorCycleToggleDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                   <input
                     type="checkbox"
                     aria-label={t('settings.doorCycleClearsPlate', 'Door open-close marks plate clear')}
-                    disabled={!localSettings.require_plate_clear}
+                    disabled={doorCycleToggleDisabled}
                     checked={localSettings.door_cycle_clears_plate ?? false}
                     onChange={(e) => updateSetting('door_cycle_clears_plate', e.target.checked)}
                     className="sr-only peer"

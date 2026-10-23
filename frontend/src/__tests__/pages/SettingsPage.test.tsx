@@ -382,12 +382,15 @@ describe('SettingsPage', () => {
     });
 
     it.each([
-      [true, false],
-      [false, true],
-    ])('door-cycle plate-clear toggle with require_plate_clear=%s is disabled=%s', async (requirePlateClear, disabled) => {
+      [true, false, false],
+      [true, true, false],
+      [false, false, true],
+      // Still enabled when on, so it can be turned off without re-enabling the parent.
+      [false, true, false],
+    ])('door-cycle toggle with require_plate_clear=%s, door_cycle_clears_plate=%s is disabled=%s', async (requirePlateClear, doorCycle, disabled) => {
       server.use(
         http.get('/api/v1/settings/', () =>
-          HttpResponse.json({ ...mockSettings, require_plate_clear: requirePlateClear, door_cycle_clears_plate: false }),
+          HttpResponse.json({ ...mockSettings, require_plate_clear: requirePlateClear, door_cycle_clears_plate: doorCycle }),
         ),
       );
       const user = userEvent.setup();

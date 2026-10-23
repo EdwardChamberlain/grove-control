@@ -5,19 +5,17 @@ Two layers:
     when the door opens after printing stops and then closes while the
     printer is awaiting plate-clear. ``_on_mqtt_state_change`` feeds it
     door values copied at push time.
-  * ``main._maybe_clear_plate_from_door_cycle`` — clears the gate only when
-    the ``door_cycle_clears_plate`` setting is enabled.
+  * ``PrinterManager._clear_plate_after_door_cycle`` — clears the gate only
+    when the ``door_cycle_clears_plate`` setting is enabled.
 """
 
 import asyncio
-import inspect
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app import main as main_module
 from backend.app.services.printer_manager import PrinterManager
 
 PID = 7
@@ -117,27 +115,27 @@ class TestMqttStateChangeWiring:
     @pytest.fixture
     async def wired(self, pm):
         pm.set_event_loop(asyncio.get_running_loop())
-        cycle = AsyncMock()
-        pm.set_door_cycle_callback(cycle)
+        clear = AsyncMock()
         with (
             patch.object(pm, "_broadcast_status_change", new=AsyncMock()),
             patch.object(pm, "_persist_awaiting_plate_clear", new=AsyncMock()),
+            patch.object(pm, "_clear_plate_after_door_cycle", new=clear),
         ):
             pm.set_awaiting_plate_clear(PID, True)
-            yield pm, cycle
+            yield pm, clear
 
     @pytest.mark.asyncio
-    async def test_cycle_calls_door_callback(self, wired):
-        pm, cycle = wired
+    async def test_cycle_clears_plate(self, wired):
+        pm, clear = wired
         for door in (False, True, False):
             pm._on_mqtt_state_change(PID, _state(door))
         await _drain()
-        cycle.assert_awaited_once_with(PID)
+        clear.assert_awaited_once_with(PID)
 
     @pytest.mark.asyncio
     async def test_uses_door_value_at_push_time(self, wired):
         # One live state object, mutated between pushes before the loop runs.
-        pm, cycle = wired
+        pm, clear = wired
         live = _state(False)
         pm._on_mqtt_state_change(PID, live)
         live.door_open = True
@@ -145,17 +143,56 @@ class TestMqttStateChangeWiring:
         live.door_open = False
         pm._on_mqtt_state_change(PID, live)
         await _drain()
-        cycle.assert_awaited_once_with(PID)
+        clear.assert_awaited_once_with(PID)
+
+    @pytest.mark.asyncio
+    async def test_unchanged_pushes_queue_no_door_update(self, wired):
+        pm, _ = wired
+        with patch.object(pm, "_handle_door_update", new=AsyncMock()) as handle:
+            for _ in range(5):
+                pm._on_mqtt_state_change(PID, _state(False))
+            pm._on_mqtt_state_change(PID, _state(False, state="RUNNING"))
+            pm._on_mqtt_state_change(PID, _state(True, state="RUNNING"))
+            await _drain()
+        assert handle.await_count == 3
 
     @pytest.mark.asyncio
     async def test_disconnect_resets_tracking(self, wired):
-        pm, cycle = wired
+        pm, clear = wired
         pm._on_mqtt_state_change(PID, _state(False))
         pm._on_mqtt_state_change(PID, _state(True))
         pm._on_mqtt_state_change(PID, _state(True, connected=False))
         pm._on_mqtt_state_change(PID, _state(False))
         await _drain()
-        cycle.assert_not_awaited()
+        clear.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_power_off_reset_runs_after_queued_updates(self, wired):
+        # Door updates are still queued when the smart plug cuts power. The
+        # reset must run after them, or they re-seed the tracking.
+        pm, clear = wired
+        client = MagicMock()
+        client.mark_power_off.return_value = True
+        pm._clients[PID] = client
+        pm._on_mqtt_state_change(PID, _state(False))
+        pm._on_mqtt_state_change(PID, _state(True))
+        pm.mark_printer_offline(PID)
+        await _drain()
+        pm._on_mqtt_state_change(PID, _state(False))  # power back, door closed
+        await _drain()
+        clear.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disconnect_printer_reset_runs_after_queued_updates(self, wired):
+        pm, clear = wired
+        pm._clients[PID] = MagicMock()
+        pm._on_mqtt_state_change(PID, _state(False))
+        pm._on_mqtt_state_change(PID, _state(True))
+        pm.disconnect_printer(PID)
+        await _drain()
+        pm._on_mqtt_state_change(PID, _state(False))  # reconnected, door closed
+        await _drain()
+        clear.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_status_change_callback_still_called(self, wired):
@@ -167,62 +204,56 @@ class TestMqttStateChangeWiring:
         await _drain()
         status_cb.assert_awaited_once_with(PID, st)
 
-    def test_main_registers_door_cycle_handler(self):
-        source = inspect.getsource(main_module)
-        assert "set_door_cycle_callback(_maybe_clear_plate_from_door_cycle)" in source
+
+class TestClearPlateAfterDoorCycle:
+    @pytest.mark.asyncio
+    async def test_clears_gate_when_enabled(self, pm):
+        pm.set_awaiting_plate_clear(PID, True)
+        with patch.object(pm, "_door_cycle_setting_enabled", new=AsyncMock(return_value=True)):
+            await pm._clear_plate_after_door_cycle(PID)
+        assert pm.is_awaiting_plate_clear(PID) is False
+
+    @pytest.mark.asyncio
+    async def test_leaves_gate_when_disabled(self, pm):
+        pm.set_awaiting_plate_clear(PID, True)
+        with patch.object(pm, "_door_cycle_setting_enabled", new=AsyncMock(return_value=False)):
+            await pm._clear_plate_after_door_cycle(PID)
+        assert pm.is_awaiting_plate_clear(PID) is True
+
+    @pytest.mark.asyncio
+    async def test_skips_if_gate_already_cleared(self, pm):
+        with (
+            patch.object(pm, "_door_cycle_setting_enabled", new=AsyncMock(return_value=True)),
+            patch.object(pm, "set_awaiting_plate_clear") as set_gate,
+        ):
+            await pm._clear_plate_after_door_cycle(PID)
+        set_gate.assert_not_called()
 
 
-def _session_factory():
+def _session_returning(value=None, error: Exception | None = None):
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = value
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result, side_effect=error)
+
     @asynccontextmanager
     async def _session():
-        yield MagicMock()
+        yield db
 
     return _session
 
 
-class TestMaybeClearPlateFromDoorCycle:
+class TestDoorCycleSettingEnabled:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", ["true", "True"])
-    async def test_clears_gate_when_enabled(self, value):
-        with (
-            patch("backend.app.main.async_session", _session_factory()),
-            patch("backend.app.api.routes.settings.get_setting", new=AsyncMock(return_value=value)),
-            patch("backend.app.main.printer_manager") as mock_pm,
-        ):
-            mock_pm.is_awaiting_plate_clear.return_value = True
-            await main_module._maybe_clear_plate_from_door_cycle(PID)
-            mock_pm.set_awaiting_plate_clear.assert_called_once_with(PID, False)
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [("true", True), ("True", True), ("false", False), ("", False), (None, False)],
+    )
+    async def test_reads_setting(self, pm, value, expected):
+        with patch("backend.app.core.database.async_session", _session_returning(value)):
+            assert await pm._door_cycle_setting_enabled() is expected
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", [None, "false", ""])
-    async def test_leaves_gate_when_disabled(self, value):
-        with (
-            patch("backend.app.main.async_session", _session_factory()),
-            patch("backend.app.api.routes.settings.get_setting", new=AsyncMock(return_value=value)),
-            patch("backend.app.main.printer_manager") as mock_pm,
-        ):
-            mock_pm.is_awaiting_plate_clear.return_value = True
-            await main_module._maybe_clear_plate_from_door_cycle(PID)
-            mock_pm.set_awaiting_plate_clear.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_skips_if_gate_already_cleared(self):
-        with (
-            patch("backend.app.main.async_session", _session_factory()),
-            patch("backend.app.api.routes.settings.get_setting", new=AsyncMock(return_value="true")),
-            patch("backend.app.main.printer_manager") as mock_pm,
-        ):
-            mock_pm.is_awaiting_plate_clear.return_value = False
-            await main_module._maybe_clear_plate_from_door_cycle(PID)
-            mock_pm.set_awaiting_plate_clear.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_setting_read_failure_leaves_gate(self):
-        with (
-            patch("backend.app.main.async_session", _session_factory()),
-            patch("backend.app.api.routes.settings.get_setting", new=AsyncMock(side_effect=RuntimeError("db"))),
-            patch("backend.app.main.printer_manager") as mock_pm,
-        ):
-            mock_pm.is_awaiting_plate_clear.return_value = True
-            await main_module._maybe_clear_plate_from_door_cycle(PID)
-            mock_pm.set_awaiting_plate_clear.assert_not_called()
+    async def test_read_failure_counts_as_disabled(self, pm):
+        with patch("backend.app.core.database.async_session", _session_returning(error=RuntimeError("db"))):
+            assert await pm._door_cycle_setting_enabled() is False

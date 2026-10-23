@@ -1145,24 +1145,6 @@ async def _maybe_notify_printer_offline(printer_id: int) -> None:
         _printer_offline_notify_tasks.pop(printer_id, None)
 
 
-async def _maybe_clear_plate_from_door_cycle(printer_id: int) -> None:
-    """Clear the plate-clear gate after a door open→close, if enabled (#238)."""
-    from backend.app.api.routes.settings import get_setting
-
-    try:
-        async with async_session() as db:
-            enabled = await get_setting(db, "door_cycle_clears_plate")
-    except Exception as e:
-        logging.getLogger(__name__).warning("Failed to read door_cycle_clears_plate for printer %s: %s", printer_id, e)
-        return
-    if (enabled or "").lower() != "true":
-        return
-    if not printer_manager.is_awaiting_plate_clear(printer_id):
-        return
-    logging.getLogger(__name__).info("[#238] Printer %s door opened and closed; marking plate clear", printer_id)
-    printer_manager.set_awaiting_plate_clear(printer_id, False)
-
-
 async def on_printer_status_change(printer_id: int, state: PrinterState):
     """Handle printer status changes - broadcast via WebSocket."""
     # Connected-edge reconciliation (#1542 follow-up). When the printer
@@ -6648,7 +6630,6 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     printer_manager.set_event_loop(loop)
     printer_manager.set_status_change_callback(on_printer_status_change)
-    printer_manager.set_door_cycle_callback(_maybe_clear_plate_from_door_cycle)
     printer_manager.set_print_start_callback(on_print_start)
     printer_manager.set_print_complete_callback(on_print_complete)
     printer_manager.set_print_running_observed_callback(on_print_running_observed)
