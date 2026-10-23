@@ -148,6 +148,21 @@ class TestSweep:
         assert await sweep_temporary_files(db, now=NOW) == 0
         assert await _exists(db, kept.id)
 
+    @pytest.mark.asyncio
+    async def test_leaves_trashed_files_to_the_trash_sweeper(self, db, printer):
+        folder = await ensure_temporary_folder(db)
+        abandoned = await _file(db, folder_id=folder.id, created_at=OLD)
+        sent = await _file(db, folder_id=folder.id, created_at=YOUNG)
+        await _job(db, printer, sent, status="printing", archive_id=await _archive(db, printer), created_at=YOUNG)
+        ids = [abandoned.id, sent.id]
+        for row in (abandoned, sent):
+            row.deleted_at = YOUNG
+        await db.commit()
+
+        assert await sweep_temporary_files(db, now=NOW) == 0
+        for file_id in ids:
+            assert await _exists(db, file_id)
+
     @pytest.mark.parametrize("status", ["pending", "skipped", "preheating", "dispatching"])
     @pytest.mark.asyncio
     async def test_keeps_files_a_live_job_needs(self, db, printer, status):

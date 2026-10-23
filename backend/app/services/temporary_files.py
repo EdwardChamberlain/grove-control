@@ -269,6 +269,9 @@ async def sweep_temporary_files(db: AsyncSession, now: datetime | None = None) -
         select(LibraryFile).where(
             LibraryFile.folder_id == folder_id,
             LibraryFile.is_external.is_(False),
+            # Trashed files keep the Trash retention the user was promised;
+            # the trash sweeper removes them.
+            LibraryFile.deleted_at.is_(None),
             ~live_reference_clause(),
             or_(
                 LibraryFile.created_at < cutoff,
