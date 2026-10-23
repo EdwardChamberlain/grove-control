@@ -34,6 +34,7 @@ const SliceJobTrackerContext = createContext<SliceJobTrackerContextValue | null>
 
 const POLL_INTERVAL_MS = 1500;
 const TICK_INTERVAL_MS = 1000;
+const COMPLETED_TOAST_LINGER_MS = 10000;
 
 const toastIdFor = (jobId: number) => `slice-job-${jobId}`;
 
@@ -168,8 +169,7 @@ export function SliceJobTrackerProvider({ children }: { children: ReactNode }) {
       phaseRef.current.delete(job.id);
       progressRef.current.delete(job.id);
 
-      // Replace the persistent progress toast with a transient
-      // success/error toast (auto-dismisses after 3s, same as showToast).
+      // Replace the persistent progress toast with a success/error toast.
       dismissToast(toastIdFor(job.id));
 
       if (state.status === 'completed') {
@@ -178,10 +178,19 @@ export function SliceJobTrackerProvider({ children }: { children: ReactNode }) {
         // firing on essentially every slice (3MF inputs trigger the
         // embedded-settings fallback as a normal path) and just added
         // noise — see the trailing yellow toast complaint, removed.
-        showToast(
-          t('slice.completedToast', 'Sliced {{name}}', { name: prettifyFilename(job.sourceName) }),
-          'success',
-        );
+        const completedMessage = t('slice.completedToast', 'Sliced {{name}}', {
+          name: prettifyFilename(job.sourceName),
+        });
+        if (job.kind === 'archive') {
+          // Archive slices land in Files, not Archive: link to where the
+          // output is. Persistent toasts don't auto-dismiss, so clear it.
+          showPersistentToast(toastIdFor(job.id), completedMessage, 'success', {
+            action: { label: t('slice.viewInFiles', 'View in Files'), href: '/files' },
+          });
+          setTimeout(() => dismissToast(toastIdFor(job.id)), COMPLETED_TOAST_LINGER_MS);
+        } else {
+          showToast(completedMessage, 'success');
+        }
       } else if (state.status === 'failed') {
         setSliceError({
           name: prettifyFilename(job.sourceName),
@@ -193,7 +202,7 @@ export function SliceJobTrackerProvider({ children }: { children: ReactNode }) {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['archives'] });
     },
-    [dismissToast, queryClient, showToast, t],
+    [dismissToast, queryClient, showPersistentToast, showToast, t],
   );
 
   // Status polling. Updates phase on each successful poll and triggers

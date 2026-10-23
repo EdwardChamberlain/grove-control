@@ -1646,15 +1646,6 @@ export interface SliceResponse {
   used_embedded_settings: boolean;
 }
 
-export interface SliceArchiveResponse {
-  archive_id: number;
-  name: string;
-  print_time_seconds: number;
-  filament_used_g: number;
-  filament_used_mm: number;
-  used_embedded_settings: boolean;
-}
-
 // Background slice-job lifecycle. POST /slice returns 202 + this shape;
 // the frontend polls /slice-jobs/{id} until status is terminal.
 export type SliceJobStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -1695,7 +1686,7 @@ export interface SliceJobState {
    * slicer emits its first frame (early "Initializing" phase) or when
    * the sidecar doesn't support progress. */
   progress: SliceJobProgress | null;
-  result?: SliceResponse | SliceArchiveResponse;
+  result?: SliceResponse;
   error_status?: number;
   error_detail?: string;
 }
