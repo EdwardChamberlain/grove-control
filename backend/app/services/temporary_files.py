@@ -156,21 +156,31 @@ def _newest_reference_subquery():
     )
 
 
+def is_temporary_file(library_file: LibraryFile | None) -> bool:
+    """Whether ``library_file`` sits in Temporary Files.
+
+    Reads only an eager-loaded ``folder`` relationship (``selectinload``) so
+    the scheduler's hot path needs no extra query and never lazy-loads.
+    """
+    folder = library_file.__dict__.get("folder") if library_file is not None else None
+    return folder is not None and folder.system_key == TEMPORARY_FOLDER_KEY
+
+
 async def should_remove_after_dispatch(
     db: AsyncSession,
     item: PrintQueueItem,
     library_file: LibraryFile,
-    temporary_folder_id: int | None,
 ) -> bool:
     """Whether dispatching ``item`` should delete its source File.
 
     Only Files still in Temporary Files are removed. ``cleanup_library_after_dispatch``
     is honoured for queue rows created before #237 whose upload is still at
-    the root where the old flow placed it.
+    the root where the old flow placed it. ``library_file.folder`` must be
+    eager-loaded (see :func:`is_temporary_file`).
     """
     if library_file.is_external:
         return False
-    in_temporary = temporary_folder_id is not None and library_file.folder_id == temporary_folder_id
+    in_temporary = is_temporary_file(library_file)
     legacy = bool(getattr(item, "cleanup_library_after_dispatch", False)) and library_file.folder_id is None
     if not (in_temporary or legacy):
         return False

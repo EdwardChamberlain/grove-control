@@ -46,7 +46,7 @@ from backend.app.services.printer_manager import (
     supports_drying_while_printing,
 )
 from backend.app.services.smart_plug_manager import smart_plug_manager
-from backend.app.services.temporary_files import get_temporary_folder_id, should_remove_after_dispatch
+from backend.app.services.temporary_files import is_temporary_file, should_remove_after_dispatch
 from backend.app.utils.filename import derive_remote_filename
 from backend.app.utils.local_time import utcnow_naive
 from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model
@@ -709,7 +709,9 @@ class PrintScheduler:
                     # (which would raise in async) per item.
                     .options(
                         selectinload(PrintQueueItem.archive),
-                        selectinload(PrintQueueItem.library_file),
+                        # The folder tells dispatch whether the File is in
+                        # Temporary Files (#237) without another query.
+                        selectinload(PrintQueueItem.library_file).selectinload(LibraryFile.folder),
                         selectinload(PrintQueueItem.printer),
                         # Cross-model candidates (#671), plus each candidate's file
                         # for the same cross-model gate. Lazy-loading either would
@@ -731,7 +733,9 @@ class PrintScheduler:
                     .where(PrintQueueItem.dispatching_at.is_(None))
                     .options(
                         selectinload(PrintQueueItem.archive),
-                        selectinload(PrintQueueItem.library_file),
+                        # The folder tells dispatch whether the File is in
+                        # Temporary Files (#237) without another query.
+                        selectinload(PrintQueueItem.library_file).selectinload(LibraryFile.folder),
                         selectinload(PrintQueueItem.printer),
                         # Cross-model candidates (#671), plus each candidate's file
                         # for the same cross-model gate. Lazy-loading either would
@@ -841,19 +845,13 @@ class PrintScheduler:
             # waits one tick, by which time the first has decided whether
             # the File is still needed. Ordinary library prints only read
             # the row and may still fan out.
-            temporary_folder_id = await get_temporary_folder_id(db)
             dispatch_libs: set[int] = set()
             consumed_libs: set[int] = set()
 
             def _consumes_library_row(candidate: PrintQueueItem) -> bool:
                 if candidate.cleanup_library_after_dispatch:
                     return True
-                library_file = getattr(candidate, "library_file", None)
-                return (
-                    temporary_folder_id is not None
-                    and library_file is not None
-                    and library_file.folder_id == temporary_folder_id
-                )
+                return is_temporary_file(getattr(candidate, "library_file", None))
 
             def _library_row_conflict(candidate: PrintQueueItem) -> bool:
                 library_id = candidate.library_file_id
@@ -3657,7 +3655,11 @@ class PrintScheduler:
 
         elif item.library_file_id:
             # Print from library file (file manager)
-            result = await db.execute(LibraryFile.active().where(LibraryFile.id == item.library_file_id))
+            result = await db.execute(
+                LibraryFile.active()
+                .options(selectinload(LibraryFile.folder))
+                .where(LibraryFile.id == item.library_file_id)
+            )
             library_file = result.scalar_one_or_none()
             if not library_file:
                 item.status = "failed"
@@ -3700,13 +3702,13 @@ class PrintScheduler:
                     # Temporary Files (#237) are removed once no other live job
                     # needs them; Archive already holds its own copy, so a
                     # Temporary source always uploads from that copy.
-                    temporary_folder_id = await get_temporary_folder_id(db)
-                    if temporary_folder_id is not None and library_file.folder_id == temporary_folder_id:
+                    source_disk_path = file_path
+                    if is_temporary_file(library_file):
                         file_path = settings.base_dir / archive.file_path
                         filename = archive.filename
-                    if await should_remove_after_dispatch(db, item, library_file, temporary_folder_id):
+                    if await should_remove_after_dispatch(db, item, library_file):
                         item.library_file_id = None
-                        cleanup_disk_paths.append(lib_path if lib_path.is_absolute() else settings.base_dir / lib_path)
+                        cleanup_disk_paths.append(source_disk_path)
                         if library_file.thumbnail_path:
                             thumb_path = Path(library_file.thumbnail_path)
                             if not thumb_path.is_absolute():
