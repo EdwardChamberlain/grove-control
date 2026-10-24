@@ -55,8 +55,9 @@ cd backend
 ../venv/bin/python -m pytest tests/ -n auto                              # everything (a few minutes)
 ```
 
-- `tests/unit/services/test_bambu_ftp.py` is slow (~60s); CI's coverage shards
-  skip it. Leave it out of quick runs with `--ignore`.
+- `tests/unit/services/test_bambu_ftp.py` runs the FTP client against a local
+  mock FTPS server (no hardware). It takes about 16s, so leave it out of quick
+  runs with `--ignore` if you like; CI always runs it.
 - CI shards the suite with `pytest-split` using `backend/.test_durations`.
   Refresh it occasionally so shards stay balanced (new tests are fine without
   it, they just get an average duration):
@@ -151,5 +152,37 @@ Coverage floors:
   i18n parity check. The Docker smoke test has no dependencies and starts
   immediately (its Dockerfile builds the frontend itself).
 
-When your change raises coverage meaningfully, raise the floors in the same PR.
-Never lower a floor to get a PR through.
+When your change raises coverage, raise the floors in the same PR to the new
+figure rounded down (backend to one decimal place, frontend to whole numbers).
+Never lower a floor to get a PR through. Issue #256 tracks raising the floors
+towards 80% backend and 70% frontend lines.
+
+On pull requests, both coverage jobs also report how much of the PR's new and
+changed lines are covered (`diff-cover`, in the job summary). The report does
+not fail the build yet; aim for 90% or more.
+
+### Coverage exclusions
+
+Excluding code from coverage hides it from the floors, so exclusions are rare
+and every one is explained. `tests/unit/test_coverage_exclusions.py` enforces
+these rules:
+
+- **Only code that cannot run in the test environment may be excluded**: it
+  needs a real GPU or WebGL, blocks forever by design, or only runs on a
+  platform or Python version the tests don't use. Code that is hard, slow or
+  tedious to test is not excluded; write the test, or leave it uncovered.
+- **Mark lines or blocks, never whole files or patterns.** No `omit`,
+  `exclude_lines` or `exclude_also` in `backend/.coveragerc`, no `ignore file`
+  hints, and no new entries in `coverage.exclude` in `frontend/vitest.config.ts`
+  (the existing entries are tests, setup, `main.tsx` and type declarations).
+- **State the reason on the same line**, in at least four words that say why
+  the code cannot run:
+
+  ```python
+  except AttributeError:  # pragma: no cover - unreachable on Python 3.11+, which the app requires
+  ```
+
+  ```ts
+  /* v8 ignore next -- jsdom has no WebGL context to create */
+  ```
+- **Call out new exclusions in the PR description** so a reviewer checks them.

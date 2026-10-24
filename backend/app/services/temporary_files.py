@@ -374,7 +374,7 @@ class TemporaryFilesService:
                     await sweep_temporary_files(db)
             except asyncio.CancelledError:
                 break
-            except Exception as e:  # pragma: no cover - defensive
+            except Exception as e:
                 logger.error("Error in Temporary Files sweeper: %s", e)
                 await asyncio.sleep(60)
 

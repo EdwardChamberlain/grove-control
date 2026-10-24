@@ -121,7 +121,7 @@ def _resolve_host_interface_for_target(target_ip: str) -> str | None:
     """
     try:
         from backend.app.services.network_utils import find_interface_for_ip
-    except Exception:  # pragma: no cover - import shielding
+    except Exception:
         return None
     try:
         iface = find_interface_for_ip(target_ip)
