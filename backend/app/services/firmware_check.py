@@ -36,7 +36,7 @@ try:
     from curl_cffi.requests import AsyncSession as _CurlCffiAsyncSession
 
     _CURL_CFFI_AVAILABLE = True
-except ImportError:  # pragma: no cover — exercised only on platforms without wheels
+except ImportError:  # pragma: no cover - curl_cffi has wheels for every platform CI runs on
     _CurlCffiAsyncSession = None  # type: ignore[misc,assignment]
     _CURL_CFFI_AVAILABLE = False
 

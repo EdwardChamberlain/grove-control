@@ -12,6 +12,7 @@ on:
 env:
   PYTHON_VERSION: '3.11'
   NODE_VERSION: '22'
+  DIFF_COVER_VERSION: '10.6.0'
 
 concurrency:
   # Superseded PR runs are cancelled. Pushes get a group per commit and are
@@ -153,7 +154,6 @@ jobs:
           COVERAGE_FILE: coverage-shard-${{ matrix.shard }}.dat
         run: |
           python -m pytest tests/ \
-            --ignore=tests/unit/services/test_bambu_ftp.py \
             --tb=short \
             --timeout=60 --timeout-method=thread \
             -n auto \
@@ -184,6 +184,9 @@ jobs:
           exit 1
 
       - uses: actions/checkout@v6
+        with:
+          # The changed-lines report diffs against the base branch.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -191,7 +194,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install coverage
-        run: pip install coverage greenlet
+        run: pip install coverage greenlet diff-cover==${{ env.DIFF_COVER_VERSION }}
 
       - name: Download coverage data
         uses: actions/download-artifact@v4
@@ -204,10 +207,25 @@ jobs:
         working-directory: backend
         run: |
           coverage combine coverage-shard-*.dat
+          # Raise this floor in the same PR as the tests that lift coverage
+          # (CLAUDE.md, "Coverage floors").
           coverage report \
             --skip-covered \
             --show-missing \
-            --fail-under=69
+            --fail-under=70.4
+
+      - name: Report coverage of changed lines
+        # Report only for now: shows how much of the PR's new and changed
+        # code is tested without failing the build (issue #256).
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        working-directory: backend
+        run: |
+          coverage xml -o coverage.xml
+          diff-cover coverage.xml \
+            --compare-branch=origin/${{ github.base_ref }} \
+            --markdown-report diff-cover.md
+          { echo "## Backend: coverage of changed lines"; cat diff-cover.md; } >> "$GITHUB_STEP_SUMMARY"
 
   frontend-lint:
     name: Frontend Lint
@@ -371,6 +389,9 @@ jobs:
           exit 1
 
       - uses: actions/checkout@v6
+        with:
+          # The changed-lines report diffs against the base branch.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -393,6 +414,18 @@ jobs:
       - name: Merge reports and enforce coverage floors
         working-directory: frontend
         run: npx vitest --merge-reports=vitest-blobs --coverage
+
+      - name: Report coverage of changed lines
+        # Report only for now: shows how much of the PR's new and changed
+        # code is tested without failing the build (issue #256).
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        working-directory: frontend
+        run: |
+          pipx run diff-cover==${{ env.DIFF_COVER_VERSION }} coverage/lcov.info \
+            --compare-branch=origin/${{ github.base_ref }} \
+            --markdown-report diff-cover.md
+          { echo "## Frontend: coverage of changed lines"; cat diff-cover.md; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check translation parity
         working-directory: frontend

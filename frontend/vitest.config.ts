@@ -23,12 +23,18 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: [
+        'text',
+        'json',
+        'html',
+        // Repo-relative paths, so diff-cover can match them to the git diff.
+        ['lcov', { projectRoot: '..' }],
+      ],
       thresholds: {
-        statements: 52,
-        branches: 48,
-        functions: 44,
-        lines: 53,
+        statements: 53,
+        branches: 49,
+        functions: 45,
+        lines: 54,
       },
       include: ['src/**/*.{ts,tsx}'],
       exclude: [

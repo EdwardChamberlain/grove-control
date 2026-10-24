@@ -134,7 +134,7 @@ class LibraryTrashService:
                     await self._maybe_run_auto_purge(db)
             except asyncio.CancelledError:
                 break
-            except Exception as e:  # pragma: no cover - defensive
+            except Exception as e:
                 logger.error("Error in library trash sweeper: %s", e)
                 await asyncio.sleep(60)
 

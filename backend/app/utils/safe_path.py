@@ -100,7 +100,7 @@ def _is_relative_to(child: Path, parent: Path) -> bool:
     # (per pyproject) so this is safe.
     try:
         return child.is_relative_to(parent)
-    except AttributeError:  # pragma: no cover - defensive
+    except AttributeError:  # pragma: no cover - unreachable on Python 3.11+, which the app requires
         try:
             child.relative_to(parent)
             return True

@@ -8,3 +8,7 @@ source = app
 # greenlet support coverage stops tracing an async function at its first
 # awaited query, so most route and service bodies were reported as unrun.
 concurrency = greenlet, thread
+
+[report]
+# One decimal place, so the CI floor can be raised in small steps.
+precision = 1
