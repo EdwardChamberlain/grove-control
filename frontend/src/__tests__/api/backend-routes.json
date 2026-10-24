@@ -395,8 +395,6 @@
   "POST /api/v1/archives/recalculate-costs",
   "POST /api/v1/archives/rescan-all",
   "POST /api/v1/archives/search/rebuild-index",
-  "POST /api/v1/archives/upload",
-  "POST /api/v1/archives/upload-bulk",
   "POST /api/v1/archives/upload-source",
   "POST /api/v1/archives/{archive_id}/f3d",
   "POST /api/v1/archives/{archive_id}/favorite",

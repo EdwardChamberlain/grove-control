@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Archive is now a record of prints only. Remove `POST /archives/upload` and
+  `POST /archives/upload-bulk`, which created Archive entries for files that
+  were never printed, along with the unused `UploadModal` and its API client
+  methods, and the `archives:create` permission, which guarded nothing else.
+  Add files to Files with `POST /library/files`, or print them via the Queue.
+  Stored `archives:create` grants on custom roles are ignored (#232).
 - Add a Grove-managed Temporary Files folder (#237). Direct uploads from a
   printer card and Queue → Add Job land there instead of the root of Files,
   and are removed once sent to a printer or after 7 days unused

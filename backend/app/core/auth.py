@@ -188,7 +188,6 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.PRINTERS_CREATE,
         Permission.PRINTERS_UPDATE,
         Permission.PRINTERS_DELETE,
-        Permission.ARCHIVES_CREATE,
         Permission.ARCHIVES_UPDATE_ALL,
         Permission.ARCHIVES_DELETE_ALL,
         Permission.QUEUE_UPDATE_ALL,
