@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse, delay } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
@@ -117,6 +117,45 @@ describe('FileManagerPage — ?file= deep link', () => {
 
     await waitFor(() => expect(row(5)?.getAttribute('data-highlighted')).toBe('true'));
     expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  it('highlights the file in the list view too', async () => {
+    visit('/files?file=5');
+    render(<FileManagerPage />);
+    await waitFor(() => expect(row(5)?.getAttribute('data-highlighted')).toBe('true'));
+
+    // The highlight lasts a few seconds, so switching views keeps it on the same file.
+    fireEvent.click(screen.getByTitle('List view'));
+
+    await waitFor(() => expect(row(5)?.querySelector('.aspect-square')).toBeNull());
+    expect(row(5)?.getAttribute('data-highlighted')).toBe('true');
+    expect(row(6)?.getAttribute('data-highlighted')).toBeNull();
+  });
+
+  it('waits for the file to appear in the list, then highlights it', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    let listIncludesFile = false;
+    server.use(
+      http.get('/api/v1/library/files', ({ request }) => {
+        const folderId = new URL(request.url).searchParams.get('folder_id');
+        const inFolder = allFiles.filter((f) => f.folder_id === (folderId ? Number(folderId) : null));
+        // The lookup knows file 5 straight away; the folder listing only gets it later.
+        return HttpResponse.json(listIncludesFile ? inFolder : inFolder.filter((f) => f.id !== 5));
+      }),
+    );
+    visit('/files?file=5');
+    render(<FileManagerPage />);
+
+    await waitFor(() => expect(row(6)).not.toBeNull());
+    expect(row(5)).toBeNull();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    listIncludesFile = true;
+    window.dispatchEvent(new Event('visibilitychange'));
+
+    await waitFor(() => expect(row(5)?.getAttribute('data-highlighted')).toBe('true'));
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it('highlights a file in the root without needing a folder', async () => {

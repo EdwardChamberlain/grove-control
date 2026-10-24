@@ -279,6 +279,38 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
     expect(screen.getByRole('link', { name: 'View in Files' }).getAttribute('href')).toBe('/files?folder=12&file=56');
   });
 
+  it('falls back to the folder, then Files, when the job result carries no file', async () => {
+    mockApi.getSliceJob.mockResolvedValue({
+      job_id: 10,
+      status: 'completed',
+      kind: 'archive',
+      source_id: 7,
+      source_name: 'Benchy.3mf',
+      created_at: new Date().toISOString(),
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+    });
+
+    render(
+      <Wrapper>
+        <TrackTrigger id={10} name="Benchy.3mf" kind="archive" folderId={12} />
+      </Wrapper>,
+    );
+
+    act(() => {
+      screen.getByText('track-10').click();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('link', { name: 'View in Files' }).getAttribute('href')).toBe('/files?folder=12');
+  });
+
   it('replaces the persistent toast with a transient error toast on failure', async () => {
     let pollCount = 0;
     mockApi.getSliceJob.mockImplementation(async () => {

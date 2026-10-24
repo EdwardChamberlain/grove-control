@@ -156,6 +156,24 @@ describe('ArchivesPage — Save to Files', () => {
     expect(saveBodies).toEqual([]);
   });
 
+  it('shows the server’s reason and keeps the picker open when saving fails', async () => {
+    useArchives([baseArchive]);
+    server.use(
+      http.post('/api/v1/archives/:id/save-to-files', () =>
+        HttpResponse.json({ detail: 'Archive file missing on disk' }, { status: 404 }),
+      ),
+    );
+    render(<ArchivesPage />);
+    await openContextMenu('Benchy');
+
+    fireEvent.click(await screen.findByText('Save to Files'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Archive file missing on disk')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Save to Files' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'View in Files' })).toBeNull();
+  });
+
   it('warns when Files already holds the same content', async () => {
     useArchives([baseArchive]);
     server.use(
