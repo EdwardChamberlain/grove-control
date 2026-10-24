@@ -1,4 +1,4 @@
-import { Cloud, CloudOff, Cog, Loader2, RefreshCw, X } from 'lucide-react';
+import { Cloud, CloudOff, Cog, FolderOpen, Loader2, RefreshCw, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,6 +7,7 @@ import {
   type PresetRef,
   type PresetSource,
   type SliceJobProgress,
+  type LibraryFolderTree,
   type SliceRequest,
   type SlicerCloudStatus,
   type UnifiedPreset,
@@ -15,6 +16,7 @@ import {
 } from '../api/client';
 import { useSliceJobTracker } from '../contexts/SliceJobTrackerContext';
 import { useToast } from '../contexts/ToastContext';
+import { FolderPickerModal } from './FolderPickerModal';
 import { PlatePickerModal } from './PlatePickerModal';
 import { ReactSelect } from './ToolbarControls';
 import type { PlateFilament } from '../types/plates';
@@ -223,6 +225,27 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
   // Per-slice layout/design controls. These are intentionally opt-in: auto
   // arrange/orient change geometry, while embedded settings change which
   // process values win over the selected profile.
+  // Where an Archive slice is saved in Files (null = root). Slicing from Files
+  // keeps the output beside its source, so only Archive sources choose.
+  const [destFolderId, setDestFolderId] = useState<number | null>(null);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const foldersQuery = useQuery({
+    queryKey: ['library-folders'],
+    queryFn: () => api.getLibraryFolders(),
+    enabled: source.kind === 'archive',
+  });
+  const destFolderName = useMemo(() => {
+    if (destFolderId == null) return null;
+    const find = (items: LibraryFolderTree[]): string | null => {
+      for (const item of items) {
+        if (item.id === destFolderId) return item.name;
+        const nested = find(item.children);
+        if (nested) return nested;
+      }
+      return null;
+    };
+    return find(foldersQuery.data ?? []);
+  }, [destFolderId, foldersQuery.data]);
   const [autoArrange, setAutoArrange] = useState(false);
   const [autoOrient, setAutoOrient] = useState(false);
   const [useEmbedded, setUseEmbedded] = useState(false);
@@ -443,7 +466,7 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
       return api.sliceArchive(source.id, body);
     },
     onSuccess: (enqueue) => {
-      trackJob(enqueue.job_id, source.kind, source.filename);
+      trackJob(enqueue.job_id, source.kind, source.filename, source.kind === 'archive' ? destFolderId : null);
       onClose();
     },
     onError: (err: unknown) => {
@@ -477,6 +500,7 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
       filament_preset: filamentPresets[0] as PresetRef,
       filament_presets: filamentPresets as PresetRef[],
       ...(plate != null ? { plate } : {}),
+      ...(source.kind === 'archive' && destFolderId != null ? { folder_id: destFolderId } : {}),
       ...(bedType != null ? { bed_type: bedType } : {}),
       ...(autoArrange ? { auto_arrange: true } : {}),
       ...(autoOrient ? { auto_orient: true } : {}),
@@ -552,6 +576,21 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {source.kind === 'archive' && (
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-bambu-gray">{t('slice.saveTo', 'Save to')}</span>
+              <button
+                type="button"
+                onClick={() => setShowFolderPicker(true)}
+                disabled={isEnqueuing}
+                className="flex min-w-0 items-center gap-2 rounded-md border border-bambu-dark-tertiary px-3 py-1.5 text-white hover:border-bambu-gray transition-colors disabled:opacity-50"
+              >
+                <FolderOpen className="w-4 h-4 flex-shrink-0" />
+                <span className="truncate">{destFolderName ?? t('fileManager.rootNoFolder')}</span>
+              </button>
+            </div>
+          )}
+
           {/* Preset listing loader — printer/process dropdowns can't render
               without it. Plate query reuses the same spinner since it's
               also blocking. */}
@@ -800,6 +839,18 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
             </div>
           )}
         </div>
+
+        {showFolderPicker && (
+          <FolderPickerModal
+            title={t('slice.saveTo', 'Save to')}
+            confirmLabel={t('slice.selectFolder', 'Select')}
+            onClose={() => setShowFolderPicker(false)}
+            onConfirm={(folderId) => {
+              setDestFolderId(folderId);
+              setShowFolderPicker(false);
+            }}
+          />
+        )}
 
         {/* Footer */}
         <div className="flex-shrink-0 flex justify-end gap-2 px-4 py-3 border-t border-bambu-dark-tertiary/40">

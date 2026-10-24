@@ -3859,6 +3859,8 @@ export default {
     runningWithProgressMultiPlate: '盘面 {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '已切片 {{name}}',
     viewInFiles: '在文件中查看',
+    saveTo: '保存到',
+    selectFolder: '选择',
     failedTitle: '切片失败',
     failedToast: '切片 {{name}} 失败：{{detail}}',
     tier: {

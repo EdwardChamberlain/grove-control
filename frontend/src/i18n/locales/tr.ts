@@ -3861,6 +3861,8 @@ export default {
     runningWithProgressMultiPlate: '{{plateCount}}/{{plateIndex}} plaka • {{name}} — {{stage}} (%{{percent}}) — {{elapsed}}',
     completedToast: '{{name}} dilimlendi',
     viewInFiles: 'Dosyalarda görüntüle',
+    saveTo: 'Kaydedilecek yer',
+    selectFolder: 'Seç',
     failedTitle: 'Dilimleme başarısız',
     failedToast: '{{name}} dilimleme başarısız: {{detail}}',
     tier: {

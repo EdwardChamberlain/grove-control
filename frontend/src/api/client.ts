@@ -1581,6 +1581,8 @@ export interface SliceRequest {
   // is omitted, so legacy single-color clients keep working unchanged.
   filament_presets?: PresetRef[];
   plate?: number;
+  // Files folder for the output; Archive slices only. Omit for the Files root.
+  folder_id?: number;
   export_3mf?: boolean;
   // Build-plate override (#1337). When omitted, the slicer uses the process
   // preset's curr_bed_type as-is. Canonical values match BambuStudio /

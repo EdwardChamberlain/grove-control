@@ -24,7 +24,7 @@ from httpx import AsyncClient
 
 from backend.app.api.routes.library import _slicer_rejection_message
 from backend.app.core.config import settings as app_settings
-from backend.app.models.library import LibraryFile
+from backend.app.models.library import LibraryFile, LibraryFolder
 from backend.app.models.local_preset import LocalPreset
 from backend.app.models.settings import Settings as SettingsModel
 from backend.app.services import plate_thumbnail as plate_thumbnail_module, slicer_api as slicer_api_module
@@ -1085,7 +1085,16 @@ class TestSliceArchiveSavesToFiles:
     Files does. Nothing has been printed, so no Archive row is created."""
 
     @staticmethod
-    async def _slice_archive(async_client, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch):
+    async def _slice_archive(
+        async_client,
+        db_session,
+        slice_test_setup,
+        printer_factory,
+        archive_factory,
+        monkeypatch,
+        extra_body: dict | None = None,
+        expect_status: int = 202,
+    ):
         tmp_path = slice_test_setup["tmp_path"]
         src_dir = tmp_path / "archives" / "src"
         src_dir.mkdir(parents=True, exist_ok=True)
@@ -1120,9 +1129,12 @@ class TestSliceArchiveSavesToFiles:
                 "printer_preset_id": slice_test_setup["printer_id"],
                 "process_preset_id": slice_test_setup["process_id"],
                 "filament_preset_id": slice_test_setup["filament_id"],
+                **(extra_body or {}),
             },
         )
-        assert resp.status_code == 202, resp.text
+        assert resp.status_code == expect_status, resp.text
+        if expect_status != 202:
+            return source_id, resp
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
         return source_id, final
@@ -1150,6 +1162,69 @@ class TestSliceArchiveSavesToFiles:
         # The slicer baked H2D into the output, so Files shows the model it
         # was sliced for rather than inheriting the source archive's X1C.
         assert new_file.file_metadata["sliced_for_model"] == "H2D"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_output_lands_in_the_chosen_folder(
+        self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
+    ):
+        folder = LibraryFolder(name="Keepers")
+        db_session.add(folder)
+        await db_session.commit()
+        await db_session.refresh(folder)
+        folder_id = folder.id
+
+        _source_id, final = await self._slice_archive(
+            async_client,
+            db_session,
+            slice_test_setup,
+            printer_factory,
+            archive_factory,
+            monkeypatch,
+            extra_body={"folder_id": folder_id},
+        )
+
+        new_file = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
+        assert new_file.folder_id == folder_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_unknown_folder_is_rejected_before_slicing(
+        self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
+    ):
+        _source_id, resp = await self._slice_archive(
+            async_client,
+            db_session,
+            slice_test_setup,
+            printer_factory,
+            archive_factory,
+            monkeypatch,
+            extra_body={"folder_id": 99999},
+            expect_status=404,
+        )
+
+        assert resp.json()["detail"] == "Folder not found"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_read_only_external_folder_is_rejected_before_slicing(
+        self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
+    ):
+        folder = LibraryFolder(name="Mounted", is_external=True, external_path="/mnt/share", external_readonly=True)
+        db_session.add(folder)
+        await db_session.commit()
+        await db_session.refresh(folder)
+
+        await self._slice_archive(
+            async_client,
+            db_session,
+            slice_test_setup,
+            printer_factory,
+            archive_factory,
+            monkeypatch,
+            extra_body={"folder_id": folder.id},
+            expect_status=403,
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.integration

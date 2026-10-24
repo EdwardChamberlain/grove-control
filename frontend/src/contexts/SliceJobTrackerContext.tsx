@@ -23,10 +23,12 @@ interface TrackedJob {
   id: number;
   kind: 'libraryFile' | 'archive';
   sourceName: string;
+  /** Files folder an Archive slice was saved to (`null`/absent = root). */
+  folderId?: number | null;
 }
 
 interface SliceJobTrackerContextValue {
-  trackJob: (id: number, kind: 'libraryFile' | 'archive', sourceName: string) => void;
+  trackJob: (id: number, kind: 'libraryFile' | 'archive', sourceName: string, folderId?: number | null) => void;
   activeJobs: TrackedJob[];
 }
 
@@ -150,14 +152,14 @@ export function SliceJobTrackerProvider({ children }: { children: ReactNode }) {
   );
 
   const trackJob = useCallback(
-    (id: number, kind: 'libraryFile' | 'archive', sourceName: string) => {
-      setActiveJobs((prev) => (prev.some((j) => j.id === id) ? prev : [...prev, { id, kind, sourceName }]));
+    (id: number, kind: 'libraryFile' | 'archive', sourceName: string, folderId?: number | null) => {
+      setActiveJobs((prev) => (prev.some((j) => j.id === id) ? prev : [...prev, { id, kind, sourceName, folderId }]));
       startedAtRef.current.set(id, Date.now());
       phaseRef.current.set(id, 'pending');
       progressRef.current.set(id, null);
       // Render the initial frame immediately so the user sees the toast
       // before the first tick lands (~1s delay otherwise).
-      renderProgressToast({ id, kind, sourceName });
+      renderProgressToast({ id, kind, sourceName, folderId });
     },
     [renderProgressToast],
   );
@@ -185,7 +187,10 @@ export function SliceJobTrackerProvider({ children }: { children: ReactNode }) {
           // Archive slices land in Files, not Archive: link to where the
           // output is. Persistent toasts don't auto-dismiss, so clear it.
           showPersistentToast(toastIdFor(job.id), completedMessage, 'success', {
-            action: { label: t('slice.viewInFiles', 'View in Files'), href: '/files' },
+            action: {
+              label: t('slice.viewInFiles', 'View in Files'),
+              href: job.folderId != null ? `/files?folder=${job.folderId}` : '/files',
+            },
           });
           setTimeout(() => dismissToast(toastIdFor(job.id)), COMPLETED_TOAST_LINGER_MS);
         } else {
