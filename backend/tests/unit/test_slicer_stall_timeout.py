@@ -13,6 +13,7 @@ stalled one. The deadline moves forward on every progress update.
 """
 
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -87,14 +88,23 @@ class TestSliceIsNotCutOffWhileProgressing:
     async def test_a_slow_slice_that_reports_progress_completes(self):
         """The reporter's case: slower than the old ceiling, still working.
 
-        The slice takes ~5x the stall window; progress keeps arriving, so it
+        The slice outlasts the stall window; progress keeps arriving, so it
         must run to completion rather than being abandoned.
+
+        The slice finishes once the poller has delivered a fixed number of
+        updates, not after a wall-clock sleep, and the window is wide enough to
+        absorb a loaded runner stalling the event loop (the first request in a
+        fresh process alone can take 100 ms+). A 0.1 s window made this flaky.
         """
+        window = 0.5
+        updates_needed = 40  # at the 20 ms poll interval, comfortably past the window
         progress = {"n": 0}
 
         async def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path.endswith("/slice"):
-                await asyncio.sleep(0.5)
+                deadline = time.monotonic() + 30.0  # backstop so a broken poller fails, not hangs
+                while progress["n"] < updates_needed and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
                 return httpx.Response(
                     200,
                     content=b"G1 X0\n",
@@ -107,11 +117,13 @@ class TestSliceIsNotCutOffWhileProgressing:
             progress["n"] += 1
             return httpx.Response(200, json={"percent": progress["n"]})
 
-        svc = _service(handler, timeout_seconds=0.1)
+        svc = _service(handler, timeout_seconds=window)
+        started = time.monotonic()
         result = await svc.slice_with_profiles(**SLICE_ARGS, request_id="req-1", on_progress=lambda _p: None)
 
         assert result.print_time_seconds == 100
-        assert progress["n"] > 1, "the poller must have been running throughout"
+        assert progress["n"] >= updates_needed, "the poller must have been running throughout"
+        assert time.monotonic() - started > window, "the slice must outlast the stall window for this to prove anything"
 
     @pytest.mark.asyncio
     async def test_repeated_identical_progress_does_not_count_as_alive(self):
