@@ -28,6 +28,7 @@ import {
   Star,
   Tag,
   StickyNote,
+  FolderInput,
   FolderOpen,
   Calendar,
   AlertCircle,
@@ -59,6 +60,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { SliceModal } from '../components/SliceModal';
+import { SaveArchiveToFilesModal } from '../components/SaveArchiveToFilesModal';
 import { openInSlicer, type SlicerType } from '../utils/slicer';
 import { formatDateTime, formatDateOnly, parseUTCDate, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
@@ -180,6 +182,7 @@ function ArchiveCard({
   const navigate = useNavigate();
   const [showReprint, setShowReprint] = useState(false);
   const [showSliceModal, setShowSliceModal] = useState(false);
+  const [showSaveToFiles, setShowSaveToFiles] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // #1343: when true, the delete also drops the row from Quick Stats. Default
   // off — soft delete preserves the archive's filament/time/cost contribution.
@@ -535,6 +538,14 @@ function ArchiveCard({
       title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
     { label: '', divider: true, onClick: () => {} },
+    // Entries without a 3MF (fallback rows for prints started outside Grove) have nothing to copy.
+    ...(archive.file_path ? [{
+      label: t('archives.menu.saveToFiles'),
+      icon: <FolderInput className="w-4 h-4" />,
+      onClick: () => setShowSaveToFiles(true),
+      disabled: !hasPermission('library:upload'),
+      title: !hasPermission('library:upload') ? t('archives.permission.noSaveToFiles') : undefined,
+    }] : []),
     {
       label: t('archives.menu.download'),
       icon: <Download className="w-4 h-4" />,
@@ -1258,6 +1269,11 @@ function ArchiveCard({
         />
       )}
 
+      {/* Save to Files */}
+      {showSaveToFiles && (
+        <SaveArchiveToFilesModal archive={archive} onClose={() => setShowSaveToFiles(false)} />
+      )}
+
       {/* Slice Modal */}
       {showSliceModal && (
         <SliceModal
@@ -1571,6 +1587,7 @@ function ArchiveListRow({
   const navigate = useNavigate();
   const [showReprint, setShowReprint] = useState(false);
   const [showSliceModal, setShowSliceModal] = useState(false);
+  const [showSaveToFiles, setShowSaveToFiles] = useState(false);
   const [showTimelapse, setShowTimelapse] = useState(false);
   const [showTimelapseSelect, setShowTimelapseSelect] = useState(false);
   const [availableTimelapses, setAvailableTimelapses] = useState<Array<{ name: string; path: string; size: number; mtime: string | null }>>([]);
@@ -1886,6 +1903,14 @@ function ArchiveListRow({
       title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
     { label: '', divider: true, onClick: () => {} },
+    // Entries without a 3MF (fallback rows for prints started outside Grove) have nothing to copy.
+    ...(archive.file_path ? [{
+      label: t('archives.menu.saveToFiles'),
+      icon: <FolderInput className="w-4 h-4" />,
+      onClick: () => setShowSaveToFiles(true),
+      disabled: !hasPermission('library:upload'),
+      title: !hasPermission('library:upload') ? t('archives.permission.noSaveToFiles') : undefined,
+    }] : []),
     {
       label: t('archives.menu.download'),
       icon: <Download className="w-4 h-4" />,
@@ -2259,6 +2284,11 @@ function ArchiveListRow({
           archiveName={archive.print_name || archive.filename}
           onClose={() => setShowReprint(false)}
         />
+      )}
+
+      {/* Save to Files */}
+      {showSaveToFiles && (
+        <SaveArchiveToFilesModal archive={archive} onClose={() => setShowSaveToFiles(false)} />
       )}
 
       {/* Slice Modal */}

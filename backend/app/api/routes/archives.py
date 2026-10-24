@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +27,7 @@ from backend.app.models.filament import Filament
 from backend.app.models.spool_usage_history import SpoolUsageHistory
 from backend.app.models.user import User
 from backend.app.schemas.archive import ArchiveResponse, ArchiveSlim, ArchiveStats, ArchiveUpdate
+from backend.app.schemas.library import FileUploadResponse
 from backend.app.schemas.print_log import PrintLogResponse
 from backend.app.schemas.slicer import SliceRequest
 from backend.app.services.archive import ArchiveDeletionBlockedError, ArchiveService
@@ -4138,6 +4140,43 @@ async def slice_archive(
         "status": job.status,
         "status_url": f"/api/v1/slice-jobs/{job.id}",
     }
+
+
+class SaveArchiveToFilesRequest(BaseModel):
+    folder_id: int | None = None
+
+
+@router.post("/{archive_id}/save-to-files", response_model=FileUploadResponse)
+async def save_archive_to_files(
+    archive_id: int,
+    body: SaveArchiveToFilesRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.LIBRARY_UPLOAD),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.ARCHIVES_READ_ALL,
+            Permission.ARCHIVES_READ_OWN,
+        )
+    ),
+):
+    """Copy an archive's 3MF and thumbnail into Files as a new file.
+
+    ``folder_id`` picks the destination folder (``null`` = root). The archive
+    and its run history are left untouched; the copy is independent of
+    archive retention. The response's ``duplicate_of`` is set when Files
+    already holds a file with the same content hash.
+    """
+    from backend.app.api.routes.library import copy_archive_to_library
+
+    owner_user, can_read_all = auth_result
+    archive = _ensure_archive_visible(await db.get(PrintArchive, archive_id), owner_user, can_read_all)
+    user = current_user or owner_user
+    return await copy_archive_to_library(
+        db,
+        archive=archive,
+        folder_id=body.folder_id,
+        current_user_id=user.id if user else None,
+    )
 
 
 # =============================================================================

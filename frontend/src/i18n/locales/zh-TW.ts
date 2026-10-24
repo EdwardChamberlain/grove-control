@@ -837,7 +837,16 @@ export default {
       exportDownloaded: '匯出已下載',
       exportFailed: '匯出失敗',
     },
+    saveToFiles: {
+      title: '儲存到檔案',
+      confirm: '儲存',
+      saved: '已將 {{name}} 儲存到檔案',
+      savedDuplicate: '已將 {{name}} 儲存到檔案 — 已存在內容相同的檔案',
+      viewInFiles: '在檔案中檢視',
+      failed: '儲存到檔案失敗',
+    },
     menu: {
+      saveToFiles: '儲存到檔案',
       print: '列印',
       openInBambuStudio: '在切片軟體中開啟',
       slice: '切片',
@@ -877,6 +886,7 @@ export default {
       delete: '刪除',
     },
     permission: {
+      noSaveToFiles: '您沒有上傳到檔案的權限',
       noReprint: '您沒有重新列印此歸檔的權限',
       noAddToQueue: '您沒有新增到佇列的權限',
       noUpdateArchives: '您沒有更新歸檔的權限',

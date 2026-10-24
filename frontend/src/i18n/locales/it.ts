@@ -837,7 +837,16 @@ export default {
       exportDownloaded: 'Export scaricato',
       exportFailed: 'Export non riuscito',
     },
+    saveToFiles: {
+      title: 'Salva in File',
+      confirm: 'Salva',
+      saved: '{{name}} salvato in File',
+      savedDuplicate: '{{name}} salvato in File — esiste già un file con lo stesso contenuto',
+      viewInFiles: 'Mostra in File',
+      failed: 'Salvataggio in File non riuscito',
+    },
     menu: {
+      saveToFiles: 'Salva in File',
       print: 'Stampa',
       openInBambuStudio: 'Apri nello slicer',
       slice: 'Slice',
@@ -877,6 +886,7 @@ export default {
       delete: 'Elimina',
     },
     permission: {
+      noSaveToFiles: 'Non hai il permesso di caricare in File',
       noReprint: 'Non hai il permesso di ristampare questo archivio',
       noAddToQueue: 'Non hai il permesso di aggiungere alla coda',
       noUpdateArchives: 'Non hai il permesso di aggiornare archivi',

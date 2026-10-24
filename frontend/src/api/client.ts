@@ -6671,6 +6671,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  saveArchiveToFiles: (archiveId: number, folderId: number | null) =>
+    request<LibraryFileUploadResponse>(`/archives/${archiveId}/save-to-files`, {
+      method: 'POST',
+      body: JSON.stringify({ folder_id: folderId }),
+    }),
   sliceArchive: (archiveId: number, body: SliceRequest) =>
     request<SliceJobEnqueueResponse>(`/archives/${archiveId}/slice`, {
       method: 'POST',
