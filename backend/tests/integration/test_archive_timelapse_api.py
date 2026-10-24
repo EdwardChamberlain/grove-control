@@ -112,6 +112,22 @@ class TestTimelapseScan:
         response = await async_client.post(f"/api/v1/archives/{archive.id}/timelapse/scan")
         assert response.json()["filename"] == "video_b.mp4"
 
+    async def test_matches_by_file_mtime_on_printer_ahead_of_utc(
+        self, async_client: AsyncClient, archive_on_printer, ftp, monkeypatch
+    ):
+        # Printer and app both on Moscow time (UTC+3): the FTP mtime reads 3h ahead
+        # of the UTC completion time, which used to fall outside the 2h window.
+        monkeypatch.setenv("TZ", "Europe/Moscow")
+        completed = datetime(2026, 5, 1, 12, 0)
+        archive = await archive_on_printer(completed_at=completed)
+        ftp["listing"]["/timelapse"] = [
+            video("video_a.mp4", mtime=completed + timedelta(hours=3) - timedelta(days=1)),
+            video("video_b.mp4", mtime=completed + timedelta(hours=3, minutes=3)),
+        ]
+        response = await async_client.post(f"/api/v1/archives/{archive.id}/timelapse/scan")
+        assert response.json()["status"] == "attached"
+        assert response.json()["filename"] == "video_b.mp4"
+
     async def test_lists_candidates_when_nothing_matches(self, async_client: AsyncClient, archive_on_printer, ftp):
         old = datetime(2020, 1, 1)
         archive = await archive_on_printer(completed_at=old, created_at=old)

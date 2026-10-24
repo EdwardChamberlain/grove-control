@@ -30,6 +30,7 @@ from backend.app.schemas.print_log import PrintLogResponse
 from backend.app.schemas.slicer import SliceRequest
 from backend.app.services.archive import ArchiveDeletionBlockedError, ArchiveService
 from backend.app.utils.http import build_content_disposition
+from backend.app.utils.local_time import local_zone, to_naive_utc
 from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import (
     extract_embedded_presets_from_3mf,
@@ -117,6 +118,54 @@ def _match_timelapse_by_timestamp(
             return None, None
 
     return best_video, best_diff
+
+
+_DEFAULT_TIMELAPSE_MTIME_TOLERANCE = timedelta(hours=2)
+
+
+def _match_timelapse_by_mtime(
+    video_files: list[dict],
+    archive_end: datetime | None,
+    *,
+    tolerance: timedelta = _DEFAULT_TIMELAPSE_MTIME_TOLERANCE,
+) -> tuple[dict | None, timedelta | None]:
+    """Pick the timelapse whose FTP modification time is closest to print completion.
+
+    The video is finalised when the print ends, so its mtime should sit just after
+    ``archive_end``. But the two are on different clocks: the FTP listing gives the
+    printer's local wall-clock time with no zone, while ``archive_end`` is naive UTC.
+    Comparing them directly put any printer at UTC+3 or later permanently outside
+    the window.
+
+    The app has no per-printer timezone, so we read the mtime as wall-clock time in
+    the app's own zone (the ``TZ`` env var — the same assumption ``bambu_ftp`` makes
+    when it parses the listing) and also as UTC, for printers left on UTC or with
+    no NTP. Whichever reading is closer wins. We deliberately don't search a wider
+    set of offsets: see ``_match_timelapse_by_timestamp`` / #1278 for how that
+    produces false matches.
+    """
+    archive_end = to_naive_utc(archive_end)
+    if archive_end is None:
+        return None, None
+
+    end_utc = archive_end.replace(tzinfo=timezone.utc)
+    # Completion time as it would read on a printer clock in each candidate zone.
+    references = {archive_end, end_utc.astimezone(local_zone()).replace(tzinfo=None)}
+
+    best_match: dict | None = None
+    best_diff: timedelta | None = None
+    for f in video_files:
+        mtime = f.get("mtime")
+        if not mtime:
+            continue
+        mtime = mtime.replace(tzinfo=None)
+        diff = min(abs(mtime - ref) for ref in references)
+        if best_diff is None or diff < best_diff:
+            best_match, best_diff = f, diff
+
+    if best_match is None or best_diff >= tolerance:
+        return None, None
+    return best_match, best_diff
 
 
 def _ensure_archive_visible(
@@ -2370,31 +2419,11 @@ async def scan_timelapse(
 
     # Strategy 3: Use file modification time from FTP listing
     # This handles cases where printer's filename timestamp is wrong but file mtime is correct
-    if not matching_file and (archive.started_at or archive.completed_at or archive.created_at):
-        from datetime import datetime, timedelta
-
-        _archive_start = archive.started_at
-        archive_end = archive.completed_at or archive.created_at
-        best_match = None
-        best_diff = timedelta(hours=24)
-
-        for f in video_files:
-            mtime = f.get("mtime")
-            if mtime:
-                # Timelapse file should be modified during or shortly after the print
-                # The mtime should be close to completion time (video finishes when print ends)
-                if archive_end:
-                    diff = abs(mtime - archive_end)
-                    if diff < best_diff:
-                        best_diff = diff
-                        best_match = f
-                        logger.debug(
-                            f"Timelapse mtime match candidate: {f.get('name')}, mtime: {mtime}, diff from end: {diff}"
-                        )
-
-        if best_match and best_diff < timedelta(hours=2):
-            matching_file = best_match
-            logger.info("Matched timelapse by file mtime: %s (diff: %s)", best_match.get("name"), best_diff)
+    if not matching_file:
+        candidate, diff = _match_timelapse_by_mtime(video_files, archive.completed_at or archive.created_at)
+        if candidate is not None:
+            matching_file = candidate
+            logger.info("Matched timelapse by file mtime: %s (diff: %s)", candidate.get("name"), diff)
 
     # Strategy 4: If only one timelapse exists and archive was recently completed, use it
     # This handles cases where printer clock is wrong or timezone issues exist

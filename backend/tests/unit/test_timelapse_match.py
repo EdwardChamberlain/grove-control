@@ -16,11 +16,11 @@ forcing the manual-selection fallback the reporter explicitly asked for.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backend.app.api.routes.archives import _match_timelapse_by_timestamp
+from backend.app.api.routes.archives import _match_timelapse_by_mtime, _match_timelapse_by_timestamp
 
 
 def _video(name: str, mtime: datetime | None = None) -> dict:
@@ -175,3 +175,79 @@ class TestMatchTimelapseByTimestamp:
         assert match is not None
         assert match["name"] == "video_2026-05-08_09-41-29.mp4"
         assert diff is not None
+
+
+class TestMatchTimelapseByMtime:
+    """FTP mtime is printer-local wall-clock; archive completion is naive UTC."""
+
+    # 12:00 UTC on a summer day, so DST-observing zones are on summer time.
+    COMPLETED = datetime(2026, 7, 1, 12, 0)
+
+    def test_utc_printer_matches_with_tz_unset(self, monkeypatch):
+        monkeypatch.delenv("TZ", raising=False)
+        videos = [
+            _video("a.mp4", mtime=self.COMPLETED - timedelta(hours=5)),
+            _video("b.mp4", mtime=self.COMPLETED + timedelta(minutes=3)),
+        ]
+        match, diff = _match_timelapse_by_mtime(videos, self.COMPLETED)
+        assert match is not None and match["name"] == "b.mp4"
+        assert diff == timedelta(minutes=3)
+
+    @pytest.mark.parametrize(
+        ("tz", "offset"),
+        [
+            ("Europe/Moscow", timedelta(hours=3)),  # first offset the old 2h window could never reach
+            ("Asia/Kolkata", timedelta(hours=5, minutes=30)),
+            ("Asia/Tokyo", timedelta(hours=9)),
+            ("America/Los_Angeles", timedelta(hours=-7)),  # PDT
+            ("Europe/London", timedelta(hours=1)),  # BST
+        ],
+    )
+    def test_printer_on_local_time_matches(self, monkeypatch, tz, offset):
+        monkeypatch.setenv("TZ", tz)
+        printer_mtime = self.COMPLETED + offset + timedelta(minutes=2)
+        videos = [
+            _video("older.mp4", mtime=printer_mtime - timedelta(days=1)),
+            _video("this_print.mp4", mtime=printer_mtime),
+        ]
+        match, diff = _match_timelapse_by_mtime(videos, self.COMPLETED)
+        assert match is not None and match["name"] == "this_print.mp4"
+        assert diff == timedelta(minutes=2)
+
+    def test_printer_left_on_utc_still_matches_when_app_is_not(self, monkeypatch):
+        """LAN-only printers often keep UTC even when the server has a local TZ."""
+        monkeypatch.setenv("TZ", "Asia/Tokyo")
+        videos = [_video("b.mp4", mtime=self.COMPLETED + timedelta(minutes=4))]
+        match, diff = _match_timelapse_by_mtime(videos, self.COMPLETED)
+        assert match is not None
+        assert diff == timedelta(minutes=4)
+
+    def test_dst_is_applied_for_the_completion_date(self, monkeypatch):
+        """Winter completion in London is UTC+0, so a +1h mtime is not a near match."""
+        monkeypatch.setenv("TZ", "Europe/London")
+        winter = datetime(2026, 1, 15, 12, 0)
+        videos = [_video("b.mp4", mtime=winter + timedelta(minutes=2))]
+        match, diff = _match_timelapse_by_mtime(videos, winter)
+        assert match is not None and diff == timedelta(minutes=2)
+
+    def test_printer_offset_unknown_to_app_is_not_matched(self, monkeypatch):
+        """Without TZ we only know UTC; a UTC+3 printer stays unmatched rather than guessed."""
+        monkeypatch.delenv("TZ", raising=False)
+        videos = [_video("b.mp4", mtime=self.COMPLETED + timedelta(hours=3, minutes=2))]
+        assert _match_timelapse_by_mtime(videos, self.COMPLETED) == (None, None)
+
+    def test_outside_tolerance_is_not_matched(self, monkeypatch):
+        monkeypatch.setenv("TZ", "Europe/Moscow")
+        videos = [_video("b.mp4", mtime=self.COMPLETED + timedelta(hours=3) + timedelta(hours=2))]
+        assert _match_timelapse_by_mtime(videos, self.COMPLETED) == (None, None)
+
+    def test_aware_completion_time_is_normalised(self, monkeypatch):
+        monkeypatch.setenv("TZ", "Europe/Moscow")
+        aware = self.COMPLETED.replace(tzinfo=timezone.utc)
+        videos = [_video("b.mp4", mtime=self.COMPLETED + timedelta(hours=3, minutes=1))]
+        match, diff = _match_timelapse_by_mtime(videos, aware)
+        assert match is not None and diff == timedelta(minutes=1)
+
+    def test_missing_mtimes_and_end_time(self):
+        assert _match_timelapse_by_mtime([_video("a.mp4")], self.COMPLETED) == (None, None)
+        assert _match_timelapse_by_mtime([_video("a.mp4", mtime=self.COMPLETED)], None) == (None, None)
