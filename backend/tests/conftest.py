@@ -255,8 +255,17 @@ async def async_client(test_engine, db_session) -> AsyncGenerator[AsyncClient, N
     test_async_session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
     async def override_get_db():
+        # Mirror backend.app.core.database.get_db: commit when the request
+        # succeeds, roll back when it raises. Many handlers only flush() and
+        # rely on that commit; without it their writes vanish when the
+        # session closes, so a create-then-read flow could not be tested.
         async with test_async_session() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()
+            except BaseException:
+                await session.rollback()
+                raise
 
     app.dependency_overrides[get_db] = override_get_db
 
