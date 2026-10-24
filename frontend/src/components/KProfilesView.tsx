@@ -604,6 +604,7 @@ function KProfileModal({
                   onClick={() => setShowDeleteConfirm(true)}
                   disabled={deleteMutation.isPending || isSyncing || !hasPermission('kprofiles:delete')}
                   title={!hasPermission('kprofiles:delete') ? t('kProfiles.permission.noDelete') : undefined}
+                  aria-label={t('common.delete')}
                   className="text-red-500 hover:bg-red-500/10"
                 >
                   {deleteMutation.isPending ? (
