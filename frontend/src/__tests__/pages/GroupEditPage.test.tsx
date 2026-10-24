@@ -27,7 +27,7 @@ const mockPermissions = {
       name: 'Archives',
       permissions: [
         { value: 'archives:read', label: 'Read Archives' },
-        { value: 'archives:create', label: 'Create Archives' },
+        { value: 'archives:update_own', label: 'Update Own Archives' },
       ],
     },
   ],
@@ -36,7 +36,7 @@ const mockPermissions = {
     'printers:control',
     'printers:clear_plate',
     'archives:read',
-    'archives:create',
+    'archives:update_own',
   ],
 };
 
@@ -109,7 +109,7 @@ describe('GroupEditPage', () => {
       expect(screen.getByText('Control Printers')).toBeInTheDocument();
       expect(screen.getByText('Clear Plate')).toBeInTheDocument();
       expect(screen.getByText('Read Archives')).toBeInTheDocument();
-      expect(screen.getByText('Create Archives')).toBeInTheDocument();
+      expect(screen.getByText('Update Own Archives')).toBeInTheDocument();
     });
 
     it('shows 0 selected initially', async () => {
