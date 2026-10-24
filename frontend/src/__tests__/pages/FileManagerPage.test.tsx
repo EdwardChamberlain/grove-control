@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { FileManagerPage } from '../../pages/FileManagerPage';
@@ -1047,6 +1047,30 @@ describe('FileManagerPage', () => {
       await waitFor(() => {
         expect(scopes).toContain('external');
       });
+    });
+  });
+
+  describe('single-file Move from the file menu', () => {
+    it('moves just that file to the chosen folder', async () => {
+      let movedBody: unknown = null;
+      server.use(
+        http.post('/api/v1/library/files/move', async ({ request }) => {
+          movedBody = await request.json();
+          return HttpResponse.json({ status: 'success', moved: 1 });
+        }),
+      );
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      const card = (await screen.findByText('Benchy')).closest('div[class*="cursor-pointer"]') as HTMLElement;
+      await user.click(within(card).getByRole('button', { name: 'Actions' }));
+      await user.click(within(card).getByRole('button', { name: /^move$/i }));
+
+      const dialog = (await screen.findByText('Move 1 File(s)')).closest('div.fixed') as HTMLElement;
+      await user.click(within(dialog).getByRole('button', { name: /Functional Parts/ }));
+      await user.click(within(dialog).getByRole('button', { name: /^move$/i }));
+
+      await waitFor(() => expect(movedBody).toEqual({ file_ids: [1], folder_id: 1 }));
     });
   });
 

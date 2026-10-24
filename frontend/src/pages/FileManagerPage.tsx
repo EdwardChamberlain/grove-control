@@ -821,6 +821,7 @@ interface FileCardProps {
   useSlicerApi?: boolean;
   onPreview3d?: (file: LibraryFileListItem) => void;
   onRename?: (file: LibraryFileListItem) => void;
+  onMove?: (file: LibraryFileListItem) => void;
   onGenerateThumbnail?: (file: LibraryFileListItem) => void;
   onTagClick?: (tagId: number) => void;
   thumbnailVersion?: number;
@@ -831,7 +832,7 @@ interface FileCardProps {
   t: TFunction;
 }
 
-function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onGenerateThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
+function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onMove, onGenerateThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
   const [showActions, setShowActions] = useState(false);
 
   return (
@@ -935,6 +936,7 @@ function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, 
         <button
           onClick={() => setShowActions(!showActions)}
           className="p-1.5 rounded bg-bambu-dark-secondary/90 hover:bg-bambu-dark-tertiary"
+          aria-label={t('common.actions')}
         >
           <MoreVertical className="w-4 h-4 text-bambu-gray" />
         </button>
@@ -1005,6 +1007,19 @@ function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, 
                   {t('common.rename')}
                 </button>
               )}
+              {onMove && (
+                <button
+                  className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 ${
+                    canModify('library', 'update', file.created_by_id) ? 'text-white hover:bg-bambu-dark' : 'text-bambu-gray cursor-not-allowed'
+                  }`}
+                  onClick={() => { if (canModify('library', 'update', file.created_by_id)) { onMove(file); setShowActions(false); } }}
+                  disabled={!canModify('library', 'update', file.created_by_id)}
+                  title={!canModify('library', 'update', file.created_by_id) ? t('fileManager.noPermissionMoveFiles') : undefined}
+                >
+                  <MoveRight className="w-3.5 h-3.5" />
+                  {t('common.move')}
+                </button>
+              )}
               {onGenerateThumbnail && file.file_type === 'stl' && (
                 <button
                   className={`w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 ${
@@ -1069,6 +1084,13 @@ export function FileManagerPage() {
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [showExternalFolderModal, setShowExternalFolderModal] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
+  // Set when Move is opened from one file's menu rather than the selection bar.
+  const [singleMoveFileId, setSingleMoveFileId] = useState<number | null>(null);
+  const moveFileIds = singleMoveFileId !== null ? [singleMoveFileId] : selectedFiles;
+  const openSingleMove = (fileId: number) => {
+    setSingleMoveFileId(fileId);
+    setShowMoveModal(true);
+  };
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
   const [showPurgeModal, setShowPurgeModal] = useState(false);
@@ -1497,11 +1519,12 @@ export function FileManagerPage() {
   const moveFilesMutation = useMutation({
     mutationFn: ({ fileIds, folderId }: { fileIds: number[]; folderId: number | null }) =>
       api.moveLibraryFiles(fileIds, folderId),
-    onSuccess: () => {
+    onSuccess: (_, { fileIds }) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
-      setSelectedFiles([]);
+      setSelectedFiles((prev) => prev.filter((id) => !fileIds.includes(id)));
       setShowMoveModal(false);
+      setSingleMoveFileId(null);
       showToast(t('fileManager.toast.filesMoved'), 'success');
     },
     onError: (error: Error) => showToast(error.message, 'error'),
@@ -2516,6 +2539,7 @@ export function FileManagerPage() {
                       }
                     }}
                     onRename={(f) => setRenameItem({ type: 'file', id: f.id, name: f.filename })}
+                    onMove={(f) => openSingleMove(f.id)}
                     onGenerateThumbnail={(f) => singleThumbnailMutation.mutate(f.id)}
                     onTagClick={toggleTagFilter}
                     thumbnailVersion={thumbnailVersions[file.id]}
@@ -2736,6 +2760,18 @@ export function FileManagerPage() {
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
+                      <button
+                        onClick={() => canModify('library', 'update', file.created_by_id) && openSingleMove(file.id)}
+                        className={`p-1.5 rounded transition-colors ${
+                          canModify('library', 'update', file.created_by_id)
+                            ? 'hover:bg-bambu-dark text-bambu-gray hover:text-white'
+                            : 'text-bambu-gray/50 cursor-not-allowed'
+                        }`}
+                        title={canModify('library', 'update', file.created_by_id) ? t('common.move') : t('fileManager.noPermissionMoveFiles')}
+                        disabled={!canModify('library', 'update', file.created_by_id)}
+                      >
+                        <MoveRight className="w-4 h-4" />
+                      </button>
                       {file.file_type === 'stl' && (
                         <button
                           onClick={() => canModify('library', 'update', file.created_by_id) && singleThumbnailMutation.mutate(file.id)}
@@ -2794,10 +2830,13 @@ export function FileManagerPage() {
       {showMoveModal && userFolders && (
         <MoveFilesModal
           folders={userFolders}
-          selectedFiles={selectedFiles}
+          selectedFiles={moveFileIds}
           currentFolderId={selectedFolderId}
-          onClose={() => setShowMoveModal(false)}
-          onMove={(folderId) => moveFilesMutation.mutate({ fileIds: selectedFiles, folderId })}
+          onClose={() => {
+            setShowMoveModal(false);
+            setSingleMoveFileId(null);
+          }}
+          onMove={(folderId) => moveFilesMutation.mutate({ fileIds: moveFileIds, folderId })}
           isLoading={moveFilesMutation.isPending}
           t={t}
         />
