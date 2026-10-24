@@ -144,7 +144,7 @@ Coverage floors:
 
 - Backend: `--fail-under` in the Backend Coverage job of
   `.github/workflows/ci.yml` (mirrored in `test_backend.sh`). Coverage is
-  collected in 4 parallel shards and combined in that job.
+  collected in 6 parallel shards and combined in that job.
 - Frontend: `coverage.thresholds` in `frontend/vitest.config.ts`.
   In CI, Vitest runs as 3 shards and Playwright as its own job; the Frontend
   Tests job merges the shard reports, enforces these thresholds and runs the
