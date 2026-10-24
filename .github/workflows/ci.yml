@@ -14,8 +14,11 @@ env:
   NODE_VERSION: '22'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR runs are cancelled. Pushes get a group per commit and are
+  # never cancelled, so every commit on dev/main gets a CI result (a shared
+  # group would still drop all but the newest pending run).
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
