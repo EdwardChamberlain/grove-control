@@ -134,14 +134,10 @@ def test_database_url():
     return TEST_DATABASE_URL
 
 
-@pytest.fixture
-async def test_engine(test_database_url):
-    """Create an isolated test database engine."""
-    engine = create_async_engine(test_database_url, echo=False)
-
-    # Import all models to register them
-    from backend.app.models import (
-        active_print_session,  # noqa: F401
+def _register_models() -> None:
+    """Import every model module so its tables are on ``Base.metadata``."""
+    from backend.app.models import (  # noqa: F401
+        active_print_session,
         ams_history,
         ams_label,
         api_key,
@@ -165,7 +161,7 @@ async def test_engine(test_database_url):
         settings,
         slot_preset,
         smart_plug,
-        smart_plug_energy_snapshot,  # noqa: F401
+        smart_plug_energy_snapshot,
         spool,
         spool_assignment,
         spool_catalog,
@@ -181,18 +177,66 @@ async def test_engine(test_database_url):
         virtual_printer,
     )
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+
+# Schema DDL keyed by the set of registered table names. Later imports (for
+# example ``backend.app.main``) can register more tables mid-session, so the
+# script is rebuilt whenever that set changes.
+_schema_scripts: dict[frozenset[str], str] = {}
+
+
+def _schema_script() -> str:
+    """Return the SQLite DDL for every table on ``Base.metadata``.
+
+    Running ``metadata.create_all`` against aiosqlite costs a thread hop per
+    statement plus a ``PRAGMA table_info`` per table, which made schema setup
+    the bulk of every database test's runtime. Instead, build the schema once
+    with the stdlib driver, read back the exact DDL SQLite stored, and replay
+    it per test with a single ``executescript`` call.
+    """
+    import sqlite3
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    key = frozenset(Base.metadata.tables)
+    script = _schema_scripts.get(key)
+    if script is None:
+        conn = sqlite3.connect(":memory:")
+        sync_engine = create_engine("sqlite://", creator=lambda: conn, poolclass=StaticPool)
+        try:
+            Base.metadata.create_all(sync_engine)
+            rows = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
+            ).fetchall()
+        finally:
+            sync_engine.dispose()  # StaticPool closes ``conn`` here
+        script = "".join(f"{sql};\n" for (sql,) in rows)
+        _schema_scripts[key] = script
+    return script
+
+
+@pytest.fixture
+async def test_engine(test_database_url):
+    """Create an isolated test database engine with the full schema."""
+    _register_models()
+    engine = create_async_engine(test_database_url, echo=False)
+
+    async with engine.connect() as conn:
+        raw = await conn.get_raw_connection()
+        await raw.driver_connection.executescript(_schema_script())
+        await conn.commit()
 
     yield engine
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    # No drop_all: an in-memory database disappears with its connection, and
+    # file-backed overrides use a fresh ``tmp_path`` per test.
     await engine.dispose()
-    # Allow aiosqlite's background thread to finish processing the close
-    # response before the per-function event loop shuts down, preventing
-    # "RuntimeError: Event loop is closed" in call_soon_threadsafe.
-    await asyncio.sleep(0.1)
+    # Yield to the event loop once so aiosqlite's close callback runs before
+    # the per-function loop shuts down ("RuntimeError: Event loop is closed"
+    # in call_soon_threadsafe). This used to sleep 0.1s per test; a single
+    # yield has been enough. If that error starts showing up on slow runners,
+    # a short sleep here is the fix.
+    await asyncio.sleep(0)
 
 
 @pytest.fixture
@@ -213,8 +257,17 @@ async def async_client(test_engine, db_session) -> AsyncGenerator[AsyncClient, N
     test_async_session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
     async def override_get_db():
+        # Mirror backend.app.core.database.get_db: commit when the request
+        # succeeds, roll back when it raises. Many handlers only flush() and
+        # rely on that commit; without it their writes vanish when the
+        # session closes, so a create-then-read flow could not be tested.
         async with test_async_session() as session:
-            yield session
+            try:
+                yield session
+                await session.commit()
+            except BaseException:
+                await session.rollback()
+                raise
 
     app.dependency_overrides[get_db] = override_get_db
 
