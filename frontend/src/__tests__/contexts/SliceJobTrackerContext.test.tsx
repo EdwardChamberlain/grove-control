@@ -211,7 +211,7 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
     expect(screen.getByText(/Sliced Done\.stl/)).toBeDefined();
   });
 
-  it('links an archive slice completion to Files', async () => {
+  it('links an archive slice completion to the new file', async () => {
     mockApi.getSliceJob.mockResolvedValue({
       job_id: 8,
       status: 'completed',
@@ -243,10 +243,10 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
 
     expect(screen.getByText(/Sliced Benchy\.3mf/)).toBeDefined();
     const link = screen.getByRole('link', { name: 'View in Files' });
-    expect(link.getAttribute('href')).toBe('/files');
+    expect(link.getAttribute('href')).toBe('/files?file=55');
   });
 
-  it('links an archive slice saved into a folder to that folder', async () => {
+  it('links an archive slice saved into a folder to the file in that folder', async () => {
     mockApi.getSliceJob.mockResolvedValue({
       job_id: 9,
       status: 'completed',
@@ -276,7 +276,7 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole('link', { name: 'View in Files' }).getAttribute('href')).toBe('/files?folder=12');
+    expect(screen.getByRole('link', { name: 'View in Files' }).getAttribute('href')).toBe('/files?folder=12&file=56');
   });
 
   it('replaces the persistent toast with a transient error toast on failure', async () => {

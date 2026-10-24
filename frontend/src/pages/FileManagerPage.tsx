@@ -744,6 +744,8 @@ function isSliceableFilename(filename: string): boolean {
 interface FileCardProps {
   file: LibraryFileListItem;
   isSelected: boolean;
+  /** Briefly emphasised after arriving via a `?file=` deep link. */
+  isHighlighted?: boolean;
   isMobile: boolean;
   onSelect: (id: number) => void;
   onDelete: (id: number) => void;
@@ -764,14 +766,18 @@ interface FileCardProps {
   t: TFunction;
 }
 
-function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onMove, onGenerateThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
+function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onMove, onGenerateThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
   const [showActions, setShowActions] = useState(false);
 
   return (
     <div
+      data-file-id={file.id}
+      data-highlighted={isHighlighted ? 'true' : undefined}
       className={`group relative bg-bambu-dark-secondary rounded-lg border transition-all cursor-pointer overflow-hidden ${
         isSelected
           ? 'border-bambu-green ring-1 ring-bambu-green'
+          : isHighlighted
+          ? 'border-bambu-green ring-2 ring-bambu-green/70'
           : 'border-bambu-dark-tertiary hover:border-bambu-green/50'
       }`}
       onClick={() => onSelect(file.id)}
@@ -1134,6 +1140,25 @@ export function FileManagerPage() {
     }
   }, [searchParams]);
 
+  // `?file=ID` deep link: open the file's folder, scroll to the file and
+  // highlight it briefly. An unknown, deleted or not-visible file just leaves
+  // the page where it was.
+  const fileIdParam = searchParams.get('file');
+  const deepLinkFileId = fileIdParam && /^\d+$/.test(fileIdParam) ? parseInt(fileIdParam, 10) : null;
+  const [highlightedFileId, setHighlightedFileId] = useState<number | null>(null);
+  const { data: deepLinkFile } = useQuery({
+    queryKey: ['library-file', deepLinkFileId],
+    queryFn: () => api.getLibraryFile(deepLinkFileId as number),
+    enabled: deepLinkFileId !== null,
+    retry: false,
+  });
+  const deepLinkFolderAppliedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!deepLinkFile || deepLinkFolderAppliedRef.current === deepLinkFile.id) return;
+    deepLinkFolderAppliedRef.current = deepLinkFile.id;
+    setSelectedFolderId(deepLinkFile.folder_id);
+  }, [deepLinkFile]);
+
   // Queries
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -1334,6 +1359,24 @@ export function FileManagerPage() {
 
     return result;
   }, [files, searchQuery, filterType, filterUsername, sortField, sortDirection]);
+
+  // Once the deep-linked file is in the visible list, bring it into view and
+  // highlight it for a few seconds. Handled once per file ID.
+  const deepLinkHandledRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!deepLinkFile || deepLinkHandledRef.current === deepLinkFile.id) return;
+    if (selectedFolderId !== deepLinkFile.folder_id) return;
+    if (!filteredAndSortedFiles.some((f) => f.id === deepLinkFile.id)) return;
+    deepLinkHandledRef.current = deepLinkFile.id;
+    setHighlightedFileId(deepLinkFile.id);
+    document.querySelector(`[data-file-id="${deepLinkFile.id}"]`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [deepLinkFile, selectedFolderId, filteredAndSortedFiles]);
+  // Separate from the effect above so a list refetch mid-highlight can't cancel the timer.
+  useEffect(() => {
+    if (highlightedFileId === null) return;
+    const timer = setTimeout(() => setHighlightedFileId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [highlightedFileId]);
 
   // Check if disk space is low
   const isDiskSpaceLow = useMemo(() => {
@@ -2451,6 +2494,7 @@ export function FileManagerPage() {
                     key={file.id}
                     file={file}
                     isSelected={selectedFiles.includes(file.id)}
+                    isHighlighted={highlightedFileId === file.id}
                     isMobile={isMobile}
                     t={t}
                     onSelect={handleFileSelect}
@@ -2511,8 +2555,14 @@ export function FileManagerPage() {
                 {filteredAndSortedFiles.map((file) => (
                   <div
                     key={file.id}
+                    data-file-id={file.id}
+                    data-highlighted={highlightedFileId === file.id ? 'true' : undefined}
                     className={`grid ${authEnabled ? 'grid-cols-[auto_1fr_120px_100px_100px_100px_minmax(0,200px)_220px]' : 'grid-cols-[auto_1fr_100px_100px_100px_minmax(0,200px)_220px]'} gap-4 px-4 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
-                      selectedFiles.includes(file.id) ? 'bg-bambu-green/10' : ''
+                      selectedFiles.includes(file.id)
+                        ? 'bg-bambu-green/10'
+                        : highlightedFileId === file.id
+                        ? 'bg-bambu-green/20 ring-1 ring-inset ring-bambu-green/70'
+                        : ''
                     }`}
                     onClick={() => handleFileSelect(file.id)}
                   >
