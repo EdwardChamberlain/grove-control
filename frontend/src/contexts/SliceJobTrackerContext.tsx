@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api, type SliceJobProgress, type SliceJobState, type SliceJobStatus } from '../api/client';
 import { useToast } from './ToastContext';
 import { AlertModal } from '../components/AlertModal';
+import { filesLink } from '../utils/filesLink';
 
 interface TrackedJob {
   id: number;
@@ -189,7 +190,7 @@ export function SliceJobTrackerProvider({ children }: { children: ReactNode }) {
           showPersistentToast(toastIdFor(job.id), completedMessage, 'success', {
             action: {
               label: t('slice.viewInFiles', 'View in Files'),
-              href: job.folderId != null ? `/files?folder=${job.folderId}` : '/files',
+              href: filesLink({ fileId: state.result?.library_file_id, folderId: job.folderId }),
             },
           });
           setTimeout(() => dismissToast(toastIdFor(job.id)), COMPLETED_TOAST_LINGER_MS);

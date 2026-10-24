@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api, type Archive } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
+import { filesLink } from '../utils/filesLink';
 import { FolderPickerModal } from './FolderPickerModal';
 
 interface SaveArchiveToFilesModalProps {
@@ -20,7 +21,7 @@ export function SaveArchiveToFilesModal({ archive, onClose }: SaveArchiveToFiles
 
   const saveMutation = useMutation({
     mutationFn: (folderId: number | null) => api.saveArchiveToFiles(archive.id, folderId),
-    onSuccess: (saved) => {
+    onSuccess: (saved, folderId) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
       const name = archive.print_name || archive.filename;
@@ -31,7 +32,7 @@ export function SaveArchiveToFilesModal({ archive, onClose }: SaveArchiveToFiles
           ? t('archives.saveToFiles.savedDuplicate', { name })
           : t('archives.saveToFiles.saved', { name }),
         saved.duplicate_of != null ? 'warning' : 'success',
-        { action: { label: t('archives.saveToFiles.viewInFiles'), href: '/files' } },
+        { action: { label: t('archives.saveToFiles.viewInFiles'), href: filesLink({ fileId: saved.id, folderId }) } },
       );
       setTimeout(() => dismissToast(toastId), 10000);
       onClose();

@@ -211,7 +211,7 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
     expect(screen.getByText(/Sliced Done\.stl/)).toBeDefined();
   });
 
-  it('links an archive slice completion to Files', async () => {
+  it('links an archive slice completion to the new file', async () => {
     mockApi.getSliceJob.mockResolvedValue({
       job_id: 8,
       status: 'completed',
@@ -243,10 +243,10 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
 
     expect(screen.getByText(/Sliced Benchy\.3mf/)).toBeDefined();
     const link = screen.getByRole('link', { name: 'View in Files' });
-    expect(link.getAttribute('href')).toBe('/files');
+    expect(link.getAttribute('href')).toBe('/files?file=55');
   });
 
-  it('links an archive slice saved into a folder to that folder', async () => {
+  it('links an archive slice saved into a folder to the file in that folder', async () => {
     mockApi.getSliceJob.mockResolvedValue({
       job_id: 9,
       status: 'completed',
@@ -267,6 +267,38 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
 
     act(() => {
       screen.getByText('track-9').click();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('link', { name: 'View in Files' }).getAttribute('href')).toBe('/files?folder=12&file=56');
+  });
+
+  it('falls back to the folder, then Files, when the job result carries no file', async () => {
+    mockApi.getSliceJob.mockResolvedValue({
+      job_id: 10,
+      status: 'completed',
+      kind: 'archive',
+      source_id: 7,
+      source_name: 'Benchy.3mf',
+      created_at: new Date().toISOString(),
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+    });
+
+    render(
+      <Wrapper>
+        <TrackTrigger id={10} name="Benchy.3mf" kind="archive" folderId={12} />
+      </Wrapper>,
+    );
+
+    act(() => {
+      screen.getByText('track-10').click();
     });
     await act(async () => {
       vi.advanceTimersByTime(1500);

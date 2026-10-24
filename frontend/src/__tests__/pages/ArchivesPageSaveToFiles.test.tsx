@@ -129,6 +129,7 @@ describe('ArchivesPage — Save to Files', () => {
 
     await waitFor(() => expect(saveBodies).toEqual([{ folder_id: 5 }]));
     expect(await screen.findByText('Saved Benchy to Files')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View in Files' }).getAttribute('href')).toBe('/files?folder=5&file=99');
   });
 
   it('saves to the root when no folder is picked', async () => {
@@ -140,6 +141,7 @@ describe('ArchivesPage — Save to Files', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(saveBodies).toEqual([{ folder_id: null }]));
+    expect(await screen.findByRole('link', { name: 'View in Files' })).toHaveAttribute('href', '/files?file=99');
   });
 
   it('creates nothing when the picker is cancelled', async () => {
@@ -152,6 +154,24 @@ describe('ArchivesPage — Save to Files', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Save to Files' })).toBeNull());
     expect(saveBodies).toEqual([]);
+  });
+
+  it('shows the server’s reason and keeps the picker open when saving fails', async () => {
+    useArchives([baseArchive]);
+    server.use(
+      http.post('/api/v1/archives/:id/save-to-files', () =>
+        HttpResponse.json({ detail: 'Archive file missing on disk' }, { status: 404 }),
+      ),
+    );
+    render(<ArchivesPage />);
+    await openContextMenu('Benchy');
+
+    fireEvent.click(await screen.findByText('Save to Files'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Archive file missing on disk')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Save to Files' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'View in Files' })).toBeNull();
   });
 
   it('warns when Files already holds the same content', async () => {
