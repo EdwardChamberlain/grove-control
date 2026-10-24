@@ -24,21 +24,23 @@ const folder = (id: number, name: string, extra: Record<string, unknown> = {}) =
   file_count: 0,
   latest_activity_at: null,
   children: [],
+  is_system: false,
   ...extra,
 });
 
-function setup() {
+function setup(props: { currentFolderId?: number | null } = {}) {
   server.use(
     http.get('/api/v1/library/folders', () =>
       HttpResponse.json([
         folder(1, 'Parent', { children: [folder(2, 'Child', { parent_id: 1 })] }),
         folder(3, 'Mounted', { is_external: true, external_readonly: true }),
+        folder(4, 'Temporary', { is_system: true }),
       ]),
     ),
   );
   const onConfirm = vi.fn();
   const onClose = vi.fn();
-  render(<FolderPickerModal title="Pick one" confirmLabel="Go" onConfirm={onConfirm} onClose={onClose} />);
+  render(<FolderPickerModal title="Pick one" confirmLabel="Go" onConfirm={onConfirm} onClose={onClose} {...props} />);
   return { onConfirm, onClose };
 }
 
@@ -69,6 +71,24 @@ describe('FolderPickerModal', () => {
     fireEvent.click(mounted);
     fireEvent.click(screen.getByRole('button', { name: 'Go' }));
 
+    expect(onConfirm).toHaveBeenCalledWith(null);
+  });
+
+  it('hides system folders', async () => {
+    setup();
+    await screen.findByText('Parent');
+
+    expect(screen.queryByText('Temporary')).toBeNull();
+  });
+
+  it('does not offer the folder the item is already in', async () => {
+    const { onConfirm } = setup({ currentFolderId: 1 });
+    const parent = (await screen.findByText('Parent')).closest('button')!;
+
+    expect(parent).toBeDisabled();
+    expect(parent).toHaveTextContent('(current)');
+    fireEvent.click(parent);
+    fireEvent.click(screen.getByRole('button', { name: 'Go' }));
     expect(onConfirm).toHaveBeenCalledWith(null);
   });
 
