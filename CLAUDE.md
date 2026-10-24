@@ -29,8 +29,8 @@ Guidance for AI coding agents (and humans) working in this repository. See
 
 ### Backend
 
-Run from `backend/` with the repo-root virtualenv (`../venv`). A fresh clone or
-git worktree has none; create it first:
+Tests run from `backend/` using the virtualenv at the repo root (`../venv`). A
+fresh clone or git worktree has none; create it from the **repo root** first:
 
 ```bash
 python3 -m venv venv && venv/bin/pip install -r requirements.txt -r requirements-dev.txt
@@ -40,7 +40,7 @@ python3 -m venv venv && venv/bin/pip install -r requirements.txt -r requirements
 cd backend
 ../venv/bin/python -m pytest tests/integration/test_print_queue_api.py   # one file
 ../venv/bin/python -m pytest tests/ -k "queue and start"                 # by name
-../venv/bin/python -m pytest tests/ -n auto                              # everything (~10 min)
+../venv/bin/python -m pytest tests/ -n auto                              # everything (a few minutes)
 ```
 
 - `tests/unit/services/test_bambu_ftp.py` is slow (~60s); CI's coverage job
@@ -86,6 +86,16 @@ runs the Docker and security suites.
 - **Every new route needs an auth dependency.**
   `tests/unit/test_route_auth_coverage.py` fails otherwise; adding a public
   route means adding it to that file's allowlist with a reason.
+- **Adding, removing or renaming a route** means regenerating the frontend's
+  copy of the route table, `frontend/src/__tests__/api/backend-routes.json`,
+  which the API contract test checks every client call against.
+  `tests/unit/test_api_route_snapshot.py` fails until you do:
+
+  ```bash
+  cd backend && UPDATE_ROUTE_SNAPSHOT=1 ../venv/bin/python -m pytest tests/unit/test_api_route_snapshot.py
+  ```
+
+  Commit the updated JSON with the route change.
 - Other structural guards will catch you too: `test_no_hardcoded_secrets.py`,
   `test_no_unsafe_path_joins.py`, `test_no_fail_open_in_auth.py`,
   `test_code_quality.py`.
