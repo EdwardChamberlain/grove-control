@@ -231,9 +231,11 @@ async def test_engine(test_database_url):
     # No drop_all: an in-memory database disappears with its connection, and
     # file-backed overrides use a fresh ``tmp_path`` per test.
     await engine.dispose()
-    # Allow aiosqlite's background thread to finish processing the close
-    # response before the per-function event loop shuts down, preventing
-    # "RuntimeError: Event loop is closed" in call_soon_threadsafe.
+    # Yield to the event loop once so aiosqlite's close callback runs before
+    # the per-function loop shuts down ("RuntimeError: Event loop is closed"
+    # in call_soon_threadsafe). This used to sleep 0.1s per test; a single
+    # yield has been enough. If that error starts showing up on slow runners,
+    # a short sleep here is the fix.
     await asyncio.sleep(0)
 
 
