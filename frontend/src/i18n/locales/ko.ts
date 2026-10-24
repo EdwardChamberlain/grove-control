@@ -612,7 +612,8 @@ export default {
       deleteReference: '참조 삭제',
       labelPlaceholder: '라벨...',
       clickToEdit: '{{label}} - 클릭하여 편집',
-      clickToAddLabel: '클릭하여 라벨 추가'
+      clickToAddLabel: '클릭하여 라벨 추가',
+      calibration: '플레이트 보정',
     },
     speed: {
       title: '인쇄 속도',
@@ -2059,7 +2060,8 @@ export default {
       passwordNeedsUppercase: '비밀번호에 대문자가 최소 1개 포함되어야 합니다',
       passwordNeedsLowercase: '비밀번호에 소문자가 최소 1개 포함되어야 합니다',
       passwordNeedsDigit: '비밀번호에 숫자가 최소 1개 포함되어야 합니다',
-      passwordNeedsSpecial: '비밀번호에 특수문자가 최소 1개 포함되어야 합니다'
+      passwordNeedsSpecial: '비밀번호에 특수문자가 최소 1개 포함되어야 합니다',
+      saveFailed: '설정을 저장하지 못했습니다',
     },
     testConnection: '연결 테스트',
     catalog: {
@@ -3085,7 +3087,21 @@ export default {
       noOverridesYet: '아직 재정의 없음',
       clickFieldsToAdd: '왼쪽 필드를 클릭하여 추가',
       saveAsTemplate: '템플릿으로 저장',
-      jsonTip: '팁: 이 모달 어디서나 .json 파일을 드래그 앤 드롭하여 설정을 가져올 수 있습니다'
+      jsonTip: '팁: 이 모달 어디서나 .json 파일을 드래그 앤 드롭하여 설정을 가져올 수 있습니다',
+      commonSettings: '일반 설정',
+      currentOverrides: '현재 재정의',
+      customTemplate: '사용자 지정 템플릿',
+      discoveredFromPresets: '기존 프리셋에서 발견됨',
+      exportToJson: 'JSON으로 내보내기',
+      importFromJson: 'JSON에서 가져오기',
+      fileImported: '파일을 가져왔습니다',
+      invalidJson: '잘못된 JSON입니다',
+      invalidJsonFile: '잘못된 JSON 파일입니다',
+      manageTemplatesHint: '템플릿은 프로필 페이지의 빠른 템플릿에서 관리하세요',
+      noOverridesToSave: '저장할 재정의가 없습니다',
+      noSettingId: '이 프리셋에는 설정 ID가 없습니다',
+      noTemplatesSelected: '이 프리셋 유형에 표시하도록 설정된 템플릿이 없습니다',
+      templateApplied: '적용된 템플릿:',
     },
     cloudView: {
       searchPlaceholder: '프리셋 검색...',
@@ -3147,7 +3163,20 @@ export default {
         created: '템플릿 생성됨',
         applied: '템플릿 적용됨'
       }
-    }
+    },
+    diff: {
+      title: '프리셋 비교',
+      left: '왼쪽',
+      right: '오른쪽',
+      added: '개 추가됨',
+      removed: '개 삭제됨',
+      changed: '개 변경됨',
+      same: '개 동일',
+      changes: '변경 사항',
+      noDifferences: '차이점이 없습니다',
+      noFieldsMatch: '검색과 일치하는 필드가 없습니다',
+      field: '필드',
+    },
   },
   support: {
     debugLoggingActive: '디버그 로깅이 활성화되어 있습니다',

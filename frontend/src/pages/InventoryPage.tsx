@@ -958,7 +958,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
     mutationFn: (threshold: number) => api.updateSettings({ low_stock_threshold: threshold }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
-      showToast(t('common.saved'), 'success');
+      showToast(t('settings.toast.settingsSaved'), 'success');
       setShowThresholdInput(false);
     },
     onError: () => {

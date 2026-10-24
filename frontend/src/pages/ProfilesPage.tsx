@@ -1144,7 +1144,7 @@ function DiffModal({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t('profiles.diff.searchFields')}
+                  placeholder={t('profiles.presets.searchFieldsPlaceholder')}
                   className="pl-8 pr-3 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none w-48"
                 />
               </div>

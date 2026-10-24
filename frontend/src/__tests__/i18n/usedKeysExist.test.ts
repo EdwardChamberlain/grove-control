@@ -40,53 +40,10 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-// Keys already missing when this test was added (they render as raw keys
-// today). Fix them by adding translations to every locale, then delete the
-// entry here; the test fails if an entry is fixed but still listed.
-const KNOWN_MISSING = new Set<string>([
-  'common.saved',
-  'printModal.plateN',
-  'printers.plateDetection.calibration',
-  'profiles.diff.added',
-  'profiles.diff.changed',
-  'profiles.diff.changes',
-  'profiles.diff.field',
-  'profiles.diff.left',
-  'profiles.diff.noDifferences',
-  'profiles.diff.noFieldsMatch',
-  'profiles.diff.removed',
-  'profiles.diff.right',
-  'profiles.diff.same',
-  'profiles.diff.searchFields',
-  'profiles.diff.title',
-  'profiles.presets.commonSettings',
-  'profiles.presets.currentOverrides',
-  'profiles.presets.customTemplate',
-  'profiles.presets.discoveredFromPresets',
-  'profiles.presets.exportToJson',
-  'profiles.presets.fileImported',
-  'profiles.presets.importFromJson',
-  'profiles.presets.invalidJson',
-  'profiles.presets.invalidJsonFile',
-  'profiles.presets.manageTemplatesHint',
-  'profiles.presets.noOverridesToSave',
-  'profiles.presets.noSettingId',
-  'profiles.presets.noTemplatesSelected',
-  'profiles.presets.templateApplied',
-  'settings.toast.saveFailed',
-  'smartPlugs.addSmartPlug.placeholders.searchEnergySensors',
-  'smartPlugs.addSmartPlug.placeholders.searchEntities',
-  'smartPlugs.addSmartPlug.placeholders.searchPowerSensors',
-  'virtualPrinter.howItWorks.proxyStep1',
-  'virtualPrinter.howItWorks.proxyStep2',
-  'virtualPrinter.howItWorks.proxyStep3',
-  'virtualPrinter.howItWorks.proxyStep4',
-  'virtualPrinter.howItWorks.proxyStep5',
-  'virtualPrinter.howItWorks.step4',
-  'virtualPrinter.howItWorks.step5',
-  'virtualPrinter.howItWorks.step6',
-  'virtualPrinter.howItWorks.titleProxy',
-]);
+// Keys known to be missing from every locale (they render as raw keys).
+// Keep this empty: add translations to every locale instead. The test fails
+// if a listed key is fixed but still listed here.
+const KNOWN_MISSING = new Set<string>([]);
 
 /** True when the t() call continues with fallback text or a defaultValue. */
 function hasFallback(rest: string): boolean {
