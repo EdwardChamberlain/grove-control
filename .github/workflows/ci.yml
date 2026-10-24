@@ -109,12 +109,17 @@ jobs:
             --tb=short \
             --timeout=60 --timeout-method=thread \
             -n auto \
-            --splits 4 --group ${{ matrix.shard }}
+            --splits 4 --group ${{ matrix.shard }} \
+            --splitting-algorithm least_duration
 
-  backend-coverage:
-    name: Backend Coverage
+  backend-coverage-shards:
+    name: Backend Coverage (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     needs: backend-lint
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
 
@@ -137,20 +142,71 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Enforce backend coverage
-        # Greenlet-aware tracing is slower than the default tracer; the full
-        # run already took ~14 minutes before it.
+      - name: Collect backend coverage
+        # Greenlet-aware tracing is slower than the default tracer, so the
+        # suite is sharded. The floor is enforced on the combined data in
+        # the Backend Coverage job below.
         timeout-minutes: 25
         working-directory: backend
+        env:
+          COVERAGE_FILE: coverage-shard-${{ matrix.shard }}.dat
         run: |
           python -m pytest tests/ \
             --ignore=tests/unit/services/test_bambu_ftp.py \
             --tb=short \
             --timeout=60 --timeout-method=thread \
             -n auto \
+            --splits 4 --group ${{ matrix.shard }} \
+            --splitting-algorithm least_duration \
             --cov=app \
-            --cov-report=term-missing:skip-covered \
-            --cov-fail-under=69
+            --cov-report=
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: backend/coverage-shard-${{ matrix.shard }}.dat
+          retention-days: 1
+
+  backend-coverage:
+    name: Backend Coverage
+    runs-on: ubuntu-latest
+    needs: backend-coverage-shards
+    # Run even when a shard failed so this required check fails instead of
+    # being skipped (a skipped required check counts as passing).
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Fail if any coverage shard failed
+        if: ${{ needs.backend-coverage-shards.result != 'success' }}
+        run: |
+          echo "Coverage shards: ${{ needs.backend-coverage-shards.result }}"
+          exit 1
+
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install coverage
+        run: pip install coverage greenlet
+
+      - name: Download coverage data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-*
+          path: backend
+          merge-multiple: true
+
+      - name: Combine and enforce backend coverage
+        working-directory: backend
+        run: |
+          coverage combine coverage-shard-*.dat
+          coverage report \
+            --skip-covered \
+            --show-missing \
+            --fail-under=69
 
   frontend-lint:
     name: Frontend Lint

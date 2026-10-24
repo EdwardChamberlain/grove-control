@@ -55,8 +55,12 @@ cd backend
 ../venv/bin/python -m pytest tests/ -n auto                              # everything (a few minutes)
 ```
 
-- `tests/unit/services/test_bambu_ftp.py` is slow (~60s); CI's coverage job
-  skips it. Leave it out of quick runs with `--ignore`.
+- `tests/unit/services/test_bambu_ftp.py` is slow (~60s); CI's coverage shards
+  skip it. Leave it out of quick runs with `--ignore`.
+- CI shards the suite with `pytest-split` using `backend/.test_durations`.
+  Refresh it occasionally so shards stay balanced (new tests are fine without
+  it, they just get an average duration):
+  `cd backend && ../venv/bin/python -m pytest tests/ -n auto --store-durations`
 - Lint and format: `ruff check backend/ && ruff format --check backend/`
   (from the repo root).
 
@@ -138,8 +142,9 @@ Security Audit.
 
 Coverage floors:
 
-- Backend: `--cov-fail-under` in the Backend Coverage job of
-  `.github/workflows/ci.yml` (mirrored in `test_backend.sh`).
+- Backend: `--fail-under` in the Backend Coverage job of
+  `.github/workflows/ci.yml` (mirrored in `test_backend.sh`). Coverage is
+  collected in 4 parallel shards and combined in that job.
 - Frontend: `coverage.thresholds` in `frontend/vitest.config.ts`.
 
 When your change raises coverage meaningfully, raise the floors in the same PR.
