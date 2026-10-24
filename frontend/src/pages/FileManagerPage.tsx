@@ -1360,24 +1360,6 @@ export function FileManagerPage() {
     return result;
   }, [files, searchQuery, filterType, filterUsername, sortField, sortDirection]);
 
-  // Once the deep-linked file is in the visible list, bring it into view and
-  // highlight it for a few seconds. Handled once per file ID.
-  const deepLinkHandledRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (!deepLinkFile || deepLinkHandledRef.current === deepLinkFile.id) return;
-    if (selectedFolderId !== deepLinkFile.folder_id) return;
-    if (!filteredAndSortedFiles.some((f) => f.id === deepLinkFile.id)) return;
-    deepLinkHandledRef.current = deepLinkFile.id;
-    setHighlightedFileId(deepLinkFile.id);
-    document.querySelector(`[data-file-id="${deepLinkFile.id}"]`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-  }, [deepLinkFile, selectedFolderId, filteredAndSortedFiles]);
-  // Separate from the effect above so a list refetch mid-highlight can't cancel the timer.
-  useEffect(() => {
-    if (highlightedFileId === null) return;
-    const timer = setTimeout(() => setHighlightedFileId(null), 3000);
-    return () => clearTimeout(timer);
-  }, [highlightedFileId]);
-
   // Check if disk space is low
   const isDiskSpaceLow = useMemo(() => {
     if (!stats || !settings) return false;
@@ -1701,6 +1683,26 @@ export function FileManagerPage() {
   };
 
   const isLoading = foldersLoading || filesLoading;
+
+  // Once the deep-linked file is actually on screen, bring it into view and
+  // highlight it for a few seconds. Handled once per file ID. Waits for the
+  // whole page (folder tree included) because the list isn't rendered until
+  // then, and scrolling to a row that doesn't exist yet silently does nothing.
+  const deepLinkHandledRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (isLoading || !deepLinkFile || deepLinkHandledRef.current === deepLinkFile.id) return;
+    if (selectedFolderId !== deepLinkFile.folder_id) return;
+    if (!filteredAndSortedFiles.some((f) => f.id === deepLinkFile.id)) return;
+    deepLinkHandledRef.current = deepLinkFile.id;
+    setHighlightedFileId(deepLinkFile.id);
+    document.querySelector(`[data-file-id="${deepLinkFile.id}"]`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [isLoading, deepLinkFile, selectedFolderId, filteredAndSortedFiles]);
+  // Separate from the effect above so a list refetch mid-highlight can't cancel the timer.
+  useEffect(() => {
+    if (highlightedFileId === null) return;
+    const timer = setTimeout(() => setHighlightedFileId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [highlightedFileId]);
 
   // Find the selected folder in the tree to check external status
   const selectedFolder = useMemo(() => {

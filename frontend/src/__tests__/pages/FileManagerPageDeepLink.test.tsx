@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { FileManagerPage } from '../../pages/FileManagerPage';
@@ -101,6 +101,22 @@ describe('FileManagerPage — ?file= deep link', () => {
     expect(requestedFolderIds).toContain('2');
     expect(row(6)?.getAttribute('data-highlighted')).toBeNull();
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' });
+  });
+
+  it('still scrolls to and highlights the file when the folder tree loads after the file list', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    server.use(
+      http.get('/api/v1/library/folders', async () => {
+        await delay(400);
+        return HttpResponse.json([folder(1, 'Parts', { children: [folder(2, 'Brackets', { parent_id: 1 })] })]);
+      }),
+    );
+    visit('/files?file=5');
+    render(<FileManagerPage />);
+
+    await waitFor(() => expect(row(5)?.getAttribute('data-highlighted')).toBe('true'));
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 
   it('highlights a file in the root without needing a folder', async () => {
