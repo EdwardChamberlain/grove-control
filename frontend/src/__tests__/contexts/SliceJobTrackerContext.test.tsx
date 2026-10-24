@@ -39,10 +39,20 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function TrackTrigger({ id, name }: { id: number; name: string }) {
+function TrackTrigger({
+  id,
+  name,
+  kind = 'libraryFile',
+  folderId,
+}: {
+  id: number;
+  name: string;
+  kind?: 'libraryFile' | 'archive';
+  folderId?: number | null;
+}) {
   const { trackJob } = useSliceJobTracker();
   return (
-    <button onClick={() => trackJob(id, 'libraryFile', name)}>
+    <button onClick={() => trackJob(id, kind, name, folderId)}>
       track-{id}
     </button>
   );
@@ -199,6 +209,74 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
     expect(screen.queryByText(/Slicing Done\.stl —/)).toBeNull();
     expect(screen.queryByText(/Queued: Done\.stl/)).toBeNull();
     expect(screen.getByText(/Sliced Done\.stl/)).toBeDefined();
+  });
+
+  it('links an archive slice completion to Files', async () => {
+    mockApi.getSliceJob.mockResolvedValue({
+      job_id: 8,
+      status: 'completed',
+      kind: 'archive',
+      source_id: 7,
+      source_name: 'Benchy.3mf',
+      created_at: new Date().toISOString(),
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      result: { library_file_id: 55, name: 'Benchy.gcode.3mf' },
+    });
+
+    render(
+      <Wrapper>
+        <TrackTrigger id={8} name="Benchy.3mf" kind="archive" />
+      </Wrapper>,
+    );
+
+    act(() => {
+      screen.getByText('track-8').click();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/Sliced Benchy\.3mf/)).toBeDefined();
+    const link = screen.getByRole('link', { name: 'View in Files' });
+    expect(link.getAttribute('href')).toBe('/files');
+  });
+
+  it('links an archive slice saved into a folder to that folder', async () => {
+    mockApi.getSliceJob.mockResolvedValue({
+      job_id: 9,
+      status: 'completed',
+      kind: 'archive',
+      source_id: 7,
+      source_name: 'Benchy.3mf',
+      created_at: new Date().toISOString(),
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      result: { library_file_id: 56, name: 'Benchy.gcode.3mf' },
+    });
+
+    render(
+      <Wrapper>
+        <TrackTrigger id={9} name="Benchy.3mf" kind="archive" folderId={12} />
+      </Wrapper>,
+    );
+
+    act(() => {
+      screen.getByText('track-9').click();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('link', { name: 'View in Files' }).getAttribute('href')).toBe('/files?folder=12');
   });
 
   it('replaces the persistent toast with a transient error toast on failure', async () => {

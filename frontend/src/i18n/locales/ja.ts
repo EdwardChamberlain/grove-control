@@ -3871,6 +3871,9 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'プレート {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}}をスライス済み',
+    viewInFiles: 'ファイルで表示',
+    saveTo: '保存先',
+    selectFolder: '選択',
     failedTitle: 'スライスに失敗しました',
     failedToast: '{{name}}のスライスに失敗: {{detail}}',
     tier: {

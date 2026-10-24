@@ -55,6 +55,13 @@ class SliceRequest(BaseModel):
         description="DEPRECATED: prefer filament_preset. LocalPreset id with preset_type='filament'.",
     )
 
+    # Destination folder in Files. Only the Archive slice route reads it: a
+    # file sliced from Files stays in its source's folder. None = Files root.
+    folder_id: int | None = Field(
+        default=None,
+        description="Files folder to save the output in (Archive slices only). Omit for the Files root.",
+    )
+
     # Source-aware fields — set by the new SliceModal.
     printer_preset: PresetRef | None = None
     process_preset: PresetRef | None = None
@@ -165,24 +172,11 @@ class SliceRequest(BaseModel):
 
 
 class SliceResponse(BaseModel):
-    """Response from `POST /library/files/{file_id}/slice`. The result lands
-    in the user's library as a new ``LibraryFile`` (in the same folder as
-    the source)."""
+    """Result of a slice job. Lands in Files as a new ``LibraryFile``: in the
+    source file's folder for `POST /library/files/{file_id}/slice`, in the
+    root for `POST /archives/{archive_id}/slice`."""
 
     library_file_id: int
-    name: str
-    print_time_seconds: int
-    filament_used_g: float
-    filament_used_mm: float
-    used_embedded_settings: bool = False
-
-
-class SliceArchiveResponse(BaseModel):
-    """Response from `POST /archives/{archive_id}/slice`. The result lands
-    in the user's archives as a new ``PrintArchive`` row, inheriting
-    printer / project metadata from the source archive."""
-
-    archive_id: int
     name: str
     print_time_seconds: int
     filament_used_g: float

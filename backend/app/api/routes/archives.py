@@ -4042,12 +4042,15 @@ async def slice_archive(
 ):
     """Enqueue a slice job for an archive's source. Returns 202 + job_id;
     the slice runs in the background, the caller polls `GET /slice-jobs/{id}`.
+    The output is saved to Files (``folder_id``, default the root) as a new
+    ``LibraryFile``; no
+    Archive row is created because nothing has been printed.
 
     Source preference: ``source_3mf_path`` (the un-sliced project file the
     user originally sent to slice) → ``file_path`` (the sliced 3MF/gcode that
     actually printed).
     """
-    from backend.app.api.routes.library import guard_nozzle_class_reslice, slice_and_persist_as_archive
+    from backend.app.api.routes.library import guard_nozzle_class_reslice, slice_and_persist
     from backend.app.core.database import async_session
     from backend.app.services.slice_dispatch import (
         http_exception_to_job_error,
@@ -4090,8 +4093,8 @@ async def slice_archive(
         )
 
     # Match the library route: derive the sliced output's filename from
-    # `print_name` when set, so the new archive row's display name lines
-    # up with the source's display.
+    # `print_name` when set, so the new file's name lines up with the
+    # source's display.
     src_ext = Path(raw_filename).suffix.lower() or ".3mf"
     src_filename = (
         f"{archive.print_name.strip()}{src_ext}" if archive.print_name and archive.print_name.strip() else raw_filename
@@ -4101,6 +4104,16 @@ async def slice_archive(
     archive_id_local = archive.id
     user_id = (current_user or owner_user).id if (current_user or owner_user) else None
 
+    # Fail fast on a bad destination rather than after a long slice.
+    if request.folder_id is not None:
+        from backend.app.models.library import LibraryFolder
+
+        folder = await db.get(LibraryFolder, request.folder_id)
+        if folder is None:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if folder.is_external and folder.external_readonly:
+            raise HTTPException(status_code=403, detail="Cannot save to a read-only external folder")
+
     # Block a cross-nozzle-class re-slice (single-nozzle <-> H2D) up front —
     # BambuStudio's multi-extruder validator would otherwise reject it with a
     # cryptic error. No-op for same-class or un-sliced sources.
@@ -4108,19 +4121,14 @@ async def slice_archive(
 
     async def _run(job_id: int):
         async with async_session() as task_db:
-            # Re-fetch the source archive on the background-task session.
-            src_archive = await task_db.get(PrintArchive, archive_id_local)
-            if src_archive is None:
-                raise http_exception_to_job_error(
-                    HTTPException(status_code=404, detail="Archive disappeared during slice")
-                )
             try:
-                response = await slice_and_persist_as_archive(
+                response = await slice_and_persist(
                     task_db,
                     model_bytes=model_bytes,
                     model_filename=src_filename,
+                    folder_id=request.folder_id,
+                    extra_metadata={"sliced_from_archive_id": archive_id_local},
                     request=request,
-                    source_archive=src_archive,
                     current_user_id=user_id,
                     job_id=job_id,
                 )
