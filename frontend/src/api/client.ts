@@ -2243,8 +2243,6 @@ export interface PrintQueueItemCreate {
   quantity?: number;
   // Project to associate the resulting archive with
   project_id?: number;
-  // Delete transient uploaded library file after scheduler creates the archive
-  cleanup_library_after_dispatch?: boolean;
   // Cross-model alternatives (#671): several sliced files, one job, whichever
   // printer frees up first. Mutually exclusive with printer_id (a named printer
   // defeats the point) and with archive_id/library_file_id (these ARE the files).
@@ -6401,13 +6399,16 @@ export const api = {
   uploadLibraryFile: async (
     file: File,
     folderId?: number | null,
-    generateStlThumbnails: boolean = true
+    generateStlThumbnails: boolean = true,
+    /** Direct uploads made only to queue a job land in Temporary Files (#237). */
+    temporary: boolean = false
   ): Promise<LibraryFileUploadResponse> => {
     const formData = new FormData();
     formData.append('file', file);
     const params = new URLSearchParams();
     if (folderId) params.set('folder_id', String(folderId));
     params.set('generate_stl_thumbnails', String(generateStlThumbnails));
+    if (temporary) params.set('temporary', 'true');
     const headers: Record<string, string> = {};
     if (authToken) {
       headers['Authorization'] = `Bearer ${authToken}`;
@@ -6477,6 +6478,13 @@ export const api = {
   hardDeleteLibraryTrash: (fileId: number) =>
     request<{ status: string }>(`/library/trash/${fileId}`, { method: 'DELETE' }),
   emptyLibraryTrash: () => request<{ deleted: number }>('/library/trash', { method: 'DELETE' }),
+  getTemporaryFilesSettings: () =>
+    request<{ retention_days: number }>('/library/temporary-files/settings'),
+  updateTemporaryFilesSettings: (body: { retention_days: number }) =>
+    request<{ retention_days: number }>('/library/temporary-files/settings', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   getLibraryTrashSettings: () =>
     request<LibraryTrashSettings>('/library/trash/settings'),
   updateLibraryTrashSettings: (body: LibraryTrashSettings) =>
@@ -6881,6 +6889,11 @@ export interface LibraryFolderTree {
   is_external: boolean;
   external_path: string | null;
   external_readonly: boolean;
+  /** Grove-managed folder (#237): no uploads, renames, moves or deletes. */
+  is_system?: boolean;
+  system_key?: string | null;
+  /** Temporary Files only: days an unused upload is kept. */
+  retention_days?: number | null;
   file_count: number;
   // max(folder.updated_at, max(immediate-child file.updated_at)). Used by
   // the File Manager folder tree's "sort by recent activity" mode (#1770).
@@ -6900,6 +6913,8 @@ export interface LibraryFolder {
   external_path: string | null;
   external_readonly: boolean;
   external_show_hidden: boolean;
+  is_system?: boolean;
+  system_key?: string | null;
   file_count: number;
   latest_activity_at: string | null;
   created_at: string;

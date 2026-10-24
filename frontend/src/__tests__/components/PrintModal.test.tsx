@@ -2717,11 +2717,9 @@ describe('PrintModal', () => {
     });
   });
 
-  describe('cleanup_library_after_dispatch forwarding (#730)', () => {
-    // The Printers-page Direct-Print flow passes cleanupLibraryAfterDispatch so the
-    // transient LibraryFile created by FileUploadModal is deleted once the archive
-    // owns its own copy. File Manager / Project Detail flows leave the prop unset so
-    // their deliberately-added library entries survive the print.
+  describe('cleanup_library_after_dispatch is no longer sent (#237)', () => {
+    // Direct uploads now land in Temporary Files and the scheduler removes them by
+    // location, so the modal never asks for a File to be deleted.
     beforeEach(() => {
       server.use(
         http.get('/api/v1/library/files/:id', () => {
@@ -2750,41 +2748,7 @@ describe('PrintModal', () => {
       );
     });
 
-    it('forwards cleanup_library_after_dispatch=true when the Direct-Print prop is set', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
-      server.use(
-        http.post('/api/v1/queue/', async ({ request }) => {
-          capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
-        })
-      );
-      const user = userEvent.setup();
-
-      render(
-        <PrintModal
-          mode="create"
-          libraryFileId={5}
-          archiveName="Benchy"
-          cleanupLibraryAfterDispatch
-          initialSelectedPrinterIds={[1]}
-          onClose={mockOnClose}
-          onSuccess={mockOnSuccess}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByRole('button', { name: /^print$/i }));
-
-      await waitFor(() => {
-        expect(capturedBody).not.toBeNull();
-        expect(capturedBody?.cleanup_library_after_dispatch).toBe(true);
-      });
-    });
-
-    it('defaults to omitting cleanup_library_after_dispatch (File Manager / Project flows survive)', async () => {
+    it('omits cleanup_library_after_dispatch from queue requests', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -2814,7 +2778,6 @@ describe('PrintModal', () => {
       await waitFor(() => {
         expect(capturedBody).not.toBeNull();
       });
-      // Either omitted entirely or explicitly undefined — both interpret as "keep file"
       expect(capturedBody?.cleanup_library_after_dispatch).toBeUndefined();
     });
   });

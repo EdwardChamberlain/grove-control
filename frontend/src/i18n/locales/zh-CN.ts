@@ -737,7 +737,7 @@ export default {
     developerModeWarning: '以下打印机未启用开发者局域网模式：{{names}}。某些功能可能无法使用。',
     howToEnable: '如何启用',
     incompatibleFile: '此文件是为 {{slicedFor}} 切片的，但该打印机是 {{printerModel}}',
-    directUploadLibraryNote: '上传的文件会先保存到文件管理器，再加入队列。',
+    directUploadLibraryNote: '上传的文件会保存在临时文件中，直到发送到打印机。',
     dropNotPrintable: '只能打印 .gcode 和 .gcode.3mf 文件',
     dropToPrint: '拖放以打印',
     cannotPrint: '打印机忙碌',
@@ -3402,6 +3402,8 @@ export default {
     size: '大小',
     free: '剩余',
     allFiles: '所有文件',
+    temporaryFiles: '临时文件',
+    temporaryFilesDescription: '此文件夹由 Grove 管理。从打印机卡片或“队列 → 添加任务”上传的文件会保留在这里，直到发送到打印机；如未使用，则保留 {{days}} 天。将文件移出即可保留。',
     allExternal: '外部',
     externalIsEmpty: '没有外部文件',
     externalEmptyDescription: '关联的外部文件夹中的文件将在此显示。',
@@ -4348,7 +4350,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: '此文件将用于多次打印，因此会保留在文件管理器中。',
     variants: {
       editNote: '这些备选在任务加入队列时确定。如需更改，请取消后重新加入队列。',
       title: '打印机备选',

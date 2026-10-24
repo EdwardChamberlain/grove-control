@@ -736,7 +736,7 @@ export default {
     developerModeWarning: '開発者LANモードが有効になっていません: {{names}}。一部の機能が動作しない可能性があります。',
     howToEnable: '有効化方法',
     incompatibleFile: 'このファイルは{{slicedFor}}用にスライスされていますが、このプリンターは{{printerModel}}です',
-    directUploadLibraryNote: 'アップロードしたファイルは、キューに追加する前にファイルマネージャーへ保存されます。',
+    directUploadLibraryNote: 'アップロードしたファイルは、プリンターに送信されるまで一時ファイルに保存されます。',
     dropNotPrintable: '.gcodeおよび.gcode.3mfファイルのみ印刷できます',
     dropToPrint: 'ドロップして印刷',
     cannotPrint: 'プリンター使用中',
@@ -3415,6 +3415,8 @@ export default {
     size: 'サイズ',
     free: '空き:',
     allFiles: 'すべてのファイル',
+    temporaryFiles: '一時ファイル',
+    temporaryFilesDescription: 'このフォルダーは Grove が管理します。プリンターカードやキュー → ジョブを追加からアップロードしたファイルは、プリンターに送信されるまで、未使用の場合は {{days}} 日間ここに保存されます。保持するにはファイルを移動してください。',
     allExternal: '外部',
     externalIsEmpty: '外部ファイルはありません',
     externalEmptyDescription: 'リンクされた外部フォルダ内のファイルがここに表示されます。',
@@ -4361,7 +4363,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: '複数回の印刷に使用するため、このファイルはファイルマネージャーに残ります。',
     variants: {
       editNote: 'これらの候補はキュー追加時に決まります。変更するにはキャンセルして追加し直してください。',
       title: 'プリンターの候補',

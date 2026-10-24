@@ -22,13 +22,14 @@ export function DirectPrintUploadModal({ onClose, onFileUploaded, beforeDropZone
       onUploadComplete={() => {}}
       onFileUploaded={onFileUploaded}
       beforeDropZone={beforeDropZone}
+      temporary
       autoUpload
       singleFile
       accept=".gcode,.3mf"
       dropZoneHint={(
         <>
           <span>{printableFileHint}</span>
-          <span className="mt-1 block">{t('printers.directUploadLibraryNote', 'The uploaded file is added to File Manager before you queue it.')}</span>
+          <span className="mt-1 block">{t('printers.directUploadLibraryNote', 'The uploaded file is kept in Temporary Files until it is sent to a printer.')}</span>
         </>
       )}
       validateFile={(file) => (isDirectPrintFile(file) ? undefined : printableFileHint)}

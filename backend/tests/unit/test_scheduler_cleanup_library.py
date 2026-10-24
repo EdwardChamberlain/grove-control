@@ -1,16 +1,18 @@
 from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
 import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
-from backend.app.models.library import LibraryFile
+from backend.app.models.library import LibraryFile, LibraryFolder
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.print_scheduler import PrintScheduler
@@ -25,7 +27,16 @@ async def queue_factory(tmp_path):
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     case_counter = 0
 
-    async def make_case(*, cleanup=True, is_external=False, thumbnail_path=None, wait_for_drying_complete=False):
+    async def make_case(
+        *,
+        cleanup=True,
+        is_external=False,
+        thumbnail_path=None,
+        wait_for_drying_complete=False,
+        in_temporary=False,
+        other_item_status=None,
+        queued_minutes_ago=10,
+    ):
         nonlocal case_counter
         case_counter += 1
 
@@ -72,6 +83,31 @@ async def queue_factory(tmp_path):
             db.add_all([printer, library_file])
             await db.flush()
 
+            # Past the dispatch grace by default so removal is decided by
+            # live references alone (#237).
+            queued_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=queued_minutes_ago)
+
+            if in_temporary:
+                from backend.app.services.temporary_files import TEMPORARY_FOLDER_KEY
+
+                folder = await db.scalar(select(LibraryFolder).where(LibraryFolder.system_key == TEMPORARY_FOLDER_KEY))
+                if folder is None:
+                    folder = LibraryFolder(name="Temporary Files", system_key=TEMPORARY_FOLDER_KEY)
+                    db.add(folder)
+                    await db.flush()
+                library_file.folder_id = folder.id
+
+            if other_item_status is not None:
+                # A second job sharing the same source (multi-printer, plates, quantity).
+                db.add(
+                    PrintQueueItem(
+                        printer_id=printer.id,
+                        library_file_id=library_file.id,
+                        status=other_item_status,
+                        created_at=queued_at,
+                    )
+                )
+
             item = PrintQueueItem(
                 printer_id=printer.id,
                 library_file_id=library_file.id,
@@ -85,6 +121,7 @@ async def queue_factory(tmp_path):
                 timelapse=False,
                 use_ams=True,
                 nozzle_offset_cali="on",
+                created_at=queued_at,
             )
             db.add(item)
             await db.commit()
@@ -383,3 +420,117 @@ async def test_oserror_during_unlink_logs_orphan_path_and_does_not_crash_dispatc
     assert "TRANSIENT_LIBRARY_FILE_ORPHAN" in caplog.text
     assert str(ctx.source_path) in caplog.text
     assert "permission denied" in caplog.text
+
+
+# ---- Temporary Files (#237) ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_temporary_file_is_removed_after_dispatch(queue_factory):
+    ctx = await queue_factory(cleanup=False, in_temporary=True)
+
+    await _dispatch_library_item(ctx)
+
+    item, library_file, archive = await _queue_snapshot(ctx)
+    assert item.status == "dispatching"
+    assert item.library_file_id is None
+    assert item.archive_id == archive.id
+    assert library_file is None
+    assert not ctx.source_path.exists()
+    assert ctx.upload.await_args.args[2] == ctx.archive_path
+
+
+@pytest.mark.asyncio
+async def test_file_moved_out_of_temporary_survives_dispatch(queue_factory):
+    """A File the user kept is an ordinary File, even for a legacy direct-upload row."""
+    ctx = await queue_factory(cleanup=True, in_temporary=True)
+    async with ctx.session_maker() as db:
+        kept = LibraryFolder(name="Kept")
+        db.add(kept)
+        await db.flush()
+        library_file = await db.get(LibraryFile, ctx.library_file_id)
+        library_file.folder_id = kept.id
+        await db.commit()
+
+    await _dispatch_library_item(ctx)
+
+    item, library_file, archive = await _queue_snapshot(ctx)
+    assert item.status == "dispatching"
+    assert item.library_file_id == ctx.library_file_id
+    assert library_file is not None
+    assert ctx.source_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_ordinary_library_file_survives_dispatch(queue_factory):
+    ctx = await queue_factory(cleanup=False)
+
+    await _dispatch_library_item(ctx)
+
+    _item, library_file, _archive = await _queue_snapshot(ctx)
+    assert library_file is not None
+    assert ctx.source_path.exists()
+
+
+@pytest.mark.parametrize("other_status", ["pending", "skipped", "preheating"])
+@pytest.mark.asyncio
+async def test_shared_temporary_source_is_kept_while_another_job_needs_it(queue_factory, other_status):
+    ctx = await queue_factory(cleanup=False, in_temporary=True, other_item_status=other_status)
+
+    await _dispatch_library_item(ctx)
+
+    item, library_file, archive = await _queue_snapshot(ctx)
+    assert item.status == "dispatching"
+    assert item.archive_id == archive.id
+    assert library_file is not None
+    assert ctx.source_path.exists()
+    # Uploads still come from Archive's copy so the last job can remove the File.
+    assert ctx.upload.await_args.args[2] == ctx.archive_path
+
+
+@pytest.mark.parametrize("other_status", ["completed", "cancelled", "failed", "printing"])
+@pytest.mark.asyncio
+async def test_shared_temporary_source_is_removed_when_other_jobs_are_done(queue_factory, other_status):
+    ctx = await queue_factory(cleanup=False, in_temporary=True, other_item_status=other_status)
+
+    await _dispatch_library_item(ctx)
+
+    _item, library_file, _archive = await _queue_snapshot(ctx)
+    assert library_file is None
+    assert not ctx.source_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_legacy_direct_upload_keeps_shared_source(queue_factory):
+    ctx = await queue_factory(cleanup=True, other_item_status="pending")
+
+    await _dispatch_library_item(ctx)
+
+    _item, library_file, _archive = await _queue_snapshot(ctx)
+    assert library_file is not None
+    assert ctx.source_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_recently_queued_temporary_file_waits_for_the_sweep(queue_factory):
+    """The dialog queues one request per printer/plate, so a just-queued File
+    may still be gaining jobs when the first one dispatches (#237)."""
+    from backend.app.services.temporary_files import sweep_temporary_files
+
+    ctx = await queue_factory(cleanup=False, in_temporary=True, queued_minutes_ago=0)
+
+    await _dispatch_library_item(ctx)
+
+    item, library_file, archive = await _queue_snapshot(ctx)
+    assert item.archive_id == archive.id
+    assert library_file is not None
+    assert ctx.source_path.exists()
+    assert ctx.upload.await_args.args[2] == ctx.archive_path
+
+    async with ctx.session_maker() as db:
+        later = datetime.now(timezone.utc) + timedelta(minutes=5)
+        assert await sweep_temporary_files(db, now=later) == 1
+
+    _item, library_file, _archive = await _queue_snapshot(ctx)
+    assert library_file is None
+    assert not ctx.source_path.exists()

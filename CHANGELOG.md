@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add a Grove-managed Temporary Files folder (#237). Direct uploads from a
+  printer card and Queue → Add Job land there instead of the root of Files,
+  and are removed once sent to a printer or after 7 days unused
+  (configurable). Move a file out to keep it. On first start, root-level Files
+  whose only queue history is cancelled or failed direct-upload jobs are
+  moved in. API: `POST /library/files` gains `temporary=true`, and
+  `cleanup_library_after_dispatch` is no longer accepted on `POST /queue/`.
+- Files: each file's menu now offers Move.
 - Remove the retired `POST /archives/{id}/reprint` endpoint, which only returned
   `410 Gone`. Reprint an archive by creating a queue item with `POST /queue/`;
   nothing in the frontend called the old route (#193).

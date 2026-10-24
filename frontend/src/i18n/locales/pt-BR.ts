@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'O modo desenvolvedor LAN não está ativado em: {{names}}. Alguns recursos podem não funcionar.',
     howToEnable: 'Como ativar',
     incompatibleFile: 'Este arquivo foi fatiado para {{slicedFor}}, mas esta impressora é uma {{printerModel}}',
-    directUploadLibraryNote: 'O arquivo enviado é salvo no Gerenciador de Arquivos antes de entrar na fila.',
+    directUploadLibraryNote: 'O arquivo enviado fica em Arquivos temporários até ser enviado para uma impressora.',
     dropNotPrintable: 'Apenas arquivos .gcode e .gcode.3mf podem ser impressos',
     dropToPrint: 'Solte para imprimir',
     cannotPrint: 'Impressora ocupada',
@@ -3403,6 +3403,8 @@ export default {
     size: 'Tamanho',
     free: 'Livre',
     allFiles: 'Todos os arquivos',
+    temporaryFiles: 'Arquivos temporários',
+    temporaryFilesDescription: 'O Grove gerencia esta pasta. Arquivos enviados pelo cartão da impressora ou por Fila → Adicionar trabalho ficam aqui até serem enviados para uma impressora, ou por {{days}} dias se não forem usados. Mova um arquivo para fora para mantê-lo.',
     allExternal: 'Externos',
     externalIsEmpty: 'Nenhum arquivo externo',
     externalEmptyDescription: 'Os arquivos das suas pastas externas vinculadas aparecerão aqui.',
@@ -4349,7 +4351,6 @@ export default {
 
   // Print modal
   printModal: {
-    directUploadRetained: 'O arquivo ficará no Gerenciador de Arquivos porque será usado em várias impressões.',
     variants: {
       editNote: 'Estas alternativas foram definidas ao enfileirar o trabalho. Cancele e enfileire de novo para alterá-las.',
       title: 'Alternativas de impressora',

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { FileManagerPage } from '../../pages/FileManagerPage';
@@ -1047,6 +1047,123 @@ describe('FileManagerPage', () => {
       await waitFor(() => {
         expect(scopes).toContain('external');
       });
+    });
+  });
+
+  describe('single-file Move from the file menu', () => {
+    it('moves just that file to the chosen folder', async () => {
+      let movedBody: unknown = null;
+      server.use(
+        http.post('/api/v1/library/files/move', async ({ request }) => {
+          movedBody = await request.json();
+          return HttpResponse.json({ status: 'success', moved: 1 });
+        }),
+      );
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      const card = (await screen.findByText('Benchy')).closest('div[class*="cursor-pointer"]') as HTMLElement;
+      await user.click(within(card).getByRole('button', { name: 'Actions' }));
+      await user.click(within(card).getByRole('button', { name: /^move$/i }));
+
+      const dialog = (await screen.findByText('Move 1 File(s)')).closest('div.fixed') as HTMLElement;
+      await user.click(within(dialog).getByRole('button', { name: /Functional Parts/ }));
+      await user.click(within(dialog).getByRole('button', { name: /^move$/i }));
+
+      await waitFor(() => expect(movedBody).toEqual({ file_ids: [1], folder_id: 1 }));
+    });
+  });
+
+  describe('Temporary Files system folder (#237)', () => {
+    const temporaryFolder = {
+      id: 50,
+      name: 'Temporary Files',
+      parent_id: null,
+      file_count: 2,
+      latest_activity_at: null,
+      project_id: null,
+      archive_id: null,
+      project_name: null,
+      archive_name: null,
+      is_external: false,
+      external_readonly: false,
+      external_path: null,
+      is_system: true,
+      system_key: 'temporary_files',
+      retention_days: 7,
+      children: [],
+    };
+
+    beforeEach(() => {
+      server.use(
+        http.get('/api/v1/library/folders', () => HttpResponse.json([temporaryFolder, ...mockFolders])),
+      );
+    });
+
+    it('pins Temporary Files above the folder tree without folder actions', async () => {
+      render(<FileManagerPage />);
+
+      const pinned = await screen.findByTestId('temporary-files-folder');
+      expect(pinned).toHaveTextContent('Temporary Files');
+      expect(pinned).toHaveTextContent('2');
+      expect(pinned.querySelector('button')).toBeNull();
+      // Pinned before the first user folder in document order.
+      const firstUserFolder = screen.getByText('Functional Parts');
+      expect(pinned.compareDocumentPosition(firstUserFolder) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('explains the folder and blocks uploads when it is selected', async () => {
+      const requestedFolders: (string | null)[] = [];
+      server.use(
+        http.get('/api/v1/library/files', ({ request }) => {
+          requestedFolders.push(new URL(request.url).searchParams.get('folder_id'));
+          return HttpResponse.json([]);
+        }),
+      );
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      await user.click(await screen.findByTestId('temporary-files-folder'));
+
+      const banner = await screen.findByTestId('temporary-files-banner');
+      expect(banner).toHaveTextContent('Grove manages this folder');
+      expect(banner).toHaveTextContent('7 days');
+      await waitFor(() => expect(requestedFolders).toContain('50'));
+      expect(screen.getByRole('button', { name: /^upload$/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /new folder/i })).toBeDisabled();
+    });
+
+    it('lets admins change how long unused uploads are kept', async () => {
+      let savedBody: unknown = null;
+      server.use(
+        http.get('/api/v1/library/files', () => HttpResponse.json([])),
+        http.put('/api/v1/library/temporary-files/settings', async ({ request }) => {
+          savedBody = await request.json();
+          return HttpResponse.json({ retention_days: 3 });
+        }),
+      );
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      await user.click(await screen.findByTestId('temporary-files-folder'));
+      const input = await screen.findByLabelText('Auto-delete after');
+      expect(input).toHaveValue(7);
+
+      await user.clear(input);
+      await user.type(input, '3');
+      await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(savedBody).toEqual({ retention_days: 3 }));
+    });
+
+    it('shows no banner for ordinary folders', async () => {
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      await user.click(await screen.findByText('Functional Parts'));
+
+      expect(screen.queryByTestId('temporary-files-banner')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^upload$/i })).not.toBeDisabled();
     });
   });
 

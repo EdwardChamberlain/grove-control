@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Select, String, Text, func, select
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, Select, String, Text, func, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -12,6 +12,8 @@ class LibraryFolder(Base):
     """Folder for organizing library files."""
 
     __tablename__ = "library_folders"
+    # Same name as the #237 migration so existing installs and create_all agree.
+    __table_args__ = (Index("uq_library_folders_system_key", "system_key", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
@@ -23,6 +25,10 @@ class LibraryFolder(Base):
     external_show_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     external_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # Set on folders Grove creates and manages itself (#237). Currently only
+    # "temporary_files". Users cannot upload into, rename, move or delete them.
+    system_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Link to project or archive
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="SET NULL"), nullable=True)
@@ -30,6 +36,10 @@ class LibraryFolder(Base):
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    @property
+    def is_system(self) -> bool:
+        return self.system_key is not None
 
     # Relationships
     parent: Mapped["LibraryFolder | None"] = relationship(

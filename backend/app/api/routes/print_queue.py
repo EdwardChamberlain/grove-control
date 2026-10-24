@@ -900,7 +900,6 @@ async def add_to_queue(
             use_ams=data.use_ams,
             nozzle_offset_cali=data.nozzle_offset_cali,
             gcode_injection=data.gcode_injection,
-            cleanup_library_after_dispatch=data.cleanup_library_after_dispatch,
             project_id=data.project_id,
             position=start_position + i,
             status="pending",

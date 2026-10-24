@@ -10,13 +10,16 @@ describe('DirectPrintUploadModal', () => {
   const onClose = vi.fn();
   const onFileUploaded = vi.fn();
   let uploadRequests = 0;
+  let lastUploadUrl: URL | null = null;
 
   beforeEach(() => {
     vi.clearAllMocks();
     uploadRequests = 0;
+    lastUploadUrl = null;
     server.use(
-      http.post('/api/v1/library/files', () => {
+      http.post('/api/v1/library/files', ({ request }) => {
         uploadRequests += 1;
+        lastUploadUrl = new URL(request.url);
         return HttpResponse.json({
           id: 41,
           filename: 'direct-print.gcode.3mf',
@@ -43,6 +46,27 @@ describe('DirectPrintUploadModal', () => {
     await waitFor(() => expect(uploadRequests).toBe(1));
     expect(onFileUploaded).toHaveBeenCalledWith(expect.objectContaining({ filename: 'direct-print.gcode.3mf' }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('uploads into Temporary Files rather than a user folder (#237)', async () => {
+    const user = userEvent.setup();
+    render(<DirectPrintUploadModal onClose={onClose} onFileUploaded={onFileUploaded} />);
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['gcode'], 'part.gcode', { type: 'application/octet-stream' }));
+
+    await waitFor(() => expect(uploadRequests).toBe(1));
+    expect(lastUploadUrl?.searchParams.get('temporary')).toBe('true');
+    expect(lastUploadUrl?.searchParams.has('folder_id')).toBe(false);
+  });
+
+  it('tells the user the upload is kept in Temporary Files (#237)', () => {
+    render(<DirectPrintUploadModal onClose={onClose} onFileUploaded={onFileUploaded} />);
+
+    expect(
+      screen.getByText('The uploaded file is kept in Temporary Files until it is sent to a printer.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/added to File Manager/)).not.toBeInTheDocument();
   });
 
   it('rejects a plain .3mf after the picker allows the compound .gcode.3mf extension', async () => {

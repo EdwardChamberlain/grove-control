@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'Geliştirici LAN modu şunlarda etkin değil: {{names}}. Bazı özellikler çalışmayabilir.',
     howToEnable: 'Nasıl etkinleştirilir',
     incompatibleFile: 'Bu dosya {{slicedFor}} için dilimlendi, ancak bu yazıcı bir {{printerModel}}',
-    directUploadLibraryNote: 'Yüklenen dosya kuyruğa eklenmeden önce Dosya Yöneticisi’ne kaydedilir.',
+    directUploadLibraryNote: 'Yüklenen dosya bir yazıcıya gönderilene kadar Geçici Dosyalar’da tutulur.',
     dropNotPrintable: 'Yalnızca .gcode ve .gcode.3mf dosyaları yazdırılabilir',
     dropToPrint: 'Yazdırmak için bırakın',
     cannotPrint: 'Yazıcı meşgul',
@@ -3410,6 +3410,8 @@ export default {
     size: 'Boyut',
     free: 'Boş',
     allFiles: 'Tüm Dosyalar',
+    temporaryFiles: 'Geçici Dosyalar',
+    temporaryFilesDescription: 'Bu klasörü Grove yönetir. Yazıcı kartından veya Kuyruk → İş Ekle’den yüklenen dosyalar bir yazıcıya gönderilene kadar, kullanılmazsa {{days}} gün boyunca burada kalır. Saklamak için dosyayı dışarı taşıyın.',
     allExternal: 'Harici',
     externalIsEmpty: 'Harici dosya yok',
     externalEmptyDescription: 'Bağlı harici klasörlerinizdeki dosyalar burada görünecek.',
@@ -4338,7 +4340,6 @@ export default {
 
   // Baskı modali
   printModal: {
-    directUploadRetained: 'Birden fazla baskıda kullanılacağı için bu dosya Dosya Yöneticisi’nde kalır.',
     variants: {
       editNote: 'Bu alternatifler iş kuyruğa alınırken belirlendi. Değiştirmek için iptal edip yeniden kuyruğa alın.',
       title: 'Yazıcı alternatifleri',

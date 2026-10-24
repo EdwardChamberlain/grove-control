@@ -90,8 +90,9 @@ class PrintQueueItem(Base):
     nozzle_mapping: Mapped[str | None] = mapped_column(Text, nullable=True)
     nozzles_info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Printer-card direct uploads create transient library rows. When this is
-    # true, the scheduler deletes the source row/files after archiving a copy.
+    # Legacy (pre-#237) marker for direct-upload rows. New rows never set it:
+    # removal after dispatch is decided by the File being in Temporary Files.
+    # Still honoured for existing rows whose upload sits at the library root.
     cleanup_library_after_dispatch: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Print options. bed_levelling / flow_cali / nozzle_offset_cali are tri-state

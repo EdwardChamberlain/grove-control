@@ -49,6 +49,10 @@ class FolderResponse(BaseModel):
     external_path: str | None = None
     external_readonly: bool = False
     external_show_hidden: bool = False
+    # Grove-managed folder (#237): users cannot upload into, rename, move or
+    # delete it. ``system_key`` names which one ("temporary_files").
+    is_system: bool = False
+    system_key: str | None = None
     file_count: int = 0  # Computed field
     # max(folder.updated_at, max(immediate-child file.updated_at)). Used by the
     # File Manager folder tree's "sort by recent activity" mode (#1770) so that
@@ -61,6 +65,12 @@ class FolderResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TemporaryFilesSettings(BaseModel):
+    """Retention window for unused uploads in Temporary Files (#237)."""
+
+    retention_days: int = Field(..., ge=1, le=365)
 
 
 class FolderReadmeResponse(BaseModel):
@@ -89,6 +99,10 @@ class FolderTreeItem(BaseModel):
     is_external: bool = False
     external_path: str | None = None
     external_readonly: bool = False
+    is_system: bool = False
+    system_key: str | None = None
+    # Temporary Files only: how many days an unused upload is kept (#237).
+    retention_days: int | None = None
     file_count: int = 0
     # See FolderResponse.latest_activity_at — #1770 folder sort source.
     latest_activity_at: datetime | None = None
