@@ -4,74 +4,75 @@ This document provides setup instructions for repository maintainers.
 
 ## Branch Protection Setup
 
-To protect the `main` branch, go to **Settings > Rules > Rulesets > New ruleset > New branch ruleset**.
+Both protected branches use repository rulesets (**Settings > Rules > Rulesets**).
+Each one restricts deletion, blocks force pushes, requires a pull request, and
+requires the status checks listed below. Status checks only appear in the
+picker after CI has run once.
 
-### Step 1: Basic Settings
+### `dev` (Dev Branch Protection)
 
-| Field | Value |
-|-------|-------|
-| Ruleset name | `Protect main` |
-| Enforcement status | `Active` |
+Feature and fix PRs target `dev`. Required status checks:
 
-### Step 2: Bypass List (optional)
+- `Backend Lint`
+- `Backend Tests (shard 1/4)` … `Backend Tests (shard 4/4)`
+- `Backend Coverage`
+- `Frontend Lint`
+- `Frontend Type Check`
+- `Frontend Tests`
+- `Frontend Build`
+- `Frontend Security Audit`
 
-Add yourself to bypass if you want to push directly in emergencies.
-Set "Always" or "Pull requests only" based on preference.
+### `main` (Main Branch Protection)
 
-### Step 3: Target Branches
+`main` only accepts release PRs from `dev`. Required status check:
 
-Click **Add target** > **Include by pattern** and enter: `main`
-
-### Step 4: Branch Rules
-
-Enable these rules:
-
-**Restrict deletions** - Prevents branch deletion
-
-**Require a pull request before merging**
-- Required approvals: `1`
-- [x] Dismiss stale pull request approvals when new commits are pushed
-- [ ] Require review from Code Owners (optional)
-- [x] Require approval of the most recent reviewable push
-
-**Require status checks to pass**
-- [x] Require branches to be up to date before merging
-- Add these status checks (they appear after CI runs once):
-  - `Release PR Route`
-  - `Release Version`
-  - `Backend Lint`
-  - `Backend Tests`
-  - `Frontend Lint`
-  - `Frontend Type Check`
-  - `Frontend Tests`
-  - `Frontend Build`
-  - `Docker Build`
-
-**Block force pushes** - Prevents history rewriting
+- `Release PR Route` (rejects any PR whose head is not `dev`)
 
 ### Optional (stricter)
 
+- [ ] Require approvals
 - [ ] Require conversation resolution before merging
 - [ ] Require signed commits
 - [ ] Require linear history
 
-## CI Workflow
+## CI Workflows
 
-The CI workflow (`.github/workflows/ci.yml`) runs on:
-- All pull requests to `main`
-- All pushes to `main`
+`.github/workflows/ci.yml` runs on pull requests to `dev` and `main`, and on
+pushes to both.
 
-### Jobs
+| Job | Purpose | Required on `dev` |
+|-----|---------|-------------------|
+| `Release Workflow Tests` | Release-script unit tests, workflow YAML parse | No |
+| `Version Consistency` | `scripts/check_version.py` | No |
+| `Backend Lint` | Ruff lint + format check | Yes |
+| `Backend Tests (shard N/4)` | pytest, split across 4 shards | Yes |
+| `Backend Coverage` | Full pytest run with `--cov-fail-under` | Yes |
+| `Frontend Lint` | ESLint | Yes |
+| `Frontend Security Audit` | `npm audit --audit-level=high` | Yes |
+| `Frontend Type Check` | `tsc --noEmit` | Yes |
+| `Frontend Tests` | Vitest with coverage thresholds, i18n parity, Playwright browser tests | Yes |
+| `Frontend Build` | Vite production build | Yes |
+| `Docker Smoke Test` | Builds the image, checks imports, static files and `/health` | No |
 
-| Job | Purpose | Required for PR |
-|-----|---------|-----------------|
-| `backend-lint` | Ruff linting + format check | Yes |
-| `backend-tests` | Unit tests | Yes |
-| `frontend-lint` | ESLint | Yes |
-| `frontend-typecheck` | TypeScript compilation | Yes |
-| `frontend-tests` | Vitest unit tests | Yes |
-| `frontend-build` | Vite production build | Yes |
-| `docker-build` | Docker image builds | Yes |
+Other workflows:
+
+| Workflow | Runs on |
+|---|---|
+| `release-pr-route.yml` (`Release PR Route`, `Release Version`) | PRs to `main` |
+| `codeql.yml` | PRs and pushes to `main`, weekly schedule |
+| `docker-publish-dev.yml` | After CI succeeds on `dev` (publishes `:dev`) |
+| `docker-publish.yml` | After CI succeeds on `main` (publishes `:latest` and `X.Y.Z`) |
+| `create-github-release.yml` | After Docker Publish succeeds (tags and releases) |
+| `readme-screenshots.yml` | Manual dispatch, `dev` only |
+
+### Coverage floors
+
+- Backend: `--cov-fail-under` in the `Backend Coverage` job (mirrored in
+  `test_backend.sh`).
+- Frontend: `coverage.thresholds` in `frontend/vitest.config.ts`.
+
+Keep the floors about one point below measured coverage, and raise them when
+coverage improves.
 
 ### Fixing CI Failures
 
@@ -97,8 +98,14 @@ npx tsc --noEmit
 **Frontend test failures:**
 ```bash
 cd frontend
-npm run test:run
-# Fix failing tests
+npm run test:run       # Vitest + coverage thresholds + i18n parity
+npm run test:browser   # Playwright (run `npm run setup:browser` once)
+```
+
+**Backend test or coverage failures:**
+```bash
+cd backend
+../venv/bin/python -m pytest tests/ -n auto --cov=app --cov-report=term-missing:skip-covered
 ```
 
 ## CODEOWNERS

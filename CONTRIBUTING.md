@@ -338,19 +338,29 @@ The easiest way to run tests is with the provided scripts in the project root:
 **Backend** — tests are in `backend/tests/` with `unit/` and `integration/` subdirectories:
 
 ```bash
-pytest backend/tests/ -v           # All tests
-pytest backend/tests/unit/         # Unit tests only
-pytest backend/tests/ --cov=backend  # With coverage
+cd backend
+pytest tests/ -n auto                                   # All tests (parallel)
+pytest tests/unit/                                      # Unit tests only
+pytest tests/integration/test_print_queue_api.py -k start  # One file / matching tests
+pytest tests/ -n auto --cov=app --cov-report=term-missing:skip-covered  # With coverage, as CI measures it
 ```
 
 **Frontend** — tests use [Vitest](https://vitest.dev/) and are in `frontend/src/__tests__/`:
 
 ```bash
 cd frontend
-npm run test:run       # Single run
+npm run test:run       # Single run with coverage thresholds + i18n parity (what CI runs)
 npm test               # Watch mode
-npm run test:coverage  # With coverage
+npx vitest run src/__tests__/pages/QueuePage.test.tsx  # One file
+npm run test:browser   # Playwright browser tests in frontend/e2e/ (run `npm run setup:browser` once)
 ```
+
+### Coverage
+
+CI fails if coverage drops below the floors set in the `Backend Coverage` job of
+`.github/workflows/ci.yml` and in `coverage.thresholds` in
+`frontend/vitest.config.ts`. New code needs tests to keep coverage above them.
+See [CLAUDE.md](CLAUDE.md) for test-writing conventions and fixtures.
 
 ## README Screenshot Generation
 
@@ -416,12 +426,12 @@ before the next release.
 
 Pull requests trigger automated CI checks via GitHub Actions (`.github/workflows/ci.yml`):
 
-- **Backend**: Ruff lint + format check, unit/integration tests, pip-audit
-- **Frontend**: ESLint, TypeScript type check, Vitest tests, production build
-- **Docker**: Full image build, backend/frontend tests in Docker, integration health checks
-- **Security**: CodeQL analysis, dependency audits
+- **Backend**: Ruff lint + format check, pytest (4 shards), coverage floor
+- **Frontend**: ESLint, TypeScript type check, Vitest with coverage thresholds and i18n parity, Playwright browser tests, `npm audit`, production build
+- **Docker**: Image build, import and static-file checks, `/health` smoke test
+- **Security**: CodeQL runs on PRs to `main` and weekly
 
-All checks must pass before merging. Run `./test_all.sh` locally before pushing to catch issues early.
+Required checks must pass before merging (see `.github/MAINTAINERS.md` for the list). Run `./test_all.sh` locally before pushing to catch issues early.
 
 ## Submitting Changes
 

@@ -251,12 +251,13 @@ if [ "$RUN_INTEGRATION" = true ]; then
         fi
 
         # Test API endpoints
-        API_RESPONSE=$(sudo docker compose -f docker-compose.test.yml exec -T integration curl -s http://localhost:${PORT}/api/v1/settings)
-        if echo "$API_RESPONSE" | grep -q "settings"; then
-            print_success "Settings API endpoint responds"
+        # 200 when auth is off, 401 when it is on; anything else (5xx, no
+        # response) means the API is broken.
+        API_STATUS=$(sudo docker compose -f docker-compose.test.yml exec -T integration curl -s -o /dev/null -w "%{http_code}" http://localhost:${PORT}/api/v1/settings)
+        if [ "$API_STATUS" = "200" ] || [ "$API_STATUS" = "401" ]; then
+            print_success "Settings API endpoint responds (HTTP $API_STATUS)"
         else
-            # Settings might return empty, which is OK
-            print_success "Settings API endpoint accessible"
+            print_failure "Settings API endpoint failed (HTTP $API_STATUS)"
         fi
 
         # Test static files
@@ -267,11 +268,11 @@ if [ "$RUN_INTEGRATION" = true ]; then
             print_failure "Static files not served (HTTP $STATIC_RESPONSE)"
         fi
 
-        # Run pytest integration tests if they exist
-        if sudo docker compose -f docker-compose.test.yml run --rm integration-test-runner 2>/dev/null; then
+        # Run the backend integration suite inside the test image
+        if sudo docker compose -f docker-compose.test.yml run --rm integration-test-runner; then
             print_success "Integration test suite passed"
         else
-            print_info "No Docker-specific integration tests found (this is OK)"
+            print_failure "Integration test suite failed"
         fi
     fi
 

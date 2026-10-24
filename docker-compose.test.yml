@@ -21,7 +21,6 @@ services:
     container_name: grove-control-frontend-test
     volumes:
       - ./frontend/src:/app/frontend/src:ro
-      - ./frontend/tests:/app/frontend/tests:ro
 
   # Integration test - full application
   integration:
