@@ -625,6 +625,7 @@ function PresetDetailModal({
                       onClick={() => setShowDeleteConfirm(true)}
                       disabled={!hasPermission('cloud:auth')}
                       title={!hasPermission('cloud:auth') ? t('profiles.presets.noDeletePermission') : undefined}
+                      aria-label={t('common.delete')}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>

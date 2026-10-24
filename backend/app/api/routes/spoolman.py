@@ -57,7 +57,10 @@ class SkippedSpool(BaseModel):
     """Information about a skipped spool during sync."""
 
     location: str
-    reason: Literal["No RFID tag and no slot assignment"]
+    reason: Literal[
+        "No RFID tag and no slot assignment",
+        "Auto-add disabled; add to inventory manually",
+    ]
     filament_type: str | None = None
     color: str | None = None
 
