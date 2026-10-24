@@ -837,7 +837,16 @@ export default {
       exportDownloaded: 'Exportação baixada',
       exportFailed: 'Falha na exportação',
     },
+    saveToFiles: {
+      title: 'Salvar em Arquivos',
+      confirm: 'Salvar',
+      saved: '{{name}} salvo em Arquivos',
+      savedDuplicate: '{{name}} salvo em Arquivos — já existe um arquivo com o mesmo conteúdo',
+      viewInFiles: 'Ver em Arquivos',
+      failed: 'Falha ao salvar em Arquivos',
+    },
     menu: {
+      saveToFiles: 'Salvar em Arquivos',
       print: 'Imprimir',
       openInBambuStudio: 'Abrir no Slicer',
       slice: 'Fatiar',
@@ -877,6 +886,7 @@ export default {
       delete: 'Excluir',
     },
     permission: {
+      noSaveToFiles: 'Você não tem permissão para enviar para Arquivos',
       noReprint: 'Você não tem permissão para reimprimir este arquivo',
       noAddToQueue: 'Você não tem permissão para adicionar à fila',
       noUpdateArchives: 'Você não tem permissão para atualizar arquivos',
@@ -3849,6 +3859,9 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Bandeja {{plateIndex}} de {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} fatiado',
+    viewInFiles: 'Ver em Arquivos',
+    saveTo: 'Salvar em',
+    selectFolder: 'Selecionar',
     failedTitle: 'Falha ao fatiar',
     failedToast: 'Falha ao fatiar {{name}}: {{detail}}',
     tier: {

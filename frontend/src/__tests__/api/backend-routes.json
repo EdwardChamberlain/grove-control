@@ -402,6 +402,7 @@
   "POST /api/v1/archives/{archive_id}/favorite",
   "POST /api/v1/archives/{archive_id}/photos",
   "POST /api/v1/archives/{archive_id}/rescan",
+  "POST /api/v1/archives/{archive_id}/save-to-files",
   "POST /api/v1/archives/{archive_id}/slice",
   "POST /api/v1/archives/{archive_id}/slicer-token",
   "POST /api/v1/archives/{archive_id}/source",

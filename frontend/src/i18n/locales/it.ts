@@ -837,7 +837,16 @@ export default {
       exportDownloaded: 'Export scaricato',
       exportFailed: 'Export non riuscito',
     },
+    saveToFiles: {
+      title: 'Salva in File',
+      confirm: 'Salva',
+      saved: '{{name}} salvato in File',
+      savedDuplicate: '{{name}} salvato in File — esiste già un file con lo stesso contenuto',
+      viewInFiles: 'Mostra in File',
+      failed: 'Salvataggio in File non riuscito',
+    },
     menu: {
+      saveToFiles: 'Salva in File',
       print: 'Stampa',
       openInBambuStudio: 'Apri nello slicer',
       slice: 'Slice',
@@ -877,6 +886,7 @@ export default {
       delete: 'Elimina',
     },
     permission: {
+      noSaveToFiles: 'Non hai il permesso di caricare in File',
       noReprint: 'Non hai il permesso di ristampare questo archivio',
       noAddToQueue: 'Non hai il permesso di aggiungere alla coda',
       noUpdateArchives: 'Non hai il permesso di aggiornare archivi',
@@ -3849,6 +3859,9 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Piatto {{plateIndex}} di {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} sezionato',
+    viewInFiles: 'Mostra in File',
+    saveTo: 'Salva in',
+    selectFolder: 'Seleziona',
     failedTitle: 'Slicing fallito',
     failedToast: 'Slicing di {{name}} fallito: {{detail}}',
     tier: {

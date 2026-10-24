@@ -24,6 +24,7 @@ vi.mock('../../api/client', () => ({
     sliceLibraryFile: vi.fn(),
     sliceArchive: vi.fn(),
     getSliceJob: vi.fn(),
+    getLibraryFolders: vi.fn(),
     getLibraryFilePlates: vi.fn(),
     getArchivePlates: vi.fn(),
     getLibraryFileFilamentRequirements: vi.fn(),
@@ -39,6 +40,7 @@ const mockApi = api as unknown as {
   sliceLibraryFile: ReturnType<typeof vi.fn>;
   sliceArchive: ReturnType<typeof vi.fn>;
   getSliceJob: ReturnType<typeof vi.fn>;
+  getLibraryFolders: ReturnType<typeof vi.fn>;
   getLibraryFilePlates: ReturnType<typeof vi.fn>;
   getArchivePlates: ReturnType<typeof vi.fn>;
   getLibraryFileFilamentRequirements: ReturnType<typeof vi.fn>;
@@ -88,6 +90,24 @@ describe('SliceModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.getSlicerPresets.mockResolvedValue(fullThreeTier);
+    mockApi.getLibraryFolders.mockResolvedValue([
+      {
+        id: 7,
+        name: 'Keepers',
+        parent_id: null,
+        project_id: null,
+        archive_id: null,
+        project_name: null,
+        archive_name: null,
+        is_external: false,
+        is_system: false,
+        external_path: null,
+        external_readonly: false,
+        file_count: 0,
+        latest_activity_at: null,
+        children: [],
+      },
+    ]);
     mockApi.getSliceJob.mockResolvedValue({
       job_id: 42,
       status: 'running',
@@ -363,6 +383,41 @@ describe('SliceModal', () => {
       expect(mockApi.sliceArchive).toHaveBeenCalledWith(86, expect.any(Object));
       expect(mockApi.sliceLibraryFile).not.toHaveBeenCalled();
     });
+  });
+
+  it('saves an archive slice to the root unless a folder is picked', async () => {
+    mockApi.sliceArchive.mockResolvedValue({ job_id: 7, status: 'pending', status_url: '/api/v1/slice-jobs/7' });
+    renderWithTracker({ source: { kind: 'archive', id: 86, filename: 'orca.3mf' }, onClose: vi.fn() });
+    await waitFor(() => expect(screen.getByText('My Custom X1C')).toBeDefined());
+
+    expect(screen.getByText('Save to')).toBeDefined();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /^Slice$/ }));
+
+    await waitFor(() => expect(mockApi.sliceArchive).toHaveBeenCalled());
+    expect(mockApi.sliceArchive.mock.calls[0][1]).not.toHaveProperty('folder_id');
+  });
+
+  it('sends the folder picked for an archive slice', async () => {
+    mockApi.sliceArchive.mockResolvedValue({ job_id: 7, status: 'pending', status_url: '/api/v1/slice-jobs/7' });
+    renderWithTracker({ source: { kind: 'archive', id: 86, filename: 'orca.3mf' }, onClose: vi.fn() });
+    await waitFor(() => expect(screen.getByText('My Custom X1C')).toBeDefined());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /Root \(No Folder\)/ }));
+    await user.click(await screen.findByText('Keepers'));
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    expect(screen.getByRole('button', { name: /Keepers/ })).toBeDefined();
+    await user.click(screen.getByRole('button', { name: /^Slice$/ }));
+
+    await waitFor(() => expect(mockApi.sliceArchive).toHaveBeenCalledWith(86, expect.objectContaining({ folder_id: 7 })));
+  });
+
+  it('does not offer a destination when slicing from Files', async () => {
+    renderWithTracker({ source: { kind: 'libraryFile', id: 100, filename: 'Cube.stl' }, onClose: vi.fn() });
+    await waitFor(() => expect(screen.getByText('My Custom X1C')).toBeDefined());
+
+    expect(screen.queryByText('Save to')).toBeNull();
   });
 
   it('surfaces enqueue errors inline and keeps the modal open', async () => {

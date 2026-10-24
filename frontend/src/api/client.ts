@@ -1581,6 +1581,8 @@ export interface SliceRequest {
   // is omitted, so legacy single-color clients keep working unchanged.
   filament_presets?: PresetRef[];
   plate?: number;
+  // Files folder for the output; Archive slices only. Omit for the Files root.
+  folder_id?: number;
   export_3mf?: boolean;
   // Build-plate override (#1337). When omitted, the slicer uses the process
   // preset's curr_bed_type as-is. Canonical values match BambuStudio /
@@ -1646,15 +1648,6 @@ export interface SliceResponse {
   used_embedded_settings: boolean;
 }
 
-export interface SliceArchiveResponse {
-  archive_id: number;
-  name: string;
-  print_time_seconds: number;
-  filament_used_g: number;
-  filament_used_mm: number;
-  used_embedded_settings: boolean;
-}
-
 // Background slice-job lifecycle. POST /slice returns 202 + this shape;
 // the frontend polls /slice-jobs/{id} until status is terminal.
 export type SliceJobStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -1695,7 +1688,7 @@ export interface SliceJobState {
    * slicer emits its first frame (early "Initializing" phase) or when
    * the sidecar doesn't support progress. */
   progress: SliceJobProgress | null;
-  result?: SliceResponse | SliceArchiveResponse;
+  result?: SliceResponse;
   error_status?: number;
   error_detail?: string;
 }
@@ -6670,6 +6663,11 @@ export const api = {
     request<SliceJobEnqueueResponse>(`/library/files/${fileId}/slice`, {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  saveArchiveToFiles: (archiveId: number, folderId: number | null) =>
+    request<LibraryFileUploadResponse>(`/archives/${archiveId}/save-to-files`, {
+      method: 'POST',
+      body: JSON.stringify({ folder_id: folderId }),
     }),
   sliceArchive: (archiveId: number, body: SliceRequest) =>
     request<SliceJobEnqueueResponse>(`/archives/${archiveId}/slice`, {

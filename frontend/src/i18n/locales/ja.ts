@@ -836,7 +836,16 @@ export default {
       exportDownloaded: 'エクスポートをダウンロードしました',
       exportFailed: 'エクスポートに失敗しました',
     },
+    saveToFiles: {
+      title: 'ファイルに保存',
+      confirm: '保存',
+      saved: '{{name}}をファイルに保存しました',
+      savedDuplicate: '{{name}}をファイルに保存しました — 同じ内容のファイルが既にあります',
+      viewInFiles: 'ファイルで表示',
+      failed: 'ファイルへの保存に失敗しました',
+    },
     menu: {
+      saveToFiles: 'ファイルに保存',
       print: '印刷',
       openInBambuStudio: 'スライサーで開く',
       slice: 'スライス',
@@ -876,6 +885,7 @@ export default {
       delete: '削除',
     },
     permission: {
+      noSaveToFiles: 'ファイルへアップロードする権限がありません',
       noReprint: 'このアーカイブを再印刷する権限がありません',
       noAddToQueue: 'キューに追加する権限がありません',
       noUpdateArchives: 'アーカイブを更新する権限がありません',
@@ -3861,6 +3871,9 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'プレート {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}}をスライス済み',
+    viewInFiles: 'ファイルで表示',
+    saveTo: '保存先',
+    selectFolder: '選択',
     failedTitle: 'スライスに失敗しました',
     failedToast: '{{name}}のスライスに失敗: {{detail}}',
     tier: {
