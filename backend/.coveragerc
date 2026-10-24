@@ -1,0 +1,7 @@
+# Coverage settings for the backend suite (pytest runs from backend/, so
+# pytest-cov picks this file up by default).
+[run]
+# SQLAlchemy's asyncio layer runs database calls through greenlets. Without
+# greenlet support coverage stops tracing an async function at its first
+# awaited query, so most route and service bodies were reported as unrun.
+concurrency = greenlet, thread
