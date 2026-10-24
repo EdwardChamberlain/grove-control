@@ -1,6 +1,9 @@
 # Coverage settings for the backend suite (pytest runs from backend/, so
 # pytest-cov picks this file up by default).
 [run]
+# Measure the app package, including files no test imports, when reporting
+# from combined shard data (pytest passes --cov=app for the shard runs).
+source = app
 # SQLAlchemy's asyncio layer runs database calls through greenlets. Without
 # greenlet support coverage stops tracing an async function at its first
 # awaited query, so most route and service bodies were reported as unrun.
