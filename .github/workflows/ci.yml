@@ -148,7 +148,7 @@ jobs:
             -n auto \
             --cov=app \
             --cov-report=term-missing:skip-covered \
-            --cov-fail-under=67
+            --cov-fail-under=69
 
   frontend-lint:
     name: Frontend Lint
