@@ -344,3 +344,18 @@ async def test_deleting_group_clears_oidc_default_on_sqlite(async_client: AsyncC
     db_provider = await db_session.get(OIDCProvider, provider_id)
     assert db_provider is not None
     assert db_provider.default_group_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_seed_strips_retired_archives_create(async_client: AsyncClient, db_session):
+    """archives:create was retired with the Archive upload endpoints (#232); a
+    custom group that still holds it must be cleaned so it stays editable."""
+    db_session.add(Group(name="legacy_custom", permissions=["archives:read", "archives:create"]))
+    await db_session.commit()
+
+    await seed_default_groups()
+
+    db_session.expire_all()
+    group = (await db_session.execute(select(Group).where(Group.name == "legacy_custom"))).scalar_one()
+    assert group.permissions == ["archives:read"]

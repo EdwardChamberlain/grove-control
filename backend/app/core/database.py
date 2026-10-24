@@ -4498,6 +4498,16 @@ async def seed_default_groups():
                 group.permissions = perms
         await session.commit()
 
+        # Strip archives:create (#232): the permission was retired with the Archive
+        # upload endpoints. Left in place, editing a custom group that still lists
+        # it would be rejected as an invalid permission.
+        result = await session.execute(select(Group))
+        for group in result.scalars().all():
+            if group.permissions and "archives:create" in group.permissions:
+                group.permissions = [p for p in group.permissions if p != "archives:create"]
+                logger.info("Removed retired archives:create from group '%s'", group.name)
+        await session.commit()
+
         # Backfill: sync the Administrators system group to ALL_PERMISSIONS.
         # Administrators' contract is full access to every feature — fresh
         # installs get that via DEFAULT_GROUPS["Administrators"]["permissions"]
