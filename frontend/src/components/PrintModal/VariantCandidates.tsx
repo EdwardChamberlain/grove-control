@@ -122,7 +122,7 @@ export function VariantCandidates({
                   >
                     {plates.map((p) => (
                       <option key={p.index} value={p.index}>
-                        {p.name || t('printModal.plateN', { n: p.index })}
+                        {p.name || t('printers.plateNumber', { number: p.index })}
                       </option>
                     ))}
                   </select>
