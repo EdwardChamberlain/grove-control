@@ -278,9 +278,13 @@ jobs:
         working-directory: frontend
         run: npx tsc --noEmit
 
-  frontend-tests:
-    name: Frontend Tests
+  frontend-test-shards:
+    name: Frontend Test Shards (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v6
 
@@ -295,10 +299,45 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Run tests
+      - name: Run Vitest shard
+        # Each shard sees a third of the code, so the coverage floors are
+        # enforced on the merged reports in the Frontend Tests job instead.
         timeout-minutes: 10
         working-directory: frontend
-        run: npm run test:run
+        run: |
+          npx vitest run \
+            --shard=${{ matrix.shard }}/3 \
+            --reporter=blob \
+            --outputFile=vitest-blobs/blob-${{ matrix.shard }}.json \
+            --coverage \
+            --coverage.thresholds.statements=0 \
+            --coverage.thresholds.branches=0 \
+            --coverage.thresholds.functions=0 \
+            --coverage.thresholds.lines=0
+
+      - name: Upload Vitest report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-blob-${{ matrix.shard }}
+          path: frontend/vitest-blobs/
+          retention-days: 1
+
+  frontend-browser-tests:
+    name: Frontend Browser Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
 
       - name: Install Chromium for browser tests
         working-directory: frontend
@@ -317,6 +356,49 @@ jobs:
         timeout-minutes: 5
         working-directory: frontend
         run: npm run test:browser
+
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    needs: [frontend-test-shards, frontend-browser-tests]
+    # Run even when an input failed so this required check fails instead of
+    # being skipped (a skipped required check counts as passing).
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Fail if a test shard or the browser tests failed
+        if: ${{ needs.frontend-test-shards.result != 'success' || needs.frontend-browser-tests.result != 'success' }}
+        run: |
+          echo "Vitest shards: ${{ needs.frontend-test-shards.result }}"
+          echo "Browser tests: ${{ needs.frontend-browser-tests.result }}"
+          exit 1
+
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Download Vitest reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vitest-blob-*
+          path: frontend/vitest-blobs
+          merge-multiple: true
+
+      - name: Merge reports and enforce coverage floors
+        working-directory: frontend
+        run: npx vitest --merge-reports=vitest-blobs --coverage
+
+      - name: Check translation parity
+        working-directory: frontend
+        run: npm run check:i18n
 
   frontend-build:
     name: Frontend Build
@@ -343,7 +425,6 @@ jobs:
     name: Docker Smoke Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [backend-tests, backend-coverage, frontend-build, version-check]
     steps:
       - uses: actions/checkout@v6
 

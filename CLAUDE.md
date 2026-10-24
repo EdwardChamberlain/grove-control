@@ -146,6 +146,10 @@ Coverage floors:
   `.github/workflows/ci.yml` (mirrored in `test_backend.sh`). Coverage is
   collected in 4 parallel shards and combined in that job.
 - Frontend: `coverage.thresholds` in `frontend/vitest.config.ts`.
+  In CI, Vitest runs as 3 shards and Playwright as its own job; the Frontend
+  Tests job merges the shard reports, enforces these thresholds and runs the
+  i18n parity check. The Docker smoke test has no dependencies and starts
+  immediately (its Dockerfile builds the frontend itself).
 
 When your change raises coverage meaningfully, raise the floors in the same PR.
 Never lower a floor to get a PR through.

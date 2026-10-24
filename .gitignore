@@ -25,6 +25,7 @@ build/
 # Node
 frontend/node_modules/
 frontend/coverage/
+frontend/vitest-blobs/
 npm-debug.log*
 
 # Database
