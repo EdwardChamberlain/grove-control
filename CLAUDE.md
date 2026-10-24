@@ -5,8 +5,19 @@ Guidance for AI coding agents (and humans) working in this repository. See
 
 ## Workflow
 
-- Branch from `origin/dev` and open PRs against `dev`. `main` only accepts
-  `dev` → `main` release PRs; a feature PR aimed at `main` will never go green.
+- **Branching (git-flow style, simplified):** `dev` is the default and
+  integration branch; `main` only holds releases. Cut `feature/`, `fix/`,
+  `docs/`, `refactor/` or `test/` branches from `origin/dev` and merge them
+  back via PR against `dev`.
+- **There are no release or hotfix branches.** A release is a `dev` → `main`
+  PR, and urgent fixes go through `dev` like everything else. The
+  `Release PR Route` check rejects any PR into `main` whose source isn't `dev`,
+  so a feature or hotfix PR aimed at `main` will never go green.
+- **Base, review and compare against `origin/dev`,** never `main`, which can be
+  hundreds of commits behind. Older clones may still have `origin/HEAD`
+  pointing at `main`; if `git log --oneline origin/dev..HEAD` shows a long
+  history you didn't write, you're on a stale base. Fix the clone with
+  `git remote set-head origin --auto`.
 - Every change ships with tests. CI enforces coverage floors (see below), so
   untested code can fail the build on its own.
 - Run the tests for what you touched while you work; run the full suites once
