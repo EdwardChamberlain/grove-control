@@ -94,6 +94,10 @@ class TestBackendExclusions:
         assert not found, f"backend/.coveragerc must not use {found}; mark individual lines instead"
 
 
+@pytest.mark.skipif(
+    not FRONTEND_SRC.exists(),
+    reason="frontend sources not present (e.g. backend-only Docker test image)",
+)
 class TestFrontendExclusions:
     def test_every_ignore_hint_states_a_reason(self):
         problems = []

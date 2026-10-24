@@ -212,7 +212,7 @@ jobs:
           coverage report \
             --skip-covered \
             --show-missing \
-            --fail-under=70.4
+            --fail-under=70.5
 
       - name: Report coverage of changed lines
         # Report only for now: shows how much of the PR's new and changed
@@ -224,7 +224,7 @@ jobs:
           coverage xml -o coverage.xml
           diff-cover coverage.xml \
             --compare-branch=origin/${{ github.base_ref }} \
-            --markdown-report diff-cover.md
+            --format markdown:diff-cover.md
           { echo "## Backend: coverage of changed lines"; cat diff-cover.md; } >> "$GITHUB_STEP_SUMMARY"
 
   frontend-lint:
@@ -424,7 +424,7 @@ jobs:
         run: |
           pipx run diff-cover==${{ env.DIFF_COVER_VERSION }} coverage/lcov.info \
             --compare-branch=origin/${{ github.base_ref }} \
-            --markdown-report diff-cover.md
+            --format markdown:diff-cover.md
           { echo "## Frontend: coverage of changed lines"; cat diff-cover.md; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check translation parity
