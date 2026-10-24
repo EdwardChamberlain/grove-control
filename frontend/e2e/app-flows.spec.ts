@@ -175,8 +175,6 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
       else await route.fulfill({ json: [spool] });
     } else if (pathname === '/api/v1/inventory/spools/1' && method === 'PATCH') {
       await route.fulfill({ json: { ...spool, ...(body as object) } });
-    } else if (pathname === '/api/v1/archives/upload' && method === 'POST') {
-      await route.fulfill({ json: archive });
     } else if (pathname === '/api/v1/archives/1/slice' && method === 'POST') {
       await route.fulfill({ status: 202, json: { job_id: 7, status_url: '/api/v1/slice-jobs/7' } });
     } else if (pathname === '/api/v1/queue/' && method === 'POST') {
@@ -392,9 +390,6 @@ test('core app API smoke reaches create, edit, upload, slice, queue, and setting
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ color_name: 'Green' }),
     });
-    const form = new FormData();
-    form.append('file', new File(['dummy'], 'benchy.3mf', { type: 'application/octet-stream' }));
-    await fetch('/api/v1/archives/upload', { method: 'POST', body: form });
     await fetch('/api/v1/archives/1/slice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -423,7 +418,6 @@ test('core app API smoke reaches create, edit, upload, slice, queue, and setting
     ['PATCH', '/api/v1/printers/1'],
     ['POST', '/api/v1/inventory/spools'],
     ['PATCH', '/api/v1/inventory/spools/1'],
-    ['POST', '/api/v1/archives/upload'],
     ['POST', '/api/v1/archives/1/slice'],
     ['POST', '/api/v1/queue/'],
     ['PATCH', '/api/v1/queue/1'],

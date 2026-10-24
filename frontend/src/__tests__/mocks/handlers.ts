@@ -335,7 +335,7 @@ export const handlers = [
   http.get('/api/v1/groups/permissions', () => {
     return HttpResponse.json({
       'Printers': ['printers:read', 'printers:create', 'printers:update', 'printers:delete', 'printers:control'],
-      'Archives': ['archives:read', 'archives:create', 'archives:update', 'archives:delete'],
+      'Archives': ['archives:read', 'archives:update', 'archives:delete'],
       'Settings': ['settings:read', 'settings:update'],
     });
   }),

@@ -344,3 +344,57 @@ async def test_deleting_group_clears_oidc_default_on_sqlite(async_client: AsyncC
     db_provider = await db_session.get(OIDCProvider, provider_id)
     assert db_provider is not None
     assert db_provider.default_group_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_seed_strips_retired_archives_create(async_client: AsyncClient, db_session):
+    """archives:create was retired with the Archive upload endpoints (#232); a
+    custom group that still holds it must be cleaned so it stays editable.
+    Other permissions and other groups are left alone, and a second run is a no-op."""
+    db_session.add(Group(name="legacy_custom", permissions=["archives:read", "archives:create", "queue:read"]))
+    db_session.add(Group(name="unaffected", permissions=["archives:read", "printers:read"]))
+    await db_session.commit()
+
+    await seed_default_groups()
+    await seed_default_groups()
+
+    db_session.expire_all()
+    groups = {g.name: g for g in (await db_session.execute(select(Group))).scalars()}
+    assert groups["legacy_custom"].permissions == ["archives:read", "queue:read"]
+    assert groups["unaffected"].permissions == ["archives:read", "printers:read"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_group_with_retired_permission_can_be_edited_after_startup(async_client: AsyncClient, db_session):
+    """The regression the cleanup prevents: saving a group in the UI resubmits
+    its stored permissions, and a leftover archives:create was rejected as invalid."""
+    headers = await _setup_admin(async_client)
+    db_session.add(Group(name="legacy_edit", permissions=["archives:read", "archives:create"]))
+    await db_session.commit()
+
+    await seed_default_groups()
+
+    group = (await db_session.execute(select(Group).where(Group.name == "legacy_edit"))).scalar_one()
+    stored = list(group.permissions)
+    response = await async_client.patch(
+        f"/api/v1/groups/{group.id}", headers=headers, json={"permissions": [*stored, "queue:read"]}
+    )
+    assert response.status_code == 200, response.text
+    assert "archives:create" not in response.json()["permissions"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_create_group_rejects_retired_archives_create(async_client: AsyncClient):
+    headers = await _setup_admin(async_client)
+
+    response = await async_client.post(
+        "/api/v1/groups/",
+        headers=headers,
+        json={"name": "retired_perm", "permissions": ["archives:read", "archives:create"]},
+    )
+
+    assert response.status_code == 400
+    assert "archives:create" in response.json()["detail"]

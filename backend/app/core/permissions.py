@@ -35,7 +35,6 @@ class Permission(StrEnum):
     ARCHIVES_READ = "archives:read"
     ARCHIVES_READ_OWN = "archives:read_own"
     ARCHIVES_READ_ALL = "archives:read_all"
-    ARCHIVES_CREATE = "archives:create"
     ARCHIVES_UPDATE_OWN = "archives:update_own"
     ARCHIVES_UPDATE_ALL = "archives:update_all"
     ARCHIVES_DELETE_OWN = "archives:delete_own"
@@ -203,7 +202,6 @@ PERMISSION_CATEGORIES = {
         Permission.ARCHIVES_READ,  # legacy — kept for back-compat with custom roles
         Permission.ARCHIVES_READ_OWN,
         Permission.ARCHIVES_READ_ALL,
-        Permission.ARCHIVES_CREATE,
         Permission.ARCHIVES_UPDATE_OWN,
         Permission.ARCHIVES_UPDATE_ALL,
         Permission.ARCHIVES_DELETE_OWN,
@@ -375,7 +373,6 @@ DEFAULT_GROUPS = {
             Permission.PRINTERS_CLEAR_PLATE.value,
             # Archives - own items only
             Permission.ARCHIVES_READ_OWN.value,
-            Permission.ARCHIVES_CREATE.value,
             Permission.ARCHIVES_UPDATE_OWN.value,
             Permission.ARCHIVES_DELETE_OWN.value,
             Permission.ARCHIVES_REPRINT_OWN.value,
