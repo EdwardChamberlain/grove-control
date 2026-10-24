@@ -15,9 +15,10 @@ Guidance for AI coding agents (and humans) working in this repository. See
   so a feature or hotfix PR aimed at `main` will never go green.
 - **Base, review and compare against `origin/dev`,** never `main`, which can be
   hundreds of commits behind. Older clones may still have `origin/HEAD`
-  pointing at `main`; if `git log --oneline origin/dev..HEAD` shows a long
-  history you didn't write, you're on a stale base. Fix the clone with
-  `git remote set-head origin --auto`.
+  pointing at `main`; if `git log --oneline HEAD..origin/dev` lists more than
+  a handful of commits, your branch is missing most of `dev` and is on a stale
+  base. Fix the clone with `git remote set-head origin --auto` and re-cut the
+  branch from `origin/dev`.
 - Every change ships with tests. CI enforces coverage floors (see below), so
   untested code can fail the build on its own.
 - Run the tests for what you touched while you work; run the full suites once
