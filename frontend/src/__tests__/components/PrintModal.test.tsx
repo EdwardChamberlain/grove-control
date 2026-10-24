@@ -1165,6 +1165,9 @@ describe('PrintModal', () => {
     });
 
     it('prevents a postponed print from using a past start time', async () => {
+      // Pin the clock to midday: the default date rolls to tomorrow late in
+      // the evening, which makes 00:00 a future time and flaked this test.
+      vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 5, 15, 12, 0) });
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1180,8 +1183,12 @@ describe('PrintModal', () => {
       await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
       fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '00:00' } });
 
-      expect(screen.getByText('Choose a future date and time')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
+      try {
+        expect(screen.getByText('Choose a future date and time')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('clears the scheduled value when the postpone date becomes invalid', async () => {
