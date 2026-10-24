@@ -33,6 +33,18 @@ _MAIN_STATE = (
     "_user_stopped_printers",
     "_bed_cool_waiters",
     "_stage22_finish_frames",
+    "_timelapse_baselines",
+    "_last_status_broadcast",
+    "_last_progress_milestone",
+    "_first_layer_notified",
+    "_notified_hms_errors",
+    "_hms_last_seen",
+    "_nozzle_count_updated",
+    "_printer_reconciled_since_connect",
+    "_pending_stale_reconciliation",
+    "_printer_last_connected",
+    "_printer_offline_notify_tasks",
+    "_ams_alarm_cooldown",
 )
 
 
@@ -274,6 +286,8 @@ async def lifecycle(test_engine, tmp_path, monkeypatch):
 def _reset_state():
     from backend.app.services import usage_tracker
 
+    for task in main._printer_offline_notify_tasks.values():
+        task.cancel()
     for name in _MAIN_STATE:
         getattr(main, name).clear()
     usage_tracker._active_sessions.clear()
