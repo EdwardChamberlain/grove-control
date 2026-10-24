@@ -381,6 +381,34 @@ describe('SettingsPage', () => {
       });
     });
 
+    it.each([
+      [true, false, false],
+      [true, true, false],
+      [false, false, true],
+      // Still enabled when on, so it can be turned off without re-enabling the parent.
+      [false, true, false],
+    ])('door-cycle toggle with require_plate_clear=%s, door_cycle_clears_plate=%s is disabled=%s', async (requirePlateClear, doorCycle, disabled) => {
+      server.use(
+        http.get('/api/v1/settings/', () =>
+          HttpResponse.json({ ...mockSettings, require_plate_clear: requirePlateClear, door_cycle_clears_plate: doorCycle }),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Workflow')).toBeInTheDocument();
+      });
+      await user.click(screen.getByText('Workflow'));
+
+      const toggle = await screen.findByRole('checkbox', { name: 'Door open-close marks plate clear' });
+      if (disabled) {
+        expect(toggle).toBeDisabled();
+      } else {
+        expect(toggle).toBeEnabled();
+      }
+    });
+
     it('shows slicer dropdown with both options on Workflow tab', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);

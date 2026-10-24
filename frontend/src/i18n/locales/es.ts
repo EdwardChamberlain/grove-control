@@ -2019,6 +2019,8 @@ export default {
     plateClear: 'Confirmación de cama despejada',
     requirePlateClear: 'Requerir confirmación de cama despejada',
     requirePlateClearDescription: 'Cuando está activado, el planificador espera la confirmación de cama despejada por impresora antes de iniciar impresiones en cola en impresoras con trabajos finalizados. Desactivar esto también oculta la insignia de estado de la cama y el botón "Marcar cama como despejada" en las tarjetas de impresora.',
+    doorCycleClearsPlate: 'Abrir y cerrar la puerta marca la cama como despejada',
+    doorCycleClearsPlateDescription: 'Cuando una impresora espera la confirmación de cama despejada, abrir y luego cerrar su puerta marca la cama como despejada. Solo funciona en impresoras con sensor de puerta.',
     gcodeInjection: 'Inyección de G-code',
     gcodeInjectionDescription: 'Configure G-code personalizado para inyectar al inicio o al final de las impresiones para sistemas de impresión automática como Farmloop, SwapMod, AutoClear y Printflow 3D. Los fragmentos se configuran por modelo de impresora y se aplican cuando se activa "Inyectar G-code" en un elemento de la cola.',
     gcodeInjectionNoPrinters: 'No se encontraron impresoras. Añada impresoras para configurar fragmentos de G-code.',

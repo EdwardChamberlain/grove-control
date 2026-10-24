@@ -2017,6 +2017,8 @@ export default {
     plateClear: '熱床清空確認',
     requirePlateClear: '需要熱床清空確認',
     requirePlateClearDescription: '啟用後，排程器會在已完成列印的印表機上啟動佇列列印之前，等待每臺印表機的熱床清空確認。停用後，也會隱藏印表機卡片上的列印板狀態標記和「將列印板標記為已清理」按鈕。',
+    doorCycleClearsPlate: '開關艙門即確認熱床已清空',
+    doorCycleClearsPlateDescription: '當印表機正在等待熱床清空確認時，打開再關閉艙門即視為熱床已清空。僅適用於配備門感測器的印表機。',
     gcodeInjection: 'G-code注入',
     gcodeInjectionDescription: '為Farmloop、SwapMod、AutoClear和Printflow 3D等自動列印系統設定自訂G-code，在列印開始和/或結束時注入。程式碼片段按印表機型號設定，在佇列項目上啟用"注入G-code"時套用。',
     gcodeInjectionNoPrinters: '未找到印表機。新增印表機以設定G-code程式碼片段。',

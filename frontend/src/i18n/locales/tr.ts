@@ -2020,6 +2020,8 @@ export default {
     plateClear: 'Plaka Temizleme Onayı',
     requirePlateClear: 'Plaka temizleme onayı gerektir',
     requirePlateClearDescription: 'Etkinleştirildiğinde, planlayıcı bitmiş işleri olan yazıcılarda kuyruktaki baskıları başlatmadan önce yazıcı başına plaka temizleme onayını bekler. Bunu devre dışı bırakmak ayrıca plaka durum rozetini ve yazıcı kartlarındaki "Plakayı temizlendi olarak işaretle" düğmesini gizler.',
+    doorCycleClearsPlate: 'Kapıyı açıp kapatmak tablayı temiz olarak işaretler',
+    doorCycleClearsPlateDescription: 'Bir yazıcı tabla temizleme onayı beklerken kapısını açıp kapatmak tablayı temizlenmiş olarak işaretler. Yalnızca kapı sensörü olan yazıcılarda çalışır.',
     gcodeInjection: 'G-kod Enjeksiyonu',
     gcodeInjectionDescription: 'Farmloop, SwapMod, AutoClear ve Printflow 3D gibi otomatik baskı sistemleri için baskıların başlangıcında ve/veya sonunda enjekte edilecek özel G-kodu yapılandırın. Parçacıklar yazıcı modeli başına yapılandırılır ve bir kuyruk öğesinde "G-kod Enjekte Et" etkinleştirildiğinde uygulanır.',
     gcodeInjectionNoPrinters: 'Yazıcı bulunamadı. G-kod parçacıklarını yapılandırmak için yazıcı ekleyin.',

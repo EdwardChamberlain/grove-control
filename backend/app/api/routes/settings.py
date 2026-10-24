@@ -216,6 +216,7 @@ async def _build_settings_response(db: AsyncSession, is_api_key: bool = False) -
             "ambient_drying_enabled",
             "print_drying_enabled",
             "require_plate_clear",
+            "door_cycle_clears_plate",
             "queue_shortest_first",
             # default_bed_levelling / default_flow_cali / default_nozzle_offset_cali
             # are tri-state strings (off/on/auto) — parsed via the raw-string else

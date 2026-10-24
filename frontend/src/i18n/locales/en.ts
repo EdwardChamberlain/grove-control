@@ -2040,6 +2040,8 @@ export default {
     plateClear: 'Plate-Clear Confirmation',
     requirePlateClear: 'Require plate-clear confirmation',
     requirePlateClearDescription: 'When enabled, the scheduler waits for per-printer plate-clear confirmation before starting queued prints on printers with finished jobs. Disabling this also hides the plate status badge and the "Mark plate as cleared" button on printer cards.',
+    doorCycleClearsPlate: 'Door open-close marks plate clear',
+    doorCycleClearsPlateDescription: 'When a printer is waiting for plate-clear, opening and then closing its door marks the plate as cleared. Only works on printers with a door sensor.',
     gcodeInjection: 'G-code Injection',
     gcodeInjectionDescription: 'Configure custom G-code to inject at the start and/or end of prints for auto-print systems like Farmloop, SwapMod, AutoClear, and Printflow 3D. Snippets are configured per printer model and applied when "Inject G-code" is enabled on a queue item.',
     gcodeInjectionNoPrinters: 'No printers found. Add printers to configure G-code snippets.',

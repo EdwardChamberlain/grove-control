@@ -2017,6 +2017,8 @@ export default {
     plateClear: 'Confirmação de placa livre',
     requirePlateClear: 'Exigir confirmação de placa livre',
     requirePlateClearDescription: 'Quando ativado, o agendador aguarda uma confirmação de placa livre por impressora antes de iniciar impressões na fila em impressoras com trabalhos concluídos. Desativar isso também oculta o indicador de status da placa e o botão "Marcar placa como liberada" nos cartões das impressoras.',
+    doorCycleClearsPlate: 'Abrir e fechar a porta marca a placa como livre',
+    doorCycleClearsPlateDescription: 'Quando uma impressora aguarda a confirmação de placa livre, abrir e depois fechar a porta marca a placa como liberada. Funciona apenas em impressoras com sensor de porta.',
     gcodeInjection: 'Injeção de G-code',
     gcodeInjectionDescription: 'Configure G-code personalizado para injetar no início e/ou no final das impressões para sistemas de impressão automática como Farmloop, SwapMod, AutoClear e Printflow 3D. Os snippets são configurados por modelo de impressora e aplicados quando "Injetar G-code" está ativado em um item da fila.',
     gcodeInjectionNoPrinters: 'Nenhuma impressora encontrada. Adicione impressoras para configurar snippets de G-code.',
