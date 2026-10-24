@@ -153,6 +153,18 @@ class TestSaveArchiveToFiles:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_out_of_tree_thumbnail_path_is_ignored(
+        self, async_client: AsyncClient, db_session, storage, make_archive
+    ):
+        archive = await make_archive(thumbnail_path="../../etc/passwd")
+
+        resp = await async_client.post(URL.format(archive.id), json={"folder_id": None})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["thumbnail_path"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_missing_file_on_disk_is_404_and_creates_nothing(
         self, async_client: AsyncClient, db_session, storage, make_archive
     ):

@@ -83,7 +83,7 @@ from backend.app.services.temporary_files import (
     set_retention_days as set_temporary_retention_days,
 )
 from backend.app.utils.filename import InvalidFilenameError, validate_print_filename
-from backend.app.utils.safe_path import safe_join_under
+from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 from backend.app.utils.threemf_tools import (
     extract_embedded_presets_from_3mf,
     extract_nozzle_mapping_from_3mf,
@@ -4334,11 +4334,14 @@ async def copy_archive_to_library(
         except Exception as exc:
             logger.warning("Failed to parse archived 3MF %s for Files copy: %s", filename, exc)
         thumbs_dir = get_library_thumbnails_dir()
-        archive_thumb = (
-            safe_join_under(Path(app_settings.base_dir), archive.thumbnail_path, http=False)
-            if archive.thumbnail_path
-            else None
-        )
+        # A thumbnail path that escapes base_dir is treated as "no thumbnail"
+        # rather than failing the save.
+        archive_thumb: Path | None = None
+        if archive.thumbnail_path:
+            try:
+                archive_thumb = safe_join_under(Path(app_settings.base_dir), archive.thumbnail_path, http=False)
+            except PathTraversalError:
+                logger.warning("Ignoring out-of-tree thumbnail path on archive %s", archive.id)
         if archive_thumb is not None and archive_thumb.is_file():
             thumb_dest = (
                 thumbs_dir / f"{uuid.uuid4().hex}{archive_thumb.suffix.lower() or '.png'}"
