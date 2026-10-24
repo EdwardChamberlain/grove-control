@@ -136,7 +136,9 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Enforce backend coverage
-        timeout-minutes: 15
+        # Greenlet-aware tracing is slower than the default tracer; the full
+        # run already took ~14 minutes before it.
+        timeout-minutes: 25
         working-directory: backend
         run: |
           python -m pytest tests/ \
