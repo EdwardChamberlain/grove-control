@@ -4042,7 +4042,8 @@ async def slice_archive(
 ):
     """Enqueue a slice job for an archive's source. Returns 202 + job_id;
     the slice runs in the background, the caller polls `GET /slice-jobs/{id}`.
-    The output is saved to Files (root folder) as a new ``LibraryFile``; no
+    The output is saved to Files (``folder_id``, default the root) as a new
+    ``LibraryFile``; no
     Archive row is created because nothing has been printed.
 
     Source preference: ``source_3mf_path`` (the un-sliced project file the
@@ -4103,6 +4104,16 @@ async def slice_archive(
     archive_id_local = archive.id
     user_id = (current_user or owner_user).id if (current_user or owner_user) else None
 
+    # Fail fast on a bad destination rather than after a long slice.
+    if request.folder_id is not None:
+        from backend.app.models.library import LibraryFolder
+
+        folder = await db.get(LibraryFolder, request.folder_id)
+        if folder is None:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if folder.is_external and folder.external_readonly:
+            raise HTTPException(status_code=403, detail="Cannot save to a read-only external folder")
+
     # Block a cross-nozzle-class re-slice (single-nozzle <-> H2D) up front —
     # BambuStudio's multi-extruder validator would otherwise reject it with a
     # cryptic error. No-op for same-class or un-sliced sources.
@@ -4115,7 +4126,7 @@ async def slice_archive(
                     task_db,
                     model_bytes=model_bytes,
                     model_filename=src_filename,
-                    folder_id=None,
+                    folder_id=request.folder_id,
                     extra_metadata={"sliced_from_archive_id": archive_id_local},
                     request=request,
                     current_user_id=user_id,

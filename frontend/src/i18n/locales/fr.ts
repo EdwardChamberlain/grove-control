@@ -3861,6 +3861,8 @@ export default {
     runningWithProgressMultiPlate: 'Plateau {{plateIndex}} sur {{plateCount}} • {{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     completedToast: '{{name}} découpé',
     viewInFiles: 'Voir dans Fichiers',
+    saveTo: 'Enregistrer dans',
+    selectFolder: 'Sélectionner',
     failedTitle: 'Échec du découpage',
     failedToast: 'Échec du découpage de {{name}} : {{detail}}',
     tier: {

@@ -55,6 +55,13 @@ class SliceRequest(BaseModel):
         description="DEPRECATED: prefer filament_preset. LocalPreset id with preset_type='filament'.",
     )
 
+    # Destination folder in Files. Only the Archive slice route reads it: a
+    # file sliced from Files stays in its source's folder. None = Files root.
+    folder_id: int | None = Field(
+        default=None,
+        description="Files folder to save the output in (Archive slices only). Omit for the Files root.",
+    )
+
     # Source-aware fields — set by the new SliceModal.
     printer_preset: PresetRef | None = None
     process_preset: PresetRef | None = None
