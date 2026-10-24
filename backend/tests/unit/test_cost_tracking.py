@@ -83,6 +83,20 @@ def _make_archive(archive_id=1, file_path=None):
 
 
 @pytest.fixture(autouse=True)
+def _clear_sessions():
+    """Start and end every test with no print sessions for any printer.
+
+    ``_active_sessions`` is module-level state. A session left behind by an
+    earlier test on the same xdist worker leaked into whichever of these tests
+    ran next (``test_cost_with_archive_id`` read ``tray_now_at_start`` off a
+    mock session), so which tests failed depended on how CI sharded the suite.
+    """
+    _active_sessions.clear()
+    yield
+    _active_sessions.clear()
+
+
+@pytest.fixture(autouse=True)
 def cleanup_temp_archives():
     yield
     # Cleanup any temp .3mf files created by _make_archive
@@ -150,12 +164,6 @@ def _mock_db_sequential(responses):
 
 class TestCostCalculation:
     """Tests for cost calculation in usage tracking."""
-
-    @pytest.fixture(autouse=True)
-    def _clear_sessions(self):
-        _active_sessions.clear()
-        yield
-        _active_sessions.clear()
 
     @pytest.mark.asyncio
     async def test_cost_with_spool_specific_cost_per_kg(self):
