@@ -6,8 +6,6 @@ from backend.app import main
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 
-from .conftest import make_3mf
-
 pytestmark = pytest.mark.integration
 
 
@@ -41,7 +39,7 @@ async def test_uses_library_file_print_time_metadata(lifecycle):
     assert notification.kwargs["archive_data"]["print_time_seconds"] == 4321
 
 
-@pytest.mark.parametrize("metadata", [None, {"print_time_seconds": "not-a-number"}])
+@pytest.mark.parametrize("metadata", [{}, {"print_time_seconds": "not-a-number"}])
 async def test_malformed_or_missing_metadata_keeps_notification_and_fallback(lifecycle, metadata):
     notification = await _complete_no_archive(lifecycle, metadata, remaining_time=900)
     assert notification is not None
