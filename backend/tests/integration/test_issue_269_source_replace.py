@@ -1,5 +1,6 @@
 """Regression tests for safe archive source replacement."""
 
+import asyncio
 import io
 import zipfile
 from pathlib import Path
@@ -75,6 +76,28 @@ async def test_same_name_commit_failure_restores_existing_source(
             assert str(error) == "forced commit failure"
         else:
             assert response.status_code >= 500
+
+    await db_session.refresh(archive)
+    assert archive.source_3mf_path == original_path
+    assert (tmp_path / original_path).read_bytes() == original_bytes
+
+
+async def test_same_name_cancelled_commit_restores_existing_source(
+    async_client: AsyncClient, archive, db_session, tmp_path, monkeypatch
+):
+    good = await _upload_source(async_client, "Gear box.3mf", _zip_bytes("first"))
+    assert good.status_code == 200
+    await db_session.refresh(archive)
+    original_path = archive.source_3mf_path
+    original_bytes = (tmp_path / original_path).read_bytes()
+
+    async def cancel_commit(self):
+        raise asyncio.CancelledError()
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(AsyncSession, "commit", cancel_commit)
+        with pytest.raises(asyncio.CancelledError):
+            await _upload_source(async_client, "Gear box.3mf", _zip_bytes("second"))
 
     await db_session.refresh(archive)
     assert archive.source_3mf_path == original_path

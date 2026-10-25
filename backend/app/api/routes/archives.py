@@ -4504,7 +4504,7 @@ async def upload_source_3mf_by_name(
             staged_path.replace(source_path)
             archive.source_3mf_path = str(source_path.relative_to(settings.base_dir))
             await db.commit()
-        except Exception:
+        except BaseException:
             if backup_path is not None:
                 try:
                     backup_path.replace(source_path)
