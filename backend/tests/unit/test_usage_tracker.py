@@ -2560,3 +2560,85 @@ class TestArchiveTypesFromSpools:
         usage = self._usage([(1, 5.0)])
         assert _archive_types_from_spools(usage, self._results([(1, "  ")])) is None
         assert _archive_types_from_spools(usage, self._results([(1, " PETG ")])) == ["PETG"]
+
+
+@pytest.mark.asyncio
+async def test_real_archive_without_plate_id_still_tracks_usage():
+    from backend.app.models.archive import PrintArchive
+
+    archive = PrintArchive(id=90, file_path="archives/1/test.3mf", extra_data=None)
+    assert not hasattr(archive, "plate_id")
+    assignment = _make_assignment(spool_id=1, ams_id=0, tray_id=0)
+    spool = _make_spool(spool_id=1, label_weight=1000)
+    db = _mock_db_sequential([archive, None, assignment, spool])
+    printer_manager = MagicMock()
+    filament_usage = [{"slot_id": 1, "used_g": 10.0, "type": "PLA", "color": ""}]
+
+    with (
+        patch("backend.app.core.config.settings") as mock_settings,
+        patch(
+            "backend.app.utils.threemf_tools.extract_filament_usage_from_3mf",
+            return_value=filament_usage,
+        ) as extract_usage,
+    ):
+        mock_settings.base_dir = MagicMock()
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_settings.base_dir.__truediv__ = MagicMock(return_value=mock_path)
+
+        results = await _track_from_3mf(
+            printer_id=1,
+            archive_id=90,
+            status="completed",
+            print_name="Test",
+            handled_trays=set(),
+            printer_manager=printer_manager,
+            db=db,
+            ams_mapping=[0],
+        )
+
+    assert extract_usage.call_args.args == (mock_path, None)
+    assert len(results) == 1
+    assert (results[0]["spool_id"], results[0]["weight_used"]) == (1, 10.0)
+
+
+@pytest.mark.asyncio
+async def test_real_archive_without_plate_id_uses_queue_plate_for_3mf_scope():
+    from backend.app.models.archive import PrintArchive
+
+    archive = PrintArchive(id=91, file_path="archives/1/test.3mf", extra_data=None)
+    queue_item = _make_queue_item(ams_mapping=None, status="completed", plate_id=2)
+    assignment = _make_assignment(spool_id=1, ams_id=0, tray_id=0)
+    spool = _make_spool(spool_id=1, label_weight=1000)
+    db = _mock_db_sequential([archive, queue_item, assignment, spool])
+    printer_manager = MagicMock()
+    printer_manager.get_status.return_value = SimpleNamespace(
+        raw_data={"mapping": [0]}, progress=100, layer_num=50, tray_now=255
+    )
+    filament_usage = [{"slot_id": 1, "used_g": 10.0, "type": "PLA", "color": ""}]
+
+    with (
+        patch("backend.app.core.config.settings") as mock_settings,
+        patch(
+            "backend.app.utils.threemf_tools.extract_filament_usage_from_3mf",
+            return_value=filament_usage,
+        ) as extract_usage,
+    ):
+        mock_settings.base_dir = MagicMock()
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_settings.base_dir.__truediv__ = MagicMock(return_value=mock_path)
+
+        results = await _track_from_3mf(
+            printer_id=1,
+            archive_id=91,
+            status="completed",
+            print_name="Test",
+            handled_trays=set(),
+            printer_manager=printer_manager,
+            db=db,
+        )
+
+    assert extract_usage.call_args.args == (mock_path, 2)
+    assert len(results) == 1
+    assert (results[0]["spool_id"], results[0]["weight_used"]) == (1, 10.0)
