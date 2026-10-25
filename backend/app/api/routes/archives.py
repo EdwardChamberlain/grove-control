@@ -2,6 +2,7 @@ import io
 import json
 import logging
 import re as _re
+import shutil
 import tempfile
 import zipfile
 from collections import defaultdict
@@ -4476,6 +4477,7 @@ async def upload_source_3mf_by_name(
     # Stage in the destination directory so replacement is atomic. Keep the old
     # source until the validated new file is in place and the archive row commits.
     staged_path: Path | None = None
+    backup_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             dir=source_path.parent,
@@ -4485,14 +4487,44 @@ async def upload_source_3mf_by_name(
         ) as staged_file:
             staged_path = Path(staged_file.name)
             staged_file.write(content)
-        staged_path.replace(source_path)
+
+        # Repeated uploads commonly target the current source path. Keep its
+        # bytes so a failed database commit can restore the existing source.
+        if old_source_path == source_path and source_path.exists():
+            with tempfile.NamedTemporaryFile(
+                dir=source_path.parent,
+                prefix=f".{source_path.name}.",
+                suffix=".bak",
+                delete=False,
+            ) as backup_file:
+                backup_path = Path(backup_file.name)
+            shutil.copy2(source_path, backup_path)
+
+        try:
+            staged_path.replace(source_path)
+            archive.source_3mf_path = str(source_path.relative_to(settings.base_dir))
+            await db.commit()
+        except Exception:
+            if backup_path is not None:
+                try:
+                    backup_path.replace(source_path)
+                except OSError as restore_error:
+                    logger.error(
+                        "Failed to restore old source for archive %s; backup remains at %s: %s",
+                        archive.id,
+                        backup_path,
+                        restore_error,
+                    )
+                    backup_path = None
+                else:
+                    backup_path = None
+            raise
+        await db.refresh(archive)
     finally:
         if staged_path is not None:
             staged_path.unlink(missing_ok=True)
-
-    archive.source_3mf_path = str(source_path.relative_to(settings.base_dir))
-    await db.commit()
-    await db.refresh(archive)
+        if backup_path is not None:
+            backup_path.unlink(missing_ok=True)
 
     if old_source_path is not None and old_source_path != source_path:
         try:
