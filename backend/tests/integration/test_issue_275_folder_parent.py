@@ -2,10 +2,8 @@
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from backend.app.models.library import LibraryFolder
 from backend.app.core.config import settings
+from backend.app.models.library import LibraryFolder
 
 pytestmark = pytest.mark.integration
 
