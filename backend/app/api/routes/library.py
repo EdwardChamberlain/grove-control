@@ -1174,6 +1174,8 @@ async def update_folder(
         # Check for circular reference in ancestors
         if data.parent_id != 0:  # 0 means move to root
             target_parent = await db.get(LibraryFolder, data.parent_id)
+            if target_parent is None:
+                raise HTTPException(status_code=404, detail="Parent folder not found")
             _reject_system_folder(target_parent, "folders can't be moved into it")
             current_id = data.parent_id
             while current_id is not None:
