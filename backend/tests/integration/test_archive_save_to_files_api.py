@@ -26,8 +26,9 @@ URL = "/api/v1/archives/{}/save-to-files"
 def _make_3mf(marker: str = "a") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("3D/3dmodel.model", f"<model>{marker}</model>")
-        zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+        # Fixed timestamps so two calls produce identical bytes.
+        zf.writestr(zipfile.ZipInfo("3D/3dmodel.model", date_time=(2026, 1, 1, 0, 0, 0)), f"<model>{marker}</model>")
+        zf.writestr(zipfile.ZipInfo("Metadata/plate_1.gcode", date_time=(2026, 1, 1, 0, 0, 0)), b"G1 X1")
     return buf.getvalue()
 
 
