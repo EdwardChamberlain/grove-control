@@ -57,7 +57,8 @@ def _zip(files: dict[str, str | bytes]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, data in files.items():
-            zf.writestr(name, data)
+            # Fixed timestamp: ZIP bytes are pytest params, and test IDs must match across xdist workers.
+            zf.writestr(zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), data)
     return buf.getvalue()
 
 
