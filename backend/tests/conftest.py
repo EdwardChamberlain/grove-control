@@ -135,47 +135,19 @@ def test_database_url():
 
 
 def _register_models() -> None:
-    """Import every model module so its tables are on ``Base.metadata``."""
-    from backend.app.models import (  # noqa: F401
-        active_print_session,
-        ams_history,
-        ams_label,
-        api_key,
-        archive,
-        auth_ephemeral,
-        color_catalog,
-        external_link,
-        filament,
-        group,
-        kprofile_note,
-        maintenance,
-        notification,
-        notification_template,
-        oidc_provider,
-        print_log,
-        print_queue,
-        printer,
-        project,
-        project_bom,
-        scheduled_drying,
-        settings,
-        slot_preset,
-        smart_plug,
-        smart_plug_energy_snapshot,
-        spool,
-        spool_assignment,
-        spool_catalog,
-        spool_filament_preset,
-        spool_k_profile,
-        spool_usage_history,
-        spoolman_k_profile,
-        spoolman_slot_assignment,
-        user,
-        user_email_pref,
-        user_otp_code,
-        user_totp,
-        virtual_printer,
-    )
+    """Import every model module so its tables are on ``Base.metadata``.
+
+    Discovered rather than listed: a hand-kept list silently left newer
+    tables (shopping list, SKU settings, Spoolman print tracking) out of the
+    test schema, so routes using them could not be tested.
+    """
+    import importlib
+    import pkgutil
+
+    from backend.app import models
+
+    for module in pkgutil.iter_modules(models.__path__):
+        importlib.import_module(f"{models.__name__}.{module.name}")
 
 
 # Schema DDL keyed by the set of registered table names. Later imports (for
