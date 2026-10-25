@@ -1330,17 +1330,21 @@ async def _track_from_3mf(
     # plate at dispatch — without falling back to them the parser sums every
     # plate of a multi-plate file and charges the lot to one spool.
     if plate_id is None:
-        # PrintArchive has no plate_id column. Recover it from the associated
-        # queue item when available; otherwise the 3MF parser handles the
-        # unscoped print without aborting usage tracking.
-        plate_queue_item = await _dispatch_queue_item()
-        if plate_queue_item is not None and plate_queue_item.plate_id is not None:
-            plate_id = plate_queue_item.plate_id
-            logger.info(
-                "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
-                plate_id,
-                plate_queue_item.id,
-            )
+        # PrintArchive currently has no mapped plate_id field. Read it only as
+        # optional compatibility data, then fall back to the persisted queue item.
+        archive_plate_id = getattr(archive, "plate_id", None) if archive is not None else None
+        if archive_plate_id is not None:
+            plate_id = archive_plate_id
+            logger.info("[UsageTracker] 3MF: plate_id=%s recovered from archive %s", plate_id, archive_id)
+        else:
+            plate_queue_item = await _dispatch_queue_item()
+            if plate_queue_item is not None and plate_queue_item.plate_id is not None:
+                plate_id = plate_queue_item.plate_id
+                logger.info(
+                    "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
+                    plate_id,
+                    plate_queue_item.id,
+                )
 
     filament_usage = extract_filament_usage_from_3mf(file_path, plate_id)
     if not filament_usage and plate_id is not None:
