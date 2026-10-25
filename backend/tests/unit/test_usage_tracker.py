@@ -89,9 +89,8 @@ def _mock_db_sequential(responses):
         result = MagicMock()
         value = responses[idx] if idx < len(responses) else None
         result.scalar_one_or_none.return_value = value
-        # Lookups that may legitimately match more than one row (an archive
-        # dispatched as several queue items in a batch) use scalars().first()
-        # instead of scalar_one_or_none() — same response sequence either way.
+        # Keep the sequential mock compatible with both single-row lookups and
+        # legacy tests that still exercise scalars().first().
         result.scalars.return_value.first.return_value = value
         # For cost aggregation queries that use .scalar() instead of .scalar_one_or_none()
         result.scalar.return_value = None
@@ -691,6 +690,7 @@ class TestTrackFrom3mf:
                 handled_trays=handled_trays,
                 printer_manager=printer_manager,
                 db=db,
+                queue_item_id=20,
             )
 
         assert len(results) == 1
@@ -746,6 +746,7 @@ class TestTrackFrom3mf:
                 handled_trays=handled_trays,
                 printer_manager=printer_manager,
                 db=db,
+                queue_item_id=30,
             )
 
         assert len(results) == 2
@@ -2637,6 +2638,7 @@ async def test_real_archive_without_plate_id_uses_queue_plate_for_3mf_scope():
             handled_trays=set(),
             printer_manager=printer_manager,
             db=db,
+            queue_item_id=91,
         )
 
     assert extract_usage.call_args.args == (mock_path, 2)

@@ -4905,6 +4905,7 @@ async def on_print_complete(printer_id: int, data: dict):
                     db,
                     archive_id=archive_id,
                     ams_mapping=stored_ams_mapping,
+                    queue_item_id=queue_item_id,
                 )
                 if usage_results:
                     await ws_manager.broadcast(
