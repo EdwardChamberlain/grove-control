@@ -195,19 +195,24 @@ describe('Maintenance mode', () => {
     await waitFor(() => expect(requests.patches).toEqual([{ is_active: false }]));
   });
 
-  it('exits maintenance', async () => {
+  it('exits maintenance from the printer card', async () => {
     const requests = setup({ printerOverrides: { is_active: false } });
+    localStorage.setItem('printerViewMode', 'detail');
     const user = userEvent.setup();
     render(<PrintersPage />);
     await screen.findAllByText('X1 Carbon');
-    const triggers = screen.queryAllByTitle(/more/i);
-    if (triggers.length === 0) {
-      // A printer in maintenance shows an Exit button instead of the full card.
-      await user.click(await screen.findByRole('button', { name: 'Exit maintenance' }));
-    } else {
-      await user.click(triggers[0]);
-      await user.click(screen.getByRole('button', { name: 'Exit maintenance mode' }));
-    }
+    await user.click(await screen.findByRole('button', { name: 'Exit maintenance' }));
+
+    await waitFor(() => expect(requests.patches).toEqual([{ is_active: true }]));
+    expect(await screen.findByText('X1 Carbon is back online')).toBeInTheDocument();
+  });
+
+  it('exits maintenance from the actions menu', async () => {
+    const requests = setup({ printerOverrides: { is_active: false } });
+    localStorage.setItem('printerViewMode', 'detail');
+    const user = userEvent.setup();
+    await openMenu(user);
+    await user.click(screen.getByRole('button', { name: 'Exit maintenance mode' }));
 
     await waitFor(() => expect(requests.patches).toEqual([{ is_active: true }]));
     expect(await screen.findByText('X1 Carbon is back online')).toBeInTheDocument();
