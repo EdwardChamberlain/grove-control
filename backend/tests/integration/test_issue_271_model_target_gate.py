@@ -26,9 +26,7 @@ class Env:
         tray_list = [{"id": str(i), "tray_type": t, "tray_color": c} for i, (t, c) in enumerate(trays)]
         self.states[printer_id] = {
             "connected": connected,
-            "status": SimpleNamespace(
-                state=state, raw_data={"ams": [{"id": "0", "tray": tray_list}], "vt_tray": []}
-            ),
+            "status": SimpleNamespace(state=state, raw_data={"ams": [{"id": "0", "tray": tray_list}], "vt_tray": []}),
         }
 
     def manager(self):
