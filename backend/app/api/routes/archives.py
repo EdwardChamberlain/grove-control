@@ -817,15 +817,9 @@ async def rebuild_search_index(
 
     try:
         if is_sqlite():
-            # SQLite: rebuild FTS5 virtual table
-            await db.execute(text("DELETE FROM archive_fts"))
-            await db.execute(
-                text("""
-                INSERT INTO archive_fts(rowid, print_name, filename, tags, notes, designer, filament_type)
-                SELECT id, print_name, filename, tags, notes, designer, filament_type
-                FROM print_archives
-            """)
-            )
+            # SQLite FTS5 external-content tables must use the special rebuild
+            # command; DELETE can fail when the index itself is out of sync.
+            await db.execute(text("INSERT INTO archive_fts(archive_fts) VALUES('rebuild')"))
             await db.commit()
 
             result = await db.execute(text("SELECT COUNT(*) FROM archive_fts"))
