@@ -96,8 +96,14 @@ async def test_same_name_cancelled_commit_restores_existing_source(
 
     with monkeypatch.context() as patcher:
         patcher.setattr(AsyncSession, "commit", cancel_commit)
-        with pytest.raises(asyncio.CancelledError):
-            await _upload_source(async_client, "Gear box.3mf", _zip_bytes("second"))
+        try:
+            response = await _upload_source(async_client, "Gear box.3mf", _zip_bytes("second"))
+        except asyncio.CancelledError:
+            pass
+        else:
+            # The auth middleware fails closed with a 5xx when the request
+            # task is cancelled; some ASGI transports propagate cancellation.
+            assert response.status_code >= 500
 
     await db_session.refresh(archive)
     assert archive.source_3mf_path == original_path
