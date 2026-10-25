@@ -1,9 +1,10 @@
 """Regression tests for rejecting library-folder moves to missing parents."""
 
 import pytest
+from httpx import AsyncClient
+
 from backend.app.core.config import settings
 from backend.app.models.library import LibraryFolder
-from httpx import AsyncClient
 
 pytestmark = pytest.mark.integration
 
