@@ -91,7 +91,11 @@ async def test_same_name_cancelled_commit_restores_existing_source(
     original_path = archive.source_3mf_path
     original_bytes = (tmp_path / original_path).read_bytes()
 
+    commit_called = False
+
     async def cancel_commit(self):
+        nonlocal commit_called
+        commit_called = True
         raise asyncio.CancelledError()
 
     with monkeypatch.context() as patcher:
@@ -105,6 +109,7 @@ async def test_same_name_cancelled_commit_restores_existing_source(
             # task is cancelled; some ASGI transports propagate cancellation.
             assert response.status_code >= 500
 
+    assert commit_called
     await db_session.refresh(archive)
     assert archive.source_3mf_path == original_path
     assert (tmp_path / original_path).read_bytes() == original_bytes
