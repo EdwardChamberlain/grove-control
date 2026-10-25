@@ -4498,7 +4498,9 @@ async def upload_source_3mf_by_name(
         try:
             old_source_path.unlink(missing_ok=True)
         except OSError as cleanup_error:
-            logger.warning("Uploaded new source for archive %s but could not remove old file: %s", archive.id, cleanup_error)
+            logger.warning(
+                "Uploaded new source for archive %s but could not remove old file: %s", archive.id, cleanup_error
+            )
 
     return {
         "status": "uploaded",
