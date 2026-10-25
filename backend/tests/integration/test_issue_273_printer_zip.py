@@ -29,15 +29,11 @@ async def test_empty_paths_remains_a_client_error(async_client: AsyncClient, pri
 
 async def test_all_missing_files_return_404(async_client: AsyncClient, printer_factory, sd_card):
     printer = await printer_factory()
-    response = await async_client.post(
-        f"/api/v1/printers/{printer.id}/files/download-zip", json={"paths": ["/gone"]}
-    )
+    response = await async_client.post(f"/api/v1/printers/{printer.id}/files/download-zip", json={"paths": ["/gone"]})
     assert response.status_code == 404
 
 
-async def test_partial_download_returns_only_available_files(
-    async_client: AsyncClient, printer_factory, sd_card
-):
+async def test_partial_download_returns_only_available_files(async_client: AsyncClient, printer_factory, sd_card):
     printer = await printer_factory()
     sd_card["/a.gcode"] = b"A"
     response = await async_client.post(
