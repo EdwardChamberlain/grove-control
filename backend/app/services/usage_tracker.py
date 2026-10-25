@@ -1317,9 +1317,7 @@ async def _track_from_3mf(
 
     async def _dispatch_queue_item():
         if not _queue_item_lookup:
-            if queue_item_id is None:
-                _queue_item_lookup.append(None)
-            else:
+            if queue_item_id is not None:
                 queue_query = select(PrintQueueItem).where(
                     PrintQueueItem.id == queue_item_id,
                     PrintQueueItem.printer_id == printer_id,
@@ -1328,6 +1326,20 @@ async def _track_from_3mf(
                     queue_query = queue_query.where(PrintQueueItem.archive_id == archive_id)
                 queue_result = await db.execute(queue_query)
                 _queue_item_lookup.append(queue_result.scalar_one_or_none())
+            elif archive_id is None:
+                _queue_item_lookup.append(None)
+            else:
+                # Compatibility for callers without a completion-run ID: keep
+                # the fallback printer-scoped and prefer the newest terminal
+                # row. The main completion callback always passes the exact ID.
+                queue_result = await db.execute(
+                    select(PrintQueueItem)
+                    .where(PrintQueueItem.archive_id == archive_id)
+                    .where(PrintQueueItem.printer_id == printer_id)
+                    .where(PrintQueueItem.status.in_(["printing", "completed", "failed", "cancelled"]))
+                    .order_by(PrintQueueItem.id.desc())
+                )
+                _queue_item_lookup.append(queue_result.scalars().first())
         return _queue_item_lookup[0]
 
     # The caller's plate_id comes from the in-memory session, which a restart
