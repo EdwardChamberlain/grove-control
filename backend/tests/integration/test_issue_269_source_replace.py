@@ -40,9 +40,7 @@ async def _upload_source(client, name, content):
     return await client.post("/api/v1/archives/upload-source", files={"file": (name, content)})
 
 
-async def test_invalid_replacement_preserves_path_and_bytes(
-    async_client: AsyncClient, archive, db_session, tmp_path
-):
+async def test_invalid_replacement_preserves_path_and_bytes(async_client: AsyncClient, archive, db_session, tmp_path):
     good = await _upload_source(async_client, "Gear box.3mf", _zip_bytes("first"))
     assert good.status_code == 200
     await db_session.refresh(archive)
