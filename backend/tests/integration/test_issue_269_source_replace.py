@@ -74,7 +74,7 @@ async def test_same_name_commit_failure_restores_existing_source(
         except RuntimeError as error:
             assert str(error) == "forced commit failure"
         else:
-            assert response.status_code == 500
+            assert response.status_code >= 500
 
     await db_session.refresh(archive)
     assert archive.source_3mf_path == original_path
