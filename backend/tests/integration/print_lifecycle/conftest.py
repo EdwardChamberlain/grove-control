@@ -45,6 +45,8 @@ _MAIN_STATE = (
     "_printer_last_connected",
     "_printer_offline_notify_tasks",
     "_ams_alarm_cooldown",
+    "_ams_assignment_locks",
+    "_unknown_tag_last_broadcast",
 )
 
 
