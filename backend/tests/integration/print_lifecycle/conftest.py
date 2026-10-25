@@ -126,6 +126,8 @@ class LifecycleEnv:
     printer_manager: MagicMock
     client: MagicMock
     base_dir: object
+    background_tasks_at_start: set[asyncio.Task] = field(default_factory=set)
+    background_task_errors: dict[asyncio.Task, BaseException] = field(default_factory=dict)
 
     async def add(self, *rows):
         async with self.session() as db:
@@ -147,14 +149,65 @@ class LifecycleEnv:
             return list((await db.execute(select(model))).scalars().all())
 
     async def drain(self, timeout: float = 10.0):
-        """Wait for every background task the callbacks spawned."""
+        """Wait for callback tasks and fail if any task raised unexpectedly."""
         from backend.app.core import tasks
 
         async def _wait():
-            while tasks._background_tasks:
-                await asyncio.gather(*list(tasks._background_tasks), return_exceptions=True)
+            while current := tuple(set(tasks._background_tasks) - self.background_tasks_at_start):
+                results = await asyncio.gather(*current, return_exceptions=True)
+                for task, result in zip(current, results, strict=True):
+                    if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                        self.background_task_errors[task] = result
+                await asyncio.sleep(0)
 
         await asyncio.wait_for(_wait(), timeout)
+        failures = list(self.background_task_errors.items())
+        self.background_task_errors.clear()
+        if failures:
+            details = "\n".join(f"- {task.get_name()}: {type(error).__name__}: {error}" for task, error in failures)
+            raise AssertionError(f"Lifecycle background task(s) failed:\n{details}") from failures[0][1]
+
+    async def cleanup_background_tasks(self):
+        """Cancel leftovers and surface failures from tasks the test did not drain."""
+        from backend.app.core import tasks
+
+        failures = []
+        pending = []
+        state_tasks = tuple(main._printer_offline_notify_tasks.values())
+        for task in state_tasks:
+            if not task.done():
+                task.cancel()
+        if state_tasks:
+            done, state_pending = await asyncio.wait(state_tasks, timeout=1.0)
+            pending.extend(task.get_name() for task in state_pending)
+            for task in done:
+                if task.cancelled():
+                    continue
+                error = task.exception()
+                if error is not None:
+                    failures.append((task.get_name(), error))
+
+        deadline = asyncio.get_running_loop().time() + 1.0
+        while current := set(tasks._background_tasks) - self.background_tasks_at_start:
+            for task in current:
+                if not task.done():
+                    task.cancel()
+            timeout = max(0.0, deadline - asyncio.get_running_loop().time())
+            _, still_pending = await asyncio.wait(current, timeout=timeout)
+            pending.extend(task.get_name() for task in still_pending)
+            if still_pending:
+                break
+            # A cancelled task may spawn cleanup work from its finally block.
+            await asyncio.sleep(0)
+
+        failures.extend((task.get_name(), error) for task, error in self.background_task_errors.items())
+        self.background_task_errors.clear()
+        if failures or pending:
+            details = [f"- {name}: {type(error).__name__}: {error}" for name, error in failures]
+            details.extend(f"- {name}: still pending after cancellation" for name in pending)
+            raise AssertionError("Lifecycle background task cleanup failed:\n" + "\n".join(details)) from (
+                failures[0][1] if failures else None
+            )
 
     async def set_setting(self, key: str, value: str):
         from backend.app.models.settings import Settings
@@ -218,8 +271,20 @@ def _serialised_spawner():
 
 @pytest.fixture
 async def lifecycle(test_engine, tmp_path, monkeypatch):
+    from backend.app.core import tasks
+
     session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
     storage = FakePrinterStorage()
+    background_tasks_at_start = set(tasks._background_tasks)
+    background_task_errors = {}
+    original_task_done = tasks._on_task_done
+
+    def track_task_done(task):
+        if task not in background_tasks_at_start and not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                background_task_errors[task] = error
+        original_task_done(task)
 
     monkeypatch.setattr(app_settings, "base_dir", tmp_path)
     monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -253,6 +318,8 @@ async def lifecycle(test_engine, tmp_path, monkeypatch):
         printer_manager=printer_manager,
         client=client,
         base_dir=tmp_path,
+        background_tasks_at_start=background_tasks_at_start,
+        background_task_errors=background_task_errors,
     )
     env.notifications._get_providers_for_event.return_value = []
 
@@ -261,6 +328,7 @@ async def lifecycle(test_engine, tmp_path, monkeypatch):
     with (
         patch("backend.app.main.async_session", session),
         patch("backend.app.core.database.async_session", session),
+        patch("backend.app.core.tasks._on_task_done", track_task_done),
         patch("backend.app.main.spawn_background_task", _serialised_spawner()),
         patch("backend.app.main.ws_manager", env.ws),
         patch("backend.app.main.notification_service", env.notifications),
@@ -278,9 +346,13 @@ async def lifecycle(test_engine, tmp_path, monkeypatch):
         patch("backend.app.services.layer_timelapse.on_print_complete", AsyncMock(return_value=None)),
         patch("backend.app.main._scan_for_timelapse_with_retries", AsyncMock()),
     ):
-        yield env
-
-    _reset_state()
+        try:
+            yield env
+        finally:
+            try:
+                await env.cleanup_background_tasks()
+            finally:
+                _reset_state()
 
 
 def _reset_state():
