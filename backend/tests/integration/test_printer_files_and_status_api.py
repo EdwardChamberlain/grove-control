@@ -53,10 +53,16 @@ def _kprofile(slot_id, k_value):
 
 
 def _zip(files: dict[str, str | bytes]) -> bytes:
+    """Build a ZIP with fixed timestamps.
+
+    Some of these are pytest parameters, and pytest derives test IDs from
+    bytes values. ZIP headers default to the current time, which gave each
+    xdist worker different IDs and failed collection.
+    """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, data in files.items():
-            zf.writestr(name, data)
+            zf.writestr(zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), data)
     return buf.getvalue()
 
 
