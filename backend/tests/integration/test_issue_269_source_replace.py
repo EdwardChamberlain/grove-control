@@ -1,8 +1,8 @@
 """Regression tests for safe archive source replacement."""
 
-from pathlib import Path
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
