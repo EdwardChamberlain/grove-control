@@ -2,8 +2,6 @@
 
 import base64
 
-import pytest
-
 from backend.app.api.routes import library
 
 
