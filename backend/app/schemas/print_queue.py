@@ -290,6 +290,12 @@ class PrintQueueItemResponse(BaseModel):
         from_attributes = True
 
 
+class PrintQueueItemCreateResponse(PrintQueueItemResponse):
+    """Queue creation response, including every row created by quantity."""
+
+    created_queue_item_ids: list[int]
+
+
 class PrintQueueReorderItem(BaseModel):
     id: int
     position: int

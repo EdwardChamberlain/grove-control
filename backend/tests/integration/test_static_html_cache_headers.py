@@ -27,11 +27,8 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-# index.html is served by two distinct routes:
-#   - "/" — root entry
-#   - the SPA catch-all (any unrecognised path that isn't /api/)
-# Both must carry the same headers; testing both individually is the
-# only guard against one being added later without the other.
+# index.html is served by the root entry, SPA catch-all, and dedicated Orca
+# integration handler. These representative paths pin the shared cache contract.
 HTML_ROUTES = [
     pytest.param("/", id="root"),
     # Catch-all routes a nested SPA path to index.html. The trailing
@@ -61,7 +58,7 @@ def fake_static_index(monkeypatch, tmp_path):
 
     static_dir = tmp_path / "static"
     static_dir.mkdir()
-    (static_dir / "index.html").write_text("<!doctype html><title>stub</title>")
+    (static_dir / "index.html").write_text('<!doctype html><head><base href="/" /></head><title>stub</title>')
 
     monkeypatch.setattr(config_mod.settings, "static_dir", static_dir)
     # main.py imports `settings as app_settings`, so the route handlers
@@ -117,3 +114,38 @@ async def test_api_routes_unaffected_by_html_cache_headers(async_client: AsyncCl
         f"If a 'no-cache' directive is intentional on an API endpoint it should be "
         f"set per-route, not inherited from the SPA HTML path."
     )
+
+
+@pytest.mark.asyncio
+async def test_prefixed_login_shell_keeps_the_reverse_proxy_base(async_client: AsyncClient, fake_static_index):
+    response = await async_client.get("/grove/login")
+
+    assert response.status_code == 200
+    assert '<base href="/grove/" />' in response.text
+
+
+@pytest.mark.asyncio
+async def test_path_preserving_proxy_prefix_normalizes_asset_path():
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+    from backend.app import main as main_mod
+
+    scope = {
+        "type": "http",
+        "path": "/grove/assets/orca.js",
+        "raw_path": b"/grove/assets/orca.js",
+        "root_path": "",
+    }
+    request = Request(scope)
+
+    async def dispatch(normalized_request):
+        assert normalized_request.scope["root_path"] == "/grove"
+        assert normalized_request.scope["path"] == "/assets/orca.js"
+        assert normalized_request.scope["raw_path"] == b"/assets/orca.js"
+        return Response("window.orcaBundleLoaded = true;")
+
+    response = await main_mod.subpath_proxy_middleware(request, dispatch)
+
+    assert response.status_code == 200
+    assert response.body.decode() == "window.orcaBundleLoaded = true;"

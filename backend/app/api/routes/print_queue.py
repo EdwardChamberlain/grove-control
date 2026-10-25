@@ -29,6 +29,7 @@ from backend.app.schemas.print_queue import (
     PrintQueueBulkUpdate,
     PrintQueueBulkUpdateResponse,
     PrintQueueItemCreate,
+    PrintQueueItemCreateResponse,
     PrintQueueItemResponse,
     PrintQueueItemUpdate,
     PrintQueueReorder,
@@ -591,7 +592,7 @@ def _variant_values(
     }
 
 
-@router.post("/", response_model=PrintQueueItemResponse)
+@router.post("/", response_model=PrintQueueItemCreateResponse)
 async def add_to_queue(
     data: PrintQueueItemCreate,
     db: AsyncSession = Depends(get_db),
@@ -990,7 +991,10 @@ async def add_to_queue(
     except Exception:
         pass  # Don't fail queue add if notification fails
 
-    return _enrich_response(item)
+    return PrintQueueItemCreateResponse(
+        **_enrich_response(item).model_dump(),
+        created_queue_item_ids=[created.id for created in items],
+    )
 
 
 @router.patch("/bulk", response_model=PrintQueueBulkUpdateResponse)
