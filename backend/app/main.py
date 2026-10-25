@@ -5010,8 +5010,10 @@ async def on_print_complete(printer_id: int, data: dict):
                                     select(LibraryFile).where(LibraryFile.id == queue_item.library_file_id)
                                 )
                                 lib_file = lib_result.scalar_one_or_none()
-                                if lib_file and lib_file.print_time_seconds:
-                                    no_archive_data["print_time_seconds"] = lib_file.print_time_seconds
+                                if lib_file:
+                                    print_time_seconds = (lib_file.file_metadata or {}).get("print_time_seconds")
+                                    if isinstance(print_time_seconds, (int, float)) and print_time_seconds > 0:
+                                        no_archive_data["print_time_seconds"] = int(print_time_seconds)
                     except Exception as lookup_err:
                         logger.debug(
                             "[NOTIFY-BG] Could not look up queue item for no-archive notification: %s", lookup_err
