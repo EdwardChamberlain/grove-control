@@ -560,6 +560,7 @@ def extract_gcode_thumbnail(file_path: Path) -> bytes | None:
         in_thumbnail = False
         thumbnail_lines = []
         best_size = 0
+        current_size = 0
 
         with open(file_path, errors="ignore") as f:
             # Only read first 50KB for performance (thumbnails are at the start)
@@ -572,13 +573,14 @@ def extract_gcode_thumbnail(file_path: Path) -> bytes | None:
             if line.startswith("; thumbnail begin"):
                 in_thumbnail = True
                 thumbnail_lines = []
+                current_size = 0
                 # Parse dimensions: "; thumbnail begin 300x300 12345"
                 match = re.search(r"(\d+)x(\d+)", line)
                 if match:
                     width = int(match.group(1))
-                    # Prefer larger thumbnails (up to 300px)
-                    if width > best_size and width <= 300:
-                        best_size = width
+                    # Prefer larger thumbnails (up to 300px).
+                    if width <= 300:
+                        current_size = width
                 continue
 
             # Check for thumbnail end
@@ -587,10 +589,11 @@ def extract_gcode_thumbnail(file_path: Path) -> bytes | None:
                     try:
                         # Decode the base64 data
                         b64_data = "".join(thumbnail_lines)
-                        decoded = base64.b64decode(b64_data)
-                        # Only keep if this is the best size or first valid thumbnail
-                        if thumbnail_data is None or best_size > 0:
+                        decoded = base64.b64decode(b64_data, validate=True)
+                        # Ignore malformed and empty images before ranking them.
+                        if decoded and (thumbnail_data is None or current_size > best_size):
                             thumbnail_data = decoded
+                            best_size = current_size
                     except (binascii.Error, ValueError):
                         pass  # Skip thumbnail with invalid base64 data
                 in_thumbnail = False
