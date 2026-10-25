@@ -589,10 +589,9 @@ def extract_gcode_thumbnail(file_path: Path) -> bytes | None:
                     try:
                         # Decode the base64 data
                         b64_data = "".join(thumbnail_lines)
-                        decoded = base64.b64decode(b64_data)
-                        # Keep the first valid fallback, then replace it only
-                        # with a larger eligible thumbnail.
-                        if thumbnail_data is None or current_size > best_size:
+                        decoded = base64.b64decode(b64_data, validate=True)
+                        # Ignore malformed and empty images before ranking them.
+                        if decoded and (thumbnail_data is None or current_size > best_size):
                             thumbnail_data = decoded
                             best_size = current_size
                     except (binascii.Error, ValueError):
