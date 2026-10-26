@@ -31,10 +31,10 @@ export default defineConfig({
         ['lcov', { projectRoot: '..' }],
       ],
       thresholds: {
-        statements: 56,
-        branches: 53,
-        functions: 50,
-        lines: 58,
+        statements: 72,
+        branches: 65,
+        functions: 63,
+        lines: 73,
       },
       include: ['src/**/*.{ts,tsx}'],
       exclude: [

@@ -154,8 +154,9 @@ Coverage floors:
 
 When your change raises coverage, raise the floors in the same PR to the new
 figure rounded down (backend to one decimal place, frontend to whole numbers).
-Never lower a floor to get a PR through. Issue #256 tracks raising the floors
-towards 80% backend and 70% frontend lines.
+Never lower a floor to get a PR through. The targets from issue #256 are now
+the minimum: 80% backend lines; 70% frontend statements and lines, 65%
+branches and 60% functions. No floor may go below these.
 
 On pull requests, both coverage jobs also report how much of the PR's new and
 changed lines are covered (`diff-cover`, in the job summary). The report does
