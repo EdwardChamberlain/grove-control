@@ -31,6 +31,7 @@ _MAIN_STATE = (
     "_print_ams_mappings",
     "_print_plate_ids",
     "_user_stopped_printers",
+    "_user_stopped_queue_item_ids",
     "_bed_cool_waiters",
     "_stage22_finish_frames",
     "_timelapse_baselines",

@@ -253,7 +253,7 @@ class TestPlateIdRecovery:
         archive = _make_archive(archive_id=312, plate_id=1)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
         seen_plate_ids: list = []
 
         printer_manager = MagicMock()
@@ -326,6 +326,7 @@ class TestPlateIdRecovery:
                 handled_trays=set(),
                 printer_manager=printer_manager,
                 db=db,
+                queue_item_id=queue_item.id,
                 plate_id=None,
             )
 
@@ -336,7 +337,7 @@ class TestPlateIdRecovery:
         archive = _make_archive(archive_id=312, plate_id=1)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
         seen_plate_ids: list = []
 
         printer_manager = MagicMock()
@@ -414,6 +415,7 @@ class TestMappingPriority:
                 handled_trays=set(),
                 printer_manager=printer_manager,
                 db=db,
+                queue_item_id=queue_item.id,
                 plate_id=1,
             )
 
@@ -427,7 +429,7 @@ class TestMappingPriority:
         archive = _make_archive(archive_id=400, plate_id=1)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -601,7 +603,7 @@ class TestPlateNotInTheFile:
         archive = _make_archive(archive_id=312, plate_id=7)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
         calls: list = []
 
         def _extract(path, plate_id=None):

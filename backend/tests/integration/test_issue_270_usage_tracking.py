@@ -76,8 +76,9 @@ async def test_archived_print_without_session_plate_records_3mf_usage(
     assert history.status == "completed"
 
 
-async def test_archive_reuse_uses_current_queue_row_for_plate_and_mapping(
-    db_session, printer_factory, archive_factory, monkeypatch, tmp_path
+@pytest.mark.parametrize("identity", ["queue_id", "dispatch_id", "unknown"])
+async def test_archive_reuse_only_uses_queue_data_with_run_identity(
+    db_session, printer_factory, archive_factory, monkeypatch, tmp_path, identity
 ):
     printer = await printer_factory()
     relative_path = "archives/test/reused.gcode.3mf"
@@ -105,6 +106,7 @@ async def test_archive_reuse_uses_current_queue_row_for_plate_and_mapping(
         status="completed",
         plate_id=2,
         ams_mapping="[0]",
+        dispatch_subtask_id="current-run",
     )
     db_session.add(current_item)
 
@@ -146,7 +148,8 @@ async def test_archive_reuse_uses_current_queue_row_for_plate_and_mapping(
             printer_manager=printer_manager,
             db=db_session,
             archive_id=archive.id,
-            queue_item_id=current_item.id,
+            queue_item_id=current_item.id if identity == "queue_id" else None,
+            dispatch_subtask_id="current-run" if identity == "dispatch_id" else None,
         )
 
     await db_session.refresh(historical_spool)
@@ -158,7 +161,7 @@ async def test_archive_reuse_uses_current_queue_row_for_plate_and_mapping(
         )
     )
 
-    extract_usage.assert_called_once_with(source_path, 2)
+    extract_usage.assert_called_once_with(source_path, None if identity == "unknown" else 2)
     assert len(results) == 1
     assert results[0]["spool_id"] == current_spool.id
     assert results[0]["tray_id"] == 0

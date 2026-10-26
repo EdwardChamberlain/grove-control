@@ -705,6 +705,7 @@ async def on_print_complete(
     archive_id: int | None = None,
     ams_mapping: list[int] | None = None,
     queue_item_id: int | None = None,
+    dispatch_subtask_id: str | None = None,
 ) -> list[dict]:
     """Compute consumption deltas and update spool weight_used/last_used.
 
@@ -810,6 +811,7 @@ async def on_print_complete(
             threemf_path=threemf_path,
             plate_id=session.plate_id if session else None,
             queue_item_id=queue_item_id,
+            dispatch_subtask_id=dispatch_subtask_id,
         )
         results.extend(threemf_results)
 
@@ -1255,6 +1257,7 @@ async def _track_from_3mf(
     threemf_path=None,
     plate_id: int | None = None,
     queue_item_id: int | None = None,
+    dispatch_subtask_id: str | None = None,
 ) -> list[dict]:
     """Track usage from 3MF per-filament slicer data (primary path).
 
@@ -1310,36 +1313,26 @@ async def _track_from_3mf(
         return []
 
     # The queue item carries both the plate and the dispatched mapping. Use the
-    # exact item selected by the completion callback: an archive may be reused
-    # by historical prints, reprints, or batch rows, so archive_id alone is
-    # insufficient to identify this run.
+    # exact item selected by the completion callback, or its durable dispatch
+    # ID after a restart. An archive may be reused by historical prints,
+    # reprints, or batch rows, so archive_id alone cannot identify this run.
     _queue_item_lookup: list = []
 
     async def _dispatch_queue_item():
         if not _queue_item_lookup:
-            if queue_item_id is not None:
-                queue_query = select(PrintQueueItem).where(
-                    PrintQueueItem.id == queue_item_id,
-                    PrintQueueItem.printer_id == printer_id,
-                )
+            if queue_item_id is not None or dispatch_subtask_id:
+                queue_query = select(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id)
+                if queue_item_id is not None:
+                    queue_query = queue_query.where(PrintQueueItem.id == queue_item_id)
+                else:
+                    queue_query = queue_query.where(PrintQueueItem.dispatch_subtask_id == dispatch_subtask_id)
                 if archive_id is not None:
                     queue_query = queue_query.where(PrintQueueItem.archive_id == archive_id)
                 queue_result = await db.execute(queue_query)
                 _queue_item_lookup.append(queue_result.scalar_one_or_none())
-            elif archive_id is None:
-                _queue_item_lookup.append(None)
             else:
-                # Compatibility for callers without a completion-run ID: keep
-                # the fallback printer-scoped and prefer the newest terminal
-                # row. The main completion callback always passes the exact ID.
-                queue_result = await db.execute(
-                    select(PrintQueueItem)
-                    .where(PrintQueueItem.archive_id == archive_id)
-                    .where(PrintQueueItem.printer_id == printer_id)
-                    .where(PrintQueueItem.status.in_(["printing", "completed", "failed", "cancelled"]))
-                    .order_by(PrintQueueItem.id.desc())
-                )
-                _queue_item_lookup.append(queue_result.scalars().first())
+                # No run identity means no queue data can safely be borrowed.
+                _queue_item_lookup.append(None)
         return _queue_item_lookup[0]
 
     # The caller's plate_id comes from the in-memory session, which a restart
