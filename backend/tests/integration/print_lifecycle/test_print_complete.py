@@ -5,6 +5,7 @@ finish photo, notifications, maintenance, timelapse) is awaited with
 ``lifecycle.drain()`` before asserting.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -460,6 +461,30 @@ async def test_usage_results_are_broadcast(lifecycle):
     # Without an archive the tracked usage still reaches the notification.
     archive_data = lifecycle.notifications.on_print_complete.await_args.kwargs["archive_data"]
     assert archive_data["actual_filament_grams"] == 12.0
+
+
+async def test_drain_fails_when_a_background_task_raises(lifecycle):
+    async def fail():
+        raise RuntimeError("fixture should surface this task failure")
+
+    main.spawn_background_task(fail(), name="fixture-task-failure")
+
+    with pytest.raises(AssertionError, match="fixture should surface this task failure"):
+        await lifecycle.drain()
+
+
+async def test_cleanup_cancels_background_tasks_left_by_test(lifecycle):
+    started = asyncio.Event()
+
+    async def wait_forever():
+        started.set()
+        await asyncio.Event().wait()
+
+    task = main.spawn_background_task(wait_forever(), name="fixture-leftover-task")
+    await started.wait()
+    await lifecycle.cleanup_background_tasks()
+
+    assert task.cancelled()
 
 
 async def test_cutoff_is_five_minutes_for_recent_queue_owner(lifecycle):

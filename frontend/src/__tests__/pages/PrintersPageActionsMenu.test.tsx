@@ -38,15 +38,17 @@ interface Requests {
   deletes: string[];
   connects: number;
   refreshes: number;
+  statusReads: number;
 }
 
 function setup({ printerOverrides = {}, state = 'IDLE', diagnostic = passing as unknown, diagnosticStatus = 200 } = {}) {
-  const requests: Requests = { patches: [], diagnose: [], deletes: [], connects: 0, refreshes: 0 };
+  const requests: Requests = { patches: [], diagnose: [], deletes: [], connects: 0, refreshes: 0, statusReads: 0 };
   server.use(
     http.get('/api/v1/printers/', () => HttpResponse.json([{ ...printer, ...printerOverrides }])),
-    http.get('/api/v1/printers/:id/status', () =>
-      HttpResponse.json({ connected: true, state, temperatures: { nozzle: 25, bed: 25 }, vt_tray: [], progress: 0 }),
-    ),
+    http.get('/api/v1/printers/:id/status', () => {
+      requests.statusReads += 1;
+      return HttpResponse.json({ connected: true, state, temperatures: { nozzle: 25, bed: 25 }, vt_tray: [], progress: 0 });
+    }),
     http.get('/api/v1/queue/', () => HttpResponse.json([])),
     http.patch('/api/v1/printers/:id', async ({ request }) => {
       requests.patches.push(await request.json());
@@ -195,19 +197,24 @@ describe('Maintenance mode', () => {
     await waitFor(() => expect(requests.patches).toEqual([{ is_active: false }]));
   });
 
-  it('exits maintenance', async () => {
+  it('exits maintenance from the printer card', async () => {
     const requests = setup({ printerOverrides: { is_active: false } });
+    localStorage.setItem('printerViewMode', 'detail');
     const user = userEvent.setup();
     render(<PrintersPage />);
     await screen.findAllByText('X1 Carbon');
-    const triggers = screen.queryAllByTitle(/more/i);
-    if (triggers.length === 0) {
-      // A printer in maintenance shows an Exit button instead of the full card.
-      await user.click(await screen.findByRole('button', { name: 'Exit maintenance' }));
-    } else {
-      await user.click(triggers[0]);
-      await user.click(screen.getByRole('button', { name: 'Exit maintenance mode' }));
-    }
+    await user.click(await screen.findByRole('button', { name: 'Exit maintenance' }));
+
+    await waitFor(() => expect(requests.patches).toEqual([{ is_active: true }]));
+    expect(await screen.findByText('X1 Carbon is back online')).toBeInTheDocument();
+  });
+
+  it('exits maintenance from the actions menu', async () => {
+    const requests = setup({ printerOverrides: { is_active: false } });
+    localStorage.setItem('printerViewMode', 'detail');
+    const user = userEvent.setup();
+    await openMenu(user);
+    await user.click(screen.getByRole('button', { name: 'Exit maintenance mode' }));
 
     await waitFor(() => expect(requests.patches).toEqual([{ is_active: true }]));
     expect(await screen.findByText('X1 Carbon is back online')).toBeInTheDocument();
@@ -219,24 +226,34 @@ describe('Connection actions', () => {
     const requests = setup();
     const user = userEvent.setup();
     await openMenu(user);
+    await waitFor(() => expect(requests.statusReads).toBeGreaterThan(0));
+    const statusReadsBefore = requests.statusReads;
     await user.click(screen.getByRole('button', { name: 'Reconnect' }));
 
-    await waitFor(() => expect(requests.connects).toBe(1));
+    await waitFor(() => {
+      expect(requests.connects).toBe(1);
+      expect(requests.statusReads).toBeGreaterThan(statusReadsBefore);
+    });
   });
 
   it('force refreshes the status', async () => {
     const requests = setup();
     const user = userEvent.setup();
     await openMenu(user);
+    await waitFor(() => expect(requests.statusReads).toBeGreaterThan(0));
+    const statusReadsBefore = requests.statusReads;
     await user.click(screen.getByRole('button', { name: 'Force Refresh' }));
 
-    await waitFor(() => expect(requests.refreshes).toBe(1));
+    await waitFor(() => {
+      expect(requests.refreshes).toBe(1);
+      expect(requests.statusReads).toBeGreaterThan(statusReadsBefore);
+    });
     expect(await screen.findByText('Refresh requested')).toBeInTheDocument();
   });
 });
 
 describe('Delete printer', () => {
-  it('deletes, keeping archives unless asked otherwise', async () => {
+  it('deletes print archives by default when deleting a printer', async () => {
     const requests = setup();
     const user = userEvent.setup();
     await openMenu(user);
@@ -245,14 +262,29 @@ describe('Delete printer', () => {
     const dialog = (await screen.findByText('Delete Printer')).closest('div') as HTMLElement;
     expect(dialog).toBeInTheDocument();
     const checkbox = screen.getByRole('checkbox', { name: /Delete print archives/ });
-    const initiallyChecked = (checkbox as HTMLInputElement).checked;
-    await user.click(checkbox);
-    expect((checkbox as HTMLInputElement).checked).toBe(!initiallyChecked);
+    expect(checkbox).toBeChecked();
 
     const buttons = screen.getAllByRole('button', { name: 'Delete' });
     await user.click(buttons[buttons.length - 1]);
 
-    await waitFor(() => expect(requests.deletes).toEqual([`?delete_archives=${!initiallyChecked}`]));
+    await waitFor(() => expect(requests.deletes).toEqual(['?delete_archives=true']));
+  });
+
+  it('keeps print archives when the option is cleared', async () => {
+    const requests = setup();
+    const user = userEvent.setup();
+    await openMenu(user);
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    const checkbox = screen.getByRole('checkbox', { name: /Delete print archives/ });
+    expect(checkbox).toBeChecked();
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+
+    const buttons = screen.getAllByRole('button', { name: 'Delete' });
+    await user.click(buttons[buttons.length - 1]);
+
+    await waitFor(() => expect(requests.deletes).toEqual(['?delete_archives=false']));
   });
 
   it('can be cancelled', async () => {
