@@ -276,11 +276,6 @@ class TestNotificationWithoutArchive:
         assert args.args[1] == "Printer 4242"
         assert args.kwargs["archive_data"] is None
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: _notify_no_archive reads lib_file.print_time_seconds, which LibraryFile lacks; "
-        "the time lives in file_metadata['print_time_seconds']",
-    )
     async def test_uses_library_file_print_time(self, lifecycle):
         from backend.app.models.library import LibraryFile
 
@@ -485,11 +480,6 @@ async def test_cutoff_is_five_minutes_for_recent_queue_owner(lifecycle):
     assert lifecycle.notifications.on_print_complete.await_args.kwargs["archive_data"] is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Bug: usage_tracker reads archive.plate_id, but PrintArchive has no plate_id column, so "
-    "usage tracking aborts for archived prints whose session has no plate (e.g. slicer-started prints)",
-)
 async def test_usage_tracking_runs_for_archived_print(lifecycle, caplog):
     printer = await lifecycle.make_printer()
     await _start(lifecycle, printer)
