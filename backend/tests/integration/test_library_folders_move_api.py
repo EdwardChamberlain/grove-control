@@ -87,11 +87,6 @@ class TestUpdateFolder:
 
         assert (rename.status_code, move_into.status_code) == (400, 400)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: update_folder accepts a parent_id that doesn't exist, leaving the folder under a "
-        "non-existent parent instead of returning 404",
-    )
     async def test_unknown_parent(self, async_client: AsyncClient, storage):
         folder = await _folder(async_client, "Orphan")
         assert (await _update(async_client, folder["id"], parent_id=9999)).status_code == 404

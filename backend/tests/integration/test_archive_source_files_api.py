@@ -66,11 +66,6 @@ class TestUploadSourceByName:
     async def test_errors(self, async_client: AsyncClient, archive, name, params, status):
         assert (await _upload_source(async_client, name, _zip_bytes(), **params)).status_code == status
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: upload-source deletes the existing source 3MF before validating the new upload, so an "
-        "invalid upload leaves the archive pointing at a deleted file",
-    )
     async def test_invalid_upload_keeps_the_existing_source(self, async_client: AsyncClient, archive, tmp_path):
         good = (await _upload_source(async_client, "Gear box.3mf", _zip_bytes())).json()
 
