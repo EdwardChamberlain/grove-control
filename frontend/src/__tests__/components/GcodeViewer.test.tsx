@@ -40,8 +40,13 @@ const { GcodeViewer } = await import('../../components/GcodeViewer');
 
 const GCODE = ['G28', 'T3', 'G1 X1', 'T255', 'T7 ; swap', 'G1 X2', 'T1000'].join('\n');
 
+let originalRaf: typeof window.requestAnimationFrame;
+let originalCaf: typeof window.cancelAnimationFrame;
+
 beforeEach(() => {
   previews.length = 0;
+  originalRaf = window.requestAnimationFrame;
+  originalCaf = window.cancelAnimationFrame;
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
     cb(0);
     return 1;
@@ -50,7 +55,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  // Put back only what this file replaced; unstubAllGlobals would also drop the setup file's stubs.
+  window.requestAnimationFrame = originalRaf;
+  window.cancelAnimationFrame = originalCaf;
   setAuthToken(null);
 });
 
