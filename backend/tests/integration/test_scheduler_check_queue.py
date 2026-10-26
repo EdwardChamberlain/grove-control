@@ -306,12 +306,6 @@ class TestModelTargetedJobs:
         assert env.dispatched == [first.id]
         assert (await env.get(second)).waiting_reason.startswith("Waiting for upload slot")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: for model-targeted jobs the require_previous_success check runs before the printer is "
-        "assigned, so _check_previous_success looks up printer_id IS NULL and never sees the chosen "
-        "printer's failure",
-    )
     async def test_previous_failure_on_chosen_printer_skips_job(self, env, printer_factory):
         printer = await printer_factory(model="P1S")
         env.printer_state(printer.id)

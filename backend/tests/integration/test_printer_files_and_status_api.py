@@ -245,11 +245,6 @@ class TestDownloadZip:
         response = await async_client.post(f"/api/v1/printers/{printer.id}/files/download-zip", json={"paths": []})
         assert response.status_code == 400
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: download-zip checks len(zip_data) == 0, but an empty ZIP is still 22 bytes, so it "
-        "returns an empty archive instead of 404 when nothing could be downloaded",
-    )
     async def test_nothing_downloadable_is_404(self, async_client: AsyncClient, printer_factory, sd_card):
         printer = await printer_factory()
         response = await async_client.post(

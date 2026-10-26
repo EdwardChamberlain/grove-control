@@ -704,6 +704,8 @@ async def on_print_complete(
     db: AsyncSession,
     archive_id: int | None = None,
     ams_mapping: list[int] | None = None,
+    queue_item_id: int | None = None,
+    dispatch_subtask_id: str | None = None,
 ) -> list[dict]:
     """Compute consumption deltas and update spool weight_used/last_used.
 
@@ -808,6 +810,8 @@ async def on_print_complete(
             print_started_at=session.started_at if session else None,
             threemf_path=threemf_path,
             plate_id=session.plate_id if session else None,
+            queue_item_id=queue_item_id,
+            dispatch_subtask_id=dispatch_subtask_id,
         )
         results.extend(threemf_results)
 
@@ -1252,6 +1256,8 @@ async def _track_from_3mf(
     print_started_at: datetime | None = None,
     threemf_path=None,
     plate_id: int | None = None,
+    queue_item_id: int | None = None,
+    dispatch_subtask_id: str | None = None,
 ) -> list[dict]:
     """Track usage from 3MF per-filament slicer data (primary path).
 
@@ -1306,23 +1312,27 @@ async def _track_from_3mf(
         logger.info("[UsageTracker] 3MF: no file available for archive %s, skipping", archive_id)
         return []
 
-    # The queue item carries both the plate and the dispatched mapping; look it
-    # up at most once. ``.first()`` rather than ``.scalar_one_or_none()``
-    # because a batch dispatches one archive as several queue items, and
-    # raising there would cost the print all of its usage tracking.
+    # The queue item carries both the plate and the dispatched mapping. Use the
+    # exact item selected by the completion callback, or its durable dispatch
+    # ID after a restart. An archive may be reused by historical prints,
+    # reprints, or batch rows, so archive_id alone cannot identify this run.
     _queue_item_lookup: list = []
 
     async def _dispatch_queue_item():
         if not _queue_item_lookup:
-            if not archive_id:
-                _queue_item_lookup.append(None)
+            if queue_item_id is not None or dispatch_subtask_id:
+                queue_query = select(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id)
+                if queue_item_id is not None:
+                    queue_query = queue_query.where(PrintQueueItem.id == queue_item_id)
+                else:
+                    queue_query = queue_query.where(PrintQueueItem.dispatch_subtask_id == dispatch_subtask_id)
+                if archive_id is not None:
+                    queue_query = queue_query.where(PrintQueueItem.archive_id == archive_id)
+                queue_result = await db.execute(queue_query)
+                _queue_item_lookup.append(queue_result.scalar_one_or_none())
             else:
-                queue_result = await db.execute(
-                    select(PrintQueueItem)
-                    .where(PrintQueueItem.archive_id == archive_id)
-                    .where(PrintQueueItem.status.in_(["printing", "completed", "failed"]))
-                )
-                _queue_item_lookup.append(queue_result.scalars().first())
+                # No run identity means no queue data can safely be borrowed.
+                _queue_item_lookup.append(None)
         return _queue_item_lookup[0]
 
     # The caller's plate_id comes from the in-memory session, which a restart
@@ -1330,8 +1340,11 @@ async def _track_from_3mf(
     # plate at dispatch — without falling back to them the parser sums every
     # plate of a multi-plate file and charges the lot to one spool.
     if plate_id is None:
-        if archive is not None and archive.plate_id is not None:
-            plate_id = archive.plate_id
+        # PrintArchive currently has no mapped plate_id field. Read it only as
+        # optional compatibility data, then fall back to the persisted queue item.
+        archive_plate_id = getattr(archive, "plate_id", None) if archive is not None else None
+        if archive_plate_id is not None:
+            plate_id = archive_plate_id
             logger.info("[UsageTracker] 3MF: plate_id=%s recovered from archive %s", plate_id, archive_id)
         else:
             plate_queue_item = await _dispatch_queue_item()

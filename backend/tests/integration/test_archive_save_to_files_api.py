@@ -26,9 +26,13 @@ URL = "/api/v1/archives/{}/save-to-files"
 def _make_3mf(marker: str = "a") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Fixed timestamps so two calls produce identical bytes.
-        zf.writestr(zipfile.ZipInfo("3D/3dmodel.model", date_time=(2026, 1, 1, 0, 0, 0)), f"<model>{marker}</model>")
-        zf.writestr(zipfile.ZipInfo("Metadata/plate_1.gcode", date_time=(2026, 1, 1, 0, 0, 0)), b"G1 X1")
+        for name, content in (
+            ("3D/3dmodel.model", f"<model>{marker}</model>"),
+            ("Metadata/plate_1.gcode", b"G1 X1"),
+        ):
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, content)
     return buf.getvalue()
 
 
@@ -75,7 +79,8 @@ class TestSaveArchiveToFiles:
     async def test_saves_to_root_with_archive_metadata(
         self, async_client: AsyncClient, db_session, storage, make_archive
     ):
-        archive = await make_archive()
+        source_3mf = _make_3mf()
+        archive = await make_archive(content=source_3mf)
 
         resp = await async_client.post(URL.format(archive.id), json={"folder_id": None})
 
@@ -92,7 +97,7 @@ class TestSaveArchiveToFiles:
         assert new_file.file_metadata["filament_color"] == "#FF0000"
         assert new_file.file_metadata["sliced_for_model"] == "X1C"
         assert new_file.file_metadata["saved_from_archive_id"] == archive.id
-        assert (storage / new_file.file_path).read_bytes() == _make_3mf()
+        assert (storage / new_file.file_path).read_bytes() == source_3mf
         assert (storage / new_file.thumbnail_path).read_bytes() == b"PNGDATA"
 
     @pytest.mark.asyncio
@@ -117,7 +122,8 @@ class TestSaveArchiveToFiles:
         """The File owns its own bytes: removing the Archive's files (what
         retention does) leaves the File readable, and the Archive row is
         unchanged by the save."""
-        archive = await make_archive()
+        source_3mf = _make_3mf()
+        archive = await make_archive(content=source_3mf)
         archive_id, archive_path, thumb_path = archive.id, archive.file_path, archive.thumbnail_path
 
         resp = await async_client.post(URL.format(archive_id), json={"folder_id": None})
@@ -128,7 +134,7 @@ class TestSaveArchiveToFiles:
 
         (storage / archive_path).unlink()
         (storage / thumb_path).unlink()
-        assert (storage / new_file.file_path).read_bytes() == _make_3mf()
+        assert (storage / new_file.file_path).read_bytes() == source_3mf
         assert (storage / new_file.thumbnail_path).read_bytes() == b"PNGDATA"
 
         db_session.expire_all()

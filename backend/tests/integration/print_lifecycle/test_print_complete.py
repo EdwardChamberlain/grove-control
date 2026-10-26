@@ -5,6 +5,7 @@ finish photo, notifications, maintenance, timelapse) is awaited with
 ``lifecycle.drain()`` before asserting.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -276,11 +277,6 @@ class TestNotificationWithoutArchive:
         assert args.args[1] == "Printer 4242"
         assert args.kwargs["archive_data"] is None
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: _notify_no_archive reads lib_file.print_time_seconds, which LibraryFile lacks; "
-        "the time lives in file_metadata['print_time_seconds']",
-    )
     async def test_uses_library_file_print_time(self, lifecycle):
         from backend.app.models.library import LibraryFile
 
@@ -467,6 +463,30 @@ async def test_usage_results_are_broadcast(lifecycle):
     assert archive_data["actual_filament_grams"] == 12.0
 
 
+async def test_drain_fails_when_a_background_task_raises(lifecycle):
+    async def fail():
+        raise RuntimeError("fixture should surface this task failure")
+
+    main.spawn_background_task(fail(), name="fixture-task-failure")
+
+    with pytest.raises(AssertionError, match="fixture should surface this task failure"):
+        await lifecycle.drain()
+
+
+async def test_cleanup_cancels_background_tasks_left_by_test(lifecycle):
+    started = asyncio.Event()
+
+    async def wait_forever():
+        started.set()
+        await asyncio.Event().wait()
+
+    task = main.spawn_background_task(wait_forever(), name="fixture-leftover-task")
+    await started.wait()
+    await lifecycle.cleanup_background_tasks()
+
+    assert task.cancelled()
+
+
 async def test_cutoff_is_five_minutes_for_recent_queue_owner(lifecycle):
     """An item completed long ago doesn't lend its owner to this notification."""
     printer = await lifecycle.make_printer(auto_archive=False)
@@ -485,11 +505,6 @@ async def test_cutoff_is_five_minutes_for_recent_queue_owner(lifecycle):
     assert lifecycle.notifications.on_print_complete.await_args.kwargs["archive_data"] is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Bug: usage_tracker reads archive.plate_id, but PrintArchive has no plate_id column, so "
-    "usage tracking aborts for archived prints whose session has no plate (e.g. slicer-started prints)",
-)
 async def test_usage_tracking_runs_for_archived_print(lifecycle, caplog):
     printer = await lifecycle.make_printer()
     await _start(lifecycle, printer)

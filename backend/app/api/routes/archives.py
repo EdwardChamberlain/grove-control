@@ -2,6 +2,8 @@ import io
 import json
 import logging
 import re as _re
+import shutil
+import tempfile
 import zipfile
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -817,15 +819,9 @@ async def rebuild_search_index(
 
     try:
         if is_sqlite():
-            # SQLite: rebuild FTS5 virtual table
-            await db.execute(text("DELETE FROM archive_fts"))
-            await db.execute(
-                text("""
-                INSERT INTO archive_fts(rowid, print_name, filename, tags, notes, designer, filament_type)
-                SELECT id, print_name, filename, tags, notes, designer, filament_type
-                FROM print_archives
-            """)
-            )
+            # SQLite FTS5 external-content tables must use the special rebuild
+            # command; DELETE can fail when the index itself is out of sync.
+            await db.execute(text("INSERT INTO archive_fts(archive_fts) VALUES('rebuild')"))
             await db.commit()
 
             result = await db.execute(text("SELECT COUNT(*) FROM archive_fts"))
@@ -4467,12 +4463,6 @@ async def upload_source_3mf_by_name(
     source_filename = safe_filename
     source_path = _resolve_source_3mf_path(archive, source_filename)
 
-    # Delete old source file if exists
-    if archive.source_3mf_path:
-        old_source_path = settings.base_dir / archive.source_3mf_path
-        if old_source_path.exists():
-            old_source_path.unlink()
-
     content = await file.read()
     # #1401: same zip-header check as the other upload routes — the
     # match-by-name endpoint is used by slicer post-processing scripts,
@@ -4480,12 +4470,69 @@ async def upload_source_3mf_by_name(
     from backend.app.api.routes.library import validate_print_file_upload
 
     validate_print_file_upload(file.filename, content)
-    source_path.write_bytes(content)
 
-    # Update archive with source path
-    archive.source_3mf_path = str(source_path.relative_to(settings.base_dir))
-    await db.commit()
-    await db.refresh(archive)
+    old_source_path = settings.base_dir / archive.source_3mf_path if archive.source_3mf_path else None
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Stage in the destination directory so replacement is atomic. Keep the old
+    # source until the validated new file is in place and the archive row commits.
+    staged_path: Path | None = None
+    backup_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=source_path.parent,
+            prefix=f".{source_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as staged_file:
+            staged_path = Path(staged_file.name)
+            staged_file.write(content)
+
+        # Repeated uploads commonly target the current source path. Keep its
+        # bytes so a failed database commit can restore the existing source.
+        if old_source_path == source_path and source_path.exists():
+            with tempfile.NamedTemporaryFile(
+                dir=source_path.parent,
+                prefix=f".{source_path.name}.",
+                suffix=".bak",
+                delete=False,
+            ) as backup_file:
+                backup_path = Path(backup_file.name)
+            shutil.copy2(source_path, backup_path)
+
+        try:
+            staged_path.replace(source_path)
+            archive.source_3mf_path = str(source_path.relative_to(settings.base_dir))
+            await db.commit()
+        except BaseException:
+            if backup_path is not None:
+                try:
+                    backup_path.replace(source_path)
+                except OSError as restore_error:
+                    logger.error(
+                        "Failed to restore old source for archive %s; backup remains at %s: %s",
+                        archive.id,
+                        backup_path,
+                        restore_error,
+                    )
+                    backup_path = None
+                else:
+                    backup_path = None
+            raise
+        await db.refresh(archive)
+    finally:
+        if staged_path is not None:
+            staged_path.unlink(missing_ok=True)
+        if backup_path is not None:
+            backup_path.unlink(missing_ok=True)
+
+    if old_source_path is not None and old_source_path != source_path:
+        try:
+            old_source_path.unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            logger.warning(
+                "Uploaded new source for archive %s but could not remove old file: %s", archive.id, cleanup_error
+            )
 
     return {
         "status": "uploaded",

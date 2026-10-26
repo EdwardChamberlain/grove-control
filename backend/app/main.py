@@ -420,6 +420,8 @@ _bed_cool_waiters: dict[int, dict] = {}
 # When on_print_complete fires with status "failed" for these printers we treat it
 # as "cancelled" (stopped by user) so the correct notification email is sent.
 _user_stopped_printers: set[int] = set()
+# Preserve the exact queue run when Stop terminalises its row before MQTT does.
+_user_stopped_queue_item_ids: dict[int, int] = {}
 
 # Offline-notification edge state (#1752): fire `on_printer_offline` exactly
 # once when a printer transitions connected → disconnected. `_printer_last_connected`
@@ -1083,7 +1085,7 @@ async def _bump_library_file_usage_if_completed(db, item, queue_status: str) -> 
     lib_file.last_printed_at = datetime.now(timezone.utc)
 
 
-def mark_printer_stopped_by_user(printer_id: int) -> None:
+def mark_printer_stopped_by_user(printer_id: int, *, queue_item_id: int | None = None) -> None:
     """Mark that the active print on this printer was stopped by the user from the queue UI.
 
     When on_print_complete fires with status 'failed' for a printer in this set we
@@ -1091,6 +1093,8 @@ def mark_printer_stopped_by_user(printer_id: int) -> None:
     rather than a 'print failed' notification.
     """
     _user_stopped_printers.add(printer_id)
+    if queue_item_id is not None:
+        _user_stopped_queue_item_ids[printer_id] = queue_item_id
     logging.getLogger(__name__).info("Marked printer %s as user-stopped from queue", printer_id)
 
 
@@ -2532,6 +2536,7 @@ async def on_print_start(printer_id: int, data: dict):
 
     # Clear any stale user-stopped flag from previous print cycles
     _user_stopped_printers.discard(printer_id)
+    _user_stopped_queue_item_ids.pop(printer_id, None)
 
     # #1721: drop any leftover pre-captured finish frame from a prior print
     # so a never-consumed cache entry can't bleed into the new print's photo.
@@ -4427,6 +4432,7 @@ async def on_print_complete(printer_id: int, data: dict):
     # report "failed" or "aborted" via MQTT.  Override that to "cancelled" so the
     # correct "print stopped" notification/email is sent instead of a failure alert.
     _raw_status = data.get("status", "completed")
+    stopped_queue_item_id = _user_stopped_queue_item_ids.pop(printer_id, None)
     if printer_id in _user_stopped_printers and _raw_status in ("failed", "aborted"):
         logger.info(
             "[CALLBACK] Overriding status '%s' -> 'cancelled' for printer %s (print was stopped from queue by user)",
@@ -4905,6 +4911,8 @@ async def on_print_complete(printer_id: int, data: dict):
                     db,
                     archive_id=archive_id,
                     ams_mapping=stored_ams_mapping,
+                    queue_item_id=queue_item_id if queue_item_id is not None else stopped_queue_item_id,
+                    dispatch_subtask_id=event_subtask_id,
                 )
                 if usage_results:
                     await ws_manager.broadcast(
@@ -5010,8 +5018,10 @@ async def on_print_complete(printer_id: int, data: dict):
                                     select(LibraryFile).where(LibraryFile.id == queue_item.library_file_id)
                                 )
                                 lib_file = lib_result.scalar_one_or_none()
-                                if lib_file and lib_file.print_time_seconds:
-                                    no_archive_data["print_time_seconds"] = lib_file.print_time_seconds
+                                if lib_file:
+                                    print_time_seconds = (lib_file.file_metadata or {}).get("print_time_seconds")
+                                    if isinstance(print_time_seconds, (int, float)) and print_time_seconds > 0:
+                                        no_archive_data["print_time_seconds"] = int(print_time_seconds)
                     except Exception as lookup_err:
                         logger.debug(
                             "[NOTIFY-BG] Could not look up queue item for no-archive notification: %s", lookup_err
