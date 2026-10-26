@@ -1712,6 +1712,7 @@ async def download_printer_files_as_zip(
 
     # Create ZIP in memory
     zip_buffer = io.BytesIO()
+    downloaded_files = 0
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in paths:
             try:
@@ -1721,15 +1722,16 @@ async def download_printer_files_as_zip(
                 if data:
                     filename = path.split("/")[-1]
                     zf.writestr(filename, data)
+                    downloaded_files += 1
             except Exception as e:
                 logging.warning("Failed to add %s to ZIP: %s", path, e)
                 continue
 
+    if downloaded_files == 0:
+        raise HTTPException(404, "No files could be downloaded")
+
     zip_buffer.seek(0)
     zip_data = zip_buffer.read()
-
-    if len(zip_data) == 0:
-        raise HTTPException(404, "No files could be downloaded")
 
     return Response(
         content=zip_data,
