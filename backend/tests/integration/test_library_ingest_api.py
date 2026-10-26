@@ -101,11 +101,6 @@ class TestGcodeThumbnail:
         assert not library.extract_gcode_thumbnail(broken)
         assert library.extract_gcode_thumbnail(tmp_path / "missing.gcode") is None
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: extract_gcode_thumbnail is meant to prefer the largest thumbnail up to 300px, but every "
-        "later thumbnail overwrites the earlier one once any size is seen, so it keeps the last",
-    )
     def test_prefers_the_largest_thumbnail_up_to_300px(self, tmp_path):
         path = tmp_path / "multi.gcode"
         path.write_text(_gcode_with_thumbnails((300, b"large"), (48, b"icon")))

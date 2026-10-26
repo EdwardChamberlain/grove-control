@@ -135,12 +135,6 @@ class TestRebuildIndex:
 
         assert response.json() == {"message": "Search index rebuilt with 2 entries"}
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: rebuild-index runs DELETE FROM archive_fts on an external-content FTS5 table, which fails "
-        "with 'database disk image is malformed' when the index is out of sync — the case the endpoint is for. "
-        "INSERT INTO archive_fts(archive_fts) VALUES('rebuild') is the supported way",
-    )
     async def test_rebuilds_an_index_that_is_out_of_sync(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):
