@@ -255,3 +255,93 @@ describe('existing presets', () => {
     expect(await screen.findByText('Cloud rejected it')).toBeInTheDocument();
   });
 });
+
+describe('templates manager', () => {
+  const seeded = [
+    { id: 't1', name: 'Hot PLA', description: 'Runs hot', type: 'filament', settings: { nozzle_temperature: '240' }, showInModal: true },
+    { id: 't2', name: 'Draft', description: 'Fast', type: 'print', settings: { layer_height: '0.28', speed: '300' }, showInModal: false },
+  ];
+
+  async function openTemplates(user: ReturnType<typeof userEvent.setup>) {
+    store['bambusy_preset_templates'] = JSON.stringify(seeded);
+    render(<ProfilesPage />);
+    await screen.findByText('My PLA @BBL X1C');
+    await user.click(screen.getByRole('button', { name: /^Templates$/ }));
+    return (await screen.findByText('Quick Templates')).closest('.fixed') as HTMLElement;
+  }
+
+  const saved = () => JSON.parse(store['bambusy_preset_templates']);
+
+  it('filters, edits, hides and deletes templates', async () => {
+    const user = userEvent.setup();
+    const dialog = await openTemplates(user);
+
+    expect(within(dialog).getByText('Hot PLA')).toBeInTheDocument();
+    expect(within(dialog).getByText('2 fields')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Process preset' }));
+    expect(within(dialog).queryByText('Hot PLA')).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Printer preset' }));
+    expect(within(dialog).getByText('No templates yet')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'All' }));
+
+    // Edit: invalid JSON is reported, cancel restores, then a valid edit saves.
+    const hotRow = within(dialog).getByText('Hot PLA').closest('.p-4, .p-3, li, div[class*="rounded"]') as HTMLElement;
+    await user.click(within(hotRow).getByTitle('Edit'));
+    const json = dialog.querySelector('textarea') as HTMLTextAreaElement;
+    fireEvent.change(json, { target: { value: '{oops' } });
+    await user.click(within(dialog).getByRole('button', { name: /^Save$/ }));
+    expect(dialog.querySelector('p.text-red-400')).not.toBeNull();
+    fireEvent.change(json, { target: { value: '{"nozzle_temperature":"245"}' } });
+    const name = within(dialog).getByDisplayValue('Hot PLA');
+    await user.clear(name);
+    await user.type(name, 'Hotter PLA');
+    await user.click(within(dialog).getByRole('button', { name: /^Save$/ }));
+    expect(await screen.findByText('Template updated')).toBeInTheDocument();
+    expect(saved()[0]).toMatchObject({ name: 'Hotter PLA', settings: { nozzle_temperature: '245' } });
+
+    await user.click(within(dialog).getAllByTitle('Edit')[1]);
+    await user.click(within(dialog).getByRole('button', { name: /Cancel/ }));
+
+    await user.click(within(dialog).getByTitle('Hidden in modals'));
+    expect(saved()[1].showInModal).toBe(true);
+
+    await user.click(within(dialog).getAllByTitle('Delete')[1]);
+    const confirm = screen.getByText('Are you sure you want to delete "Draft"?').parentElement as HTMLElement;
+    await user.click(within(confirm).getByRole('button', { name: /Delete/ }));
+    expect(await screen.findByText('Template deleted')).toBeInTheDocument();
+    expect(saved().map((t: { id: string }) => t.id)).toEqual(['t1']);
+  });
+
+  it('applies a template by opening the editor with its settings', async () => {
+    const user = userEvent.setup();
+    const dialog = await openTemplates(user);
+
+    await user.click(within(dialog).getAllByRole('button', { name: /Apply/ })[0]);
+
+    expect(await screen.findByText('Duplicate Preset')).toBeInTheDocument();
+    expect(within(modal()).getByDisplayValue('240')).toBeInTheDocument();
+  });
+
+  it('closes on Escape and the X', async () => {
+    const user = userEvent.setup();
+    const dialog = await openTemplates(user);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText('Quick Templates')).not.toBeInTheDocument());
+    expect(dialog).not.toBeInTheDocument();
+  });
+});
+
+describe('comparing with the base preset', () => {
+  it('shows the differences from the base', async () => {
+    const user = userEvent.setup();
+    await openCreate(user);
+
+    await chooseDropdown(user, 'Select base preset...', 'Bambu PLA Basic @BBL X1C');
+    await user.type(await within(modal()).findByPlaceholderText('220'), '230');
+    await user.click(within(modal()).getByRole('button', { name: /Compare/ }));
+
+    expect((await screen.findAllByText(/Base: Bambu PLA Basic/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Current: /).length).toBeGreaterThan(0);
+  });
+});
