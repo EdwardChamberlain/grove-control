@@ -1246,9 +1246,9 @@ class PrintScheduler:
                             skip_reasons["upload_pool_full"] = skip_reasons.get("upload_pool_full", 0) + 1
                             continue
 
-                        # Check condition (previous print success) before assigning
+                        # Check against the candidate printer before assigning it to the item.
                         if item.require_previous_success:
-                            if not await self._check_previous_success(db, item):
+                            if not await self._check_previous_success(db, item, printer_id=printer_id):
                                 item.status = "skipped"
                                 item.error_message = "Previous print failed or was aborted"
                                 item.completed_at = datetime.now(timezone.utc)
@@ -3376,7 +3376,9 @@ class PrintScheduler:
         logger.warning("Printer %s did not connect within %ss after power on", printer_id, self._power_on_wait_time)
         return False
 
-    async def _check_previous_success(self, db: AsyncSession, item: PrintQueueItem) -> bool:
+    async def _check_previous_success(
+        self, db: AsyncSession, item: PrintQueueItem, *, printer_id: int | None = None
+    ) -> bool:
         """Check if the previous print on this printer succeeded.
 
         A user-cancelled predecessor is treated as neutral — `cancelled` is a
@@ -3394,7 +3396,7 @@ class PrintScheduler:
         """
         result = await db.execute(
             select(PrintQueueItem)
-            .where(PrintQueueItem.printer_id == item.printer_id)
+            .where(PrintQueueItem.printer_id == (printer_id if printer_id is not None else item.printer_id))
             .where(PrintQueueItem.id != item.id)
             .where(PrintQueueItem.status.in_(["completed", "failed", "cancelled", "aborted"]))
             .where(PrintQueueItem.gate_acknowledged == False)  # noqa: E712
