@@ -940,9 +940,10 @@ class PrintScheduler:
                         await db.commit()
 
                     # Specific printer assignment (existing behavior)
+                    printer_name = item.printer.name if item.printer else f"printer {item.printer_id}"
                     if item.printer_id in busy_printers:
                         if not cleared_sensor_interlock_reason:
-                            item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
+                            item.waiting_reason = f"Waiting for printer reservation on {printer_name}"
                             await db.commit()
                         continue
 
@@ -985,7 +986,7 @@ class PrintScheduler:
                     # Check if printer is idle (busy with another print)
                     if not printer_idle:
                         if not cleared_sensor_interlock_reason:
-                            item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
+                            item.waiting_reason = f"Waiting for printer reservation on {printer_name}"
                         busy_printers.add(item.printer_id)
                         await db.commit()
                         continue
