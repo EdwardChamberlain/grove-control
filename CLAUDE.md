@@ -161,9 +161,12 @@ Never lower a floor to get a PR through. The targets from issue #256 are now
 the minimum: 80% backend lines; 70% frontend statements and lines, 65%
 branches and 60% functions. No floor may go below these.
 
-On pull requests, both coverage jobs also report how much of the PR's new and
-changed lines are covered (`diff-cover`, in the job summary). The report does
-not fail the build yet; aim for 90% or more.
+On pull requests, both coverage jobs also check how much of the PR's new and
+changed lines are covered (`diff-cover`, in the job summary). The check fails
+the job when that coverage is below 90%. A PR that changes no measurable lines
+(docs, config or test files only) passes. The coverage exclusion rules below
+still apply to this check: exclude code only where those rules allow it, and
+write tests for everything else.
 
 ### Coverage exclusions
 

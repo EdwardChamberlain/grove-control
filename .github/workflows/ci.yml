@@ -213,18 +213,24 @@ jobs:
           # as the tests that lift coverage (CLAUDE.md, "Coverage floors").
           coverage json -q -o - | python ../scripts/coverage_gate.py --fail-under 80.0
 
-      - name: Report coverage of changed lines
-        # Report only for now: shows how much of the PR's new and changed
-        # code is tested without failing the build (issue #256).
+      - name: Enforce coverage of changed lines
+        # Fails the job when less than 90% of the PR's new and changed lines
+        # are covered. A diff with no measurable lines passes (exit 0). The
+        # summary is written before the exit code is propagated.
         if: ${{ github.event_name == 'pull_request' }}
-        continue-on-error: true
         working-directory: backend
         run: |
           coverage xml -o coverage.xml
+          rc=0
           diff-cover coverage.xml \
             --compare-branch=origin/${{ github.base_ref }} \
-            --format markdown:diff-cover.md
-          { echo "## Backend: coverage of changed lines"; cat diff-cover.md; } >> "$GITHUB_STEP_SUMMARY"
+            --fail-under=90 \
+            --format markdown:diff-cover.md || rc=$?
+          {
+            echo "## Backend: coverage of changed lines"
+            if [ -f diff-cover.md ]; then cat diff-cover.md; else echo "diff-cover produced no report (exit $rc)."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
 
   frontend-lint:
     name: Frontend Lint
@@ -414,17 +420,23 @@ jobs:
         working-directory: frontend
         run: npx vitest --merge-reports=vitest-blobs --coverage
 
-      - name: Report coverage of changed lines
-        # Report only for now: shows how much of the PR's new and changed
-        # code is tested without failing the build (issue #256).
+      - name: Enforce coverage of changed lines
+        # Fails the job when less than 90% of the PR's new and changed lines
+        # are covered. A diff with no measurable lines passes (exit 0). The
+        # summary is written before the exit code is propagated.
         if: ${{ github.event_name == 'pull_request' }}
-        continue-on-error: true
         working-directory: frontend
         run: |
+          rc=0
           pipx run diff-cover==${{ env.DIFF_COVER_VERSION }} coverage/lcov.info \
             --compare-branch=origin/${{ github.base_ref }} \
-            --format markdown:diff-cover.md
-          { echo "## Frontend: coverage of changed lines"; cat diff-cover.md; } >> "$GITHUB_STEP_SUMMARY"
+            --fail-under=90 \
+            --format markdown:diff-cover.md || rc=$?
+          {
+            echo "## Frontend: coverage of changed lines"
+            if [ -f diff-cover.md ]; then cat diff-cover.md; else echo "diff-cover produced no report (exit $rc)."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
 
       - name: Check translation parity
         working-directory: frontend
