@@ -1,6 +1,9 @@
 # Coverage settings for the backend suite (pytest runs from backend/, so
 # pytest-cov picks this file up by default).
 [run]
+# Also measure branch coverage. Branches are reported but not gated yet: the
+# CI floor applies to line coverage only (scripts/coverage_gate.py).
+branch = True
 # Measure the app package, including files no test imports, when reporting
 # from combined shard data (pytest passes --cov=app for the shard runs).
 source = app

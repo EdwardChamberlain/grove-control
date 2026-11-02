@@ -207,12 +207,11 @@ jobs:
         working-directory: backend
         run: |
           coverage combine coverage-shard-*.dat
-          # Raise this floor in the same PR as the tests that lift coverage
-          # (CLAUDE.md, "Coverage floors").
-          coverage report \
-            --skip-covered \
-            --show-missing \
-            --fail-under=80.0
+          coverage report --skip-covered --show-missing
+          # The floor gates line coverage only; branch coverage is written to
+          # the job summary and not gated yet. Raise this floor in the same PR
+          # as the tests that lift coverage (CLAUDE.md, "Coverage floors").
+          coverage json -q -o - | python ../scripts/coverage_gate.py --fail-under 80.0
 
       - name: Report coverage of changed lines
         # Report only for now: shows how much of the PR's new and changed

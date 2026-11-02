@@ -143,9 +143,12 @@ Security Audit.
 
 Coverage floors:
 
-- Backend: `--fail-under` in the Backend Coverage job of
-  `.github/workflows/ci.yml` (mirrored in `test_backend.sh`). Coverage is
-  collected in 6 parallel shards and combined in that job.
+- Backend: the line floor is passed to `scripts/coverage_gate.py` in the
+  Backend Coverage job of `.github/workflows/ci.yml` (mirrored in
+  `test_backend.sh`). Coverage is collected in 6 parallel shards and combined
+  in that job. Branch coverage (`branch = True` in `backend/.coveragerc`) is
+  measured and reported in the job summary but not yet gated; the gate does
+  not use coverage.py's combined line+branch TOTAL.
 - Frontend: `coverage.thresholds` in `frontend/vitest.config.ts`.
   In CI, Vitest runs as 3 shards and Playwright as its own job; the Frontend
   Tests job merges the shard reports, enforces these thresholds and runs the
