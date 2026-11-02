@@ -142,7 +142,7 @@ class TestPrinterTargetedJobs:
         await env.run()
 
         assert env.dispatched == []
-        assert (await env.get(waiting)).waiting_reason == f"Waiting for printer reservation on printer {printer.id}"
+        assert (await env.get(waiting)).waiting_reason == f"Waiting for printer reservation on {printer.name}"
 
     async def test_printing_printer_is_not_used(self, env, printer_factory):
         printer = await printer_factory()
@@ -152,7 +152,7 @@ class TestPrinterTargetedJobs:
         await env.run()
 
         assert env.dispatched == []
-        assert (await env.get(item)).waiting_reason == f"Waiting for printer reservation on printer {printer.id}"
+        assert (await env.get(item)).waiting_reason == f"Waiting for printer reservation on {printer.name}"
 
     async def test_home_assistant_interlock_holds_then_releases(self, env, printer_factory):
         printer = await printer_factory()
