@@ -70,8 +70,6 @@ async function ready() {
   await screen.findByText('M3x8 screws');
 }
 
-const bomRow = (name: string) => screen.getByText(name).closest('div.flex, li, tr') as HTMLElement;
-
 describe('bill of materials', () => {
   it('shows parts and their progress, and hides finished ones', async () => {
     const user = userEvent.setup();
