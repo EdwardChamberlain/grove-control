@@ -169,13 +169,20 @@ class TestCreate:
     def test_densities(self, material, density):
         assert SpoolmanClient("http://x")._get_material_density(material) == density
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Bug: _get_material_density checks prefixes in dict order, so 'PLA-CF' matches 'PLA' (1.24) "
-        "and 'PA-CF' matches 'PA' (1.14) before their own entries are reached",
+    @pytest.mark.parametrize(
+        ("material", "density"),
+        [
+            ("PLA-CF", 1.29),
+            ("PA-CF", 1.20),
+            ("PLA-S", 1.24),
+            ("PETG", 1.27),
+            ("pa-cf", 1.20),
+            ("UNKNOWN-MATERIAL", 1.24),
+            (None, 1.24),
+            ("PLA+", 1.24),
+        ],
     )
-    @pytest.mark.parametrize(("material", "density"), [("PLA-CF", 1.29), ("PA-CF", 1.20)])
-    def test_carbon_fibre_densities(self, material, density):
+    def test_longest_matching_material_wins(self, material, density):
         assert SpoolmanClient("http://x")._get_material_density(material) == density
 
     async def test_spool(self, client, fake):

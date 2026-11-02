@@ -319,11 +319,13 @@ class SpoolmanClient:
             "PET": 1.38,
         }
         if material:
-            # Try exact match first, then uppercase
+            # Case-insensitive. An exact match is also the longest matching prefix of itself,
+            # so picking the longest matching key covers both "exact wins" and "longest prefix wins"
+            # (e.g. "PLA-CF" must not fall through to "PLA").
             mat_upper = material.upper()
-            for key, density in densities.items():
-                if key.upper() == mat_upper or mat_upper.startswith(key.upper()):
-                    return density
+            matches = [key for key in densities if mat_upper.startswith(key.upper())]
+            if matches:
+                return densities[max(matches, key=lambda key: len(key))]
         return 1.24  # Default to PLA density
 
     async def create_filament(
