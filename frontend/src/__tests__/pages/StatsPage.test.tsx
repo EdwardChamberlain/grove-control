@@ -206,6 +206,21 @@ describe('StatsPage', () => {
   });
 
   describe('success rate', () => {
+    it('shows successful parts next to successful prints', async () => {
+      server.use(
+        http.get('*/api/v1/archives/stats', () => {
+          return HttpResponse.json({ ...mockStats, successful_prints: 3, successful_parts: 12 });
+        })
+      );
+      render(<StatsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Successful parts:')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Successful:').nextElementSibling).toHaveTextContent('3');
+      expect(screen.getByText('Successful parts:').nextElementSibling).toHaveTextContent('12');
+    });
+
     it('shows success rate widget', async () => {
       render(<StatsPage />);
 

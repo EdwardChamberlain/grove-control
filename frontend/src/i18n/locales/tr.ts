@@ -1367,6 +1367,7 @@ export default {
     failureAnalysis: 'Başarısızlık Analizi',
     timeAccuracy: 'Süre Doğruluğu',
     successful: 'Başarılı:',
+    successfulParts: 'Başarılı parçalar:',
     failed: 'Başarısız:',
     cancelled: 'İptal edildi:',
     perfectEstimate: '%100 = mükemmel tahmin',

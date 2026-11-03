@@ -1365,6 +1365,7 @@ export default {
     failureAnalysis: '失敗分析',
     timeAccuracy: '時間精度',
     successful: '成功',
+    successfulParts: '成功したパーツ',
     failed: '失敗',
     cancelled: 'キャンセル',
     perfectEstimate: '100% = 完全な推定',

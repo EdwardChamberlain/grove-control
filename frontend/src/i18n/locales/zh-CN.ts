@@ -1366,6 +1366,7 @@ export default {
     failureAnalysis: '失败分析',
     timeAccuracy: '时间准确度',
     successful: '成功：',
+    successfulParts: '成功零件：',
     failed: '失败：',
     cancelled: '已取消：',
     perfectEstimate: '100% = 完美估计',

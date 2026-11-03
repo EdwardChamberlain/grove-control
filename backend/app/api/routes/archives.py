@@ -1092,6 +1092,17 @@ async def get_archive_stats(
     )
     successful_prints = successful_result.scalar() or 0
 
+    # Successful parts: sum the linked archive's quantity over completed runs.
+    # The outer join keeps runs whose archive was deleted, and a missing,
+    # NULL or < 1 quantity counts as 1 part (a successful job made at least one).
+    successful_parts_result = await db.execute(
+        select(func.coalesce(func.sum(case((PrintArchive.quantity >= 1, PrintArchive.quantity), else_=1)), 0))
+        .select_from(PrintLogEntry)
+        .outerjoin(PrintArchive, PrintArchive.id == PrintLogEntry.archive_id)
+        .where(PrintLogEntry.status == "completed", *base_conditions)
+    )
+    successful_parts = int(successful_parts_result.scalar() or 0)
+
     failed_result = await db.execute(
         select(func.count(PrintLogEntry.id)).where(PrintLogEntry.status.in_(("failed", "aborted")), *base_conditions)
     )
@@ -1249,6 +1260,7 @@ async def get_archive_stats(
     return ArchiveStats(
         total_prints=total_prints,
         successful_prints=successful_prints,
+        successful_parts=successful_parts,
         failed_prints=failed_prints,
         cancelled_prints=cancelled_prints,
         total_print_time_hours=round(total_time, 1),

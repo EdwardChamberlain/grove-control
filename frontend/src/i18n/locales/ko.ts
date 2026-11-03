@@ -1303,6 +1303,7 @@ export default {
     failureAnalysis: '실패 분석',
     timeAccuracy: '시간 정확도',
     successful: '성공:',
+    successfulParts: '성공한 부품:',
     failed: '실패:',
     cancelled: '취소됨:',
     perfectEstimate: '100% = 완벽한 예상',

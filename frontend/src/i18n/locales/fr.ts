@@ -1366,6 +1366,7 @@ export default {
     failureAnalysis: 'Analyse des échecs',
     timeAccuracy: 'Précision du temps',
     successful: 'Succès :',
+    successfulParts: 'Pièces réussies :',
     failed: 'Échecs :',
     cancelled: 'Annulés :',
     perfectEstimate: '100% = estimation parfaite',

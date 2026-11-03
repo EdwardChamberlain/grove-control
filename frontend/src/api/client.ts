@@ -756,6 +756,7 @@ export interface PrintLogResponse {
 export interface ArchiveStats {
   total_prints: number;
   successful_prints: number;
+  successful_parts: number;
   failed_prints: number;
   cancelled_prints: number;
   total_print_time_hours: number;

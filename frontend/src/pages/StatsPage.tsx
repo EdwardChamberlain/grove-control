@@ -22,6 +22,7 @@ import {
   ChevronDown,
   Users,
   BarChart3,
+  Boxes,
 } from 'lucide-react';
 import {
   BarChart,
@@ -191,6 +192,7 @@ function SuccessRateWidget({
   stats: {
     total_prints: number;
     successful_prints: number;
+    successful_parts?: number;
     failed_prints: number;
     cancelled_prints?: number;
     prints_by_printer: Record<string, number>;
@@ -246,6 +248,11 @@ function SuccessRateWidget({
             <CheckCircle className="w-4 h-4 text-status-ok flex-shrink-0" />
             <span className="text-sm text-bambu-gray">{t('stats.successful')}</span>
             <span className="text-sm text-white font-medium">{stats?.successful_prints || 0}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Boxes className="w-4 h-4 text-status-ok flex-shrink-0" />
+            <span className="text-sm text-bambu-gray">{t('stats.successfulParts')}</span>
+            <span className="text-sm text-white font-medium">{stats?.successful_parts || 0}</span>
           </div>
           <div className="flex items-center gap-2">
             <XCircle className="w-4 h-4 text-status-error flex-shrink-0" />
