@@ -139,6 +139,7 @@ export default {
 
   // Printers page
   printers: {
+    moreActions: 'Altro',
     addPreflight: {
       checking: 'Verifica della connessione...',
       warning: 'Alcuni controlli di connessione non sono riusciti. Questa stampante potrebbe risultare offline. Controlla le verifiche qui sotto, risolvi ciò che puoi oppure salva comunque.',

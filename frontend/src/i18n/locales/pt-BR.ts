@@ -139,6 +139,7 @@ export default {
 
   // Printers page
   printers: {
+    moreActions: 'Mais',
     addPreflight: {
       checking: 'Verificando a conexão...',
       warning: 'Algumas verificações de conexão falharam. Esta impressora pode aparecer como offline. Revise as verificações abaixo, corrija o que puder ou salve mesmo assim.',
