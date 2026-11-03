@@ -73,6 +73,8 @@ async function openTab(user: ReturnType<typeof userEvent.setup>, tab: string, ma
   await waitFor(() => expect(screen.getByText('Date Format')).toBeInTheDocument());
   await user.click(screen.getAllByText(tab).find((el) => el.tagName === 'BUTTON') ?? screen.getAllByText(tab)[0]);
   await screen.findByText(marker);
+  // The page clears its initial-load guard on a 100 ms timer started when the settings load. This
+  // later timer is registered after that one, so timers fire in order and the guard is always clear.
   await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
@@ -198,8 +200,7 @@ describe('SettingsPage humidity thresholds', () => {
 
     await user.type(thresholdInput('PLA'), '{Control>}a{/Control}25{Enter}');
 
-    await waitFor(() => expect(lastSaved(saves, 'ams_humidity_thresholds')).toBeDefined());
-    expect(JSON.parse(lastSaved(saves, 'ams_humidity_thresholds') as string)).toEqual({ PLA: 25 });
+    await waitFor(() => expect(JSON.parse(lastSaved(saves, 'ams_humidity_thresholds') as string)).toEqual({ PLA: 25 }));
   });
 
   it('clamps a threshold into the 5 to 95 range', async () => {
@@ -210,8 +211,7 @@ describe('SettingsPage humidity thresholds', () => {
     await user.type(thresholdInput('PETG'), '{Control>}a{/Control}150');
     await user.click(document.body);
 
-    await waitFor(() => expect(lastSaved(saves, 'ams_humidity_thresholds')).toBeDefined());
-    expect(JSON.parse(lastSaved(saves, 'ams_humidity_thresholds') as string)).toEqual({ PETG: 95 });
+    await waitFor(() => expect(JSON.parse(lastSaved(saves, 'ams_humidity_thresholds') as string)).toEqual({ PETG: 95 }));
   });
 
   it('drops an override when its field is cleared', async () => {
@@ -222,7 +222,6 @@ describe('SettingsPage humidity thresholds', () => {
     await user.type(thresholdInput('PLA'), '{Control>}a{/Control}{Backspace}');
     await user.click(document.body);
 
-    await waitFor(() => expect(lastSaved(saves, 'ams_humidity_thresholds')).toBeDefined());
-    expect(JSON.parse(lastSaved(saves, 'ams_humidity_thresholds') as string)).toEqual({ PETG: 45 });
+    await waitFor(() => expect(JSON.parse(lastSaved(saves, 'ams_humidity_thresholds') as string)).toEqual({ PETG: 45 }));
   });
 });

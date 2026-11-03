@@ -78,7 +78,8 @@ async function openNetworkTab(user: ReturnType<typeof userEvent.setup>) {
   await waitFor(() => expect(screen.getByText('Date Format')).toBeInTheDocument());
   await user.click(screen.getByText('Network'));
   await screen.findByText('MQTT Publishing');
-  // Let the initial-load guard clear before the first edit is autosaved.
+  // The page clears its initial-load guard on a 100 ms timer started when the settings load. This
+  // later timer is registered after that one, so timers fire in order and the guard is always clear.
   await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
