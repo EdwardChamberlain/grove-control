@@ -692,6 +692,19 @@ async def _record_energy_start(archive, printer_id: int, db, *, context: str = "
         return False
 
 
+def _expected_print_keys(printer_id: int, filename: str) -> list[tuple[int, str]]:
+    """Every key register_expected_print stores for ``filename``.
+
+    Also used by on_print_start cleanup so registration and cleanup cannot drift.
+    """
+    keys = [(printer_id, filename)]
+    if filename.endswith(".3mf"):
+        base = filename[:-4]
+        keys.append((printer_id, base))
+        keys.append((printer_id, f"{base}.gcode"))
+    return keys
+
+
 def register_expected_print(
     printer_id: int,
     filename: str,
@@ -702,12 +715,8 @@ def register_expected_print(
 ):
     """Register an expected print from reprint/scheduled so we don't create duplicate archives."""
     # Store with multiple filename variations to catch different naming patterns
-    _expected_prints[(printer_id, filename)] = archive_id
-    # Also store without .3mf extension if present
-    if filename.endswith(".3mf"):
-        base = filename[:-4]
-        _expected_prints[(printer_id, base)] = archive_id
-        _expected_prints[(printer_id, f"{base}.gcode")] = archive_id
+    for key in _expected_print_keys(printer_id, filename):
+        _expected_prints[key] = archive_id
     # Store AMS mapping for usage tracking at print completion
     if ams_mapping is not None:
         _print_ams_mappings[archive_id] = ams_mapping
@@ -719,18 +728,12 @@ def register_expected_print(
     # Store created_by_id so the user start email can be sent even when the archive
     # itself has no created_by_id (e.g. library-file-based queue prints)
     if created_by_id is not None:
-        _expected_print_creators[(printer_id, filename)] = created_by_id
-        if filename.endswith(".3mf"):
-            base = filename[:-4]
-            _expected_print_creators[(printer_id, base)] = created_by_id
-            _expected_print_creators[(printer_id, f"{base}.gcode")] = created_by_id
+        for key in _expected_print_keys(printer_id, filename):
+            _expected_print_creators[key] = created_by_id
     # Record registration time for TTL-based eviction
     _registered_at = time.monotonic()
-    _expected_print_registered_at[(printer_id, filename)] = _registered_at
-    if filename.endswith(".3mf"):
-        base = filename[:-4]
-        _expected_print_registered_at[(printer_id, base)] = _registered_at
-        _expected_print_registered_at[(printer_id, f"{base}.gcode")] = _registered_at
+    for key in _expected_print_keys(printer_id, filename):
+        _expected_print_registered_at[key] = _registered_at
     logging.getLogger(__name__).info(
         f"Registered expected print: printer={printer_id}, file={filename}, archive={archive_id}, ams_mapping={ams_mapping}, plate_id={plate_id}"
     )
@@ -2793,7 +2796,12 @@ async def on_print_start(printer_id: int, data: dict):
             # Strip extensions to match
             base = fname.replace(".gcode", "").replace(".3mf", "")
             expected_keys.append((printer_id, base))
-            expected_keys.append((printer_id, f"{base}.3mf"))
+            # Every variant register_expected_print may have stored for this file
+            # (incl. "<base>.gcode"), so none is left behind after a match (#301).
+            for variant in (f"{base}.3mf", f"{base}.gcode"):
+                for ekey in _expected_print_keys(printer_id, variant):
+                    if ekey not in expected_keys:
+                        expected_keys.append(ekey)
 
         expected_archive_id = None
         for key in expected_keys:
