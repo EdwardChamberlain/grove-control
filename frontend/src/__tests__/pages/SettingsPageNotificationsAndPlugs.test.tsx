@@ -100,6 +100,8 @@ async function openTab(user: ReturnType<typeof userEvent.setup>, label: string, 
   const buttons = screen.getAllByText(label).filter((el) => el.tagName === 'BUTTON');
   await user.click(buttons[0] ?? screen.getAllByText(label)[0]);
   await screen.findByText(marker);
+  // The page clears its initial-load guard on a 100 ms timer started when the settings load. This
+  // later timer is registered after that one, so timers fire in order and the guard is always clear.
   await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
