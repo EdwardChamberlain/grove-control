@@ -2796,22 +2796,25 @@ async def on_print_start(printer_id: int, data: dict):
             # Strip extensions to match
             base = fname.replace(".gcode", "").replace(".3mf", "")
             expected_keys.append((printer_id, base))
-            # Every variant register_expected_print may have stored for this file
-            # (incl. "<base>.gcode"), so none is left behind after a match (#301).
-            for variant in (f"{base}.3mf", f"{base}.gcode"):
-                for ekey in _expected_print_keys(printer_id, variant):
-                    if ekey not in expected_keys:
-                        expected_keys.append(ekey)
+            expected_keys.append((printer_id, f"{base}.3mf"))
 
         expected_archive_id = None
+        expected_creator: int | None = None
         for key in expected_keys:
             expected_archive_id = _expected_prints.pop(key, None)
             _expected_print_registered_at.pop(key, None)
             if expected_archive_id:
-                # Clean up other possible keys for this print
-                for other_key in expected_keys:
+                # Remove every key registered for this archive (whatever variant the
+                # printer reported) so nothing lingers until age eviction (#301).
+                stale_keys = {k for k, v in _expected_prints.items() if k[0] == printer_id and v == expected_archive_id}
+                stale_keys.update(expected_keys)
+                stale_keys.add(key)
+                for other_key in stale_keys:
                     _expected_prints.pop(other_key, None)
                     _expected_print_registered_at.pop(other_key, None)
+                    popped_creator = _expected_print_creators.pop(other_key, None)
+                    if expected_creator is None:
+                        expected_creator = popped_creator
                 break
 
         if expected_archive_id:
@@ -2952,12 +2955,8 @@ async def on_print_start(printer_id: int, data: dict):
                     # The queue item owns this job, even when someone else uploaded
                     # its source archive. Fall back to the archive creator for
                     # printer-initiated and legacy prints with no queue owner.
-                    # Pop ALL matching keys so no stale entries remain in the dict.
-                    fallback_creator = None
-                    for key in expected_keys:
-                        popped = _expected_print_creators.pop(key, None)
-                        if fallback_creator is None:
-                            fallback_creator = popped
+                    # Creator was read and all keys cleared when the match was consumed.
+                    fallback_creator = expected_creator
                     archive_data = {
                         "print_time_seconds": archive.print_time_seconds,
                         "created_by_id": archive.created_by_id or fallback_creator,
