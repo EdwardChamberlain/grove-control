@@ -7234,16 +7234,17 @@ async def auth_middleware(request, call_next):
             from backend.app.core.auth import is_auth_enabled
 
             auth_enabled = await is_auth_enabled(db)
-
-        if not auth_enabled:
-            # Auth disabled, allow all requests
-            return await call_next(request)
     except Exception:
         logging.getLogger(__name__).exception("auth_middleware: failing closed on auth-probe error from %s", path)
         return JSONResponse(
             status_code=503,
             content={"detail": "Authentication service temporarily unavailable"},
         )
+
+    if not auth_enabled:
+        # Auth disabled, allow all requests. Called outside the probe's try
+        # block so route errors surface as normal 500s, not auth-probe failures.
+        return await call_next(request)
 
     # Auth is enabled - require valid token
     auth_header = request.headers.get("Authorization")
