@@ -31,6 +31,10 @@ interface CameraTileProps {
 // still does the MJPEG fan-out, so per-tile cost is one TLS pull on the wire.
 const LIVE_FPS = 8;
 
+// Tight drop shadow for the 11-12px overlay labels so they stay readable over
+// bright frames. Kept small on purpose: a wide blur smears text this size.
+export const CAMERA_TEXT_SHADOW = 'drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]';
+
 type StatusBucket = 'printing' | 'paused' | 'finished' | 'error' | 'idle';
 
 function classifyState(state: string | null | undefined): StatusBucket {
@@ -204,11 +208,18 @@ export function CameraTile({
         </button>
       )}
 
+      {/* Bottom scrim: sits above the feed, below the labels and buttons */}
+      <div
+        data-testid="camera-tile-scrim"
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-[15] h-12 bg-gradient-to-t from-black/60 via-black/25 to-transparent"
+      />
+
       {/* Printer name */}
       <div className={`pointer-events-none absolute inset-x-0 bottom-1.5 z-20 flex items-end justify-between gap-2 px-2 pb-1.5 pt-3 text-white ${showClearPlate ? 'pr-12' : ''}`}>
-        <span className="block min-w-0 truncate text-xs font-medium">{printerName}</span>
+        <span className={`block min-w-0 truncate text-xs font-medium ${CAMERA_TEXT_SHADOW}`}>{printerName}</span>
         {isPrintingOrPaused && (
-          <span className="shrink-0 text-right text-[11px] font-semibold tabular-nums text-white">
+          <span className={`shrink-0 text-right text-[11px] font-semibold tabular-nums text-white ${CAMERA_TEXT_SHADOW}`}>
             {displayedProgress}%{etaLabel ? ` - ${etaLabel}` : ''}
           </span>
         )}

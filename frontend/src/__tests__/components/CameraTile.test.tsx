@@ -284,4 +284,31 @@ describe('CameraTile', () => {
       String(url).includes('/api/v1/printers/12/camera/stop'),
     )).toBe(true);
   });
+
+  it('draws a non-interactive scrim and label shadows so text stays readable on bright feeds', async () => {
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="X1C-Lab"
+        mode="snapshot"
+        snapshotIntervalMs={5000}
+        connected
+        printerState="RUNNING"
+        progress={42}
+        etaLabel="1h 12m"
+      />,
+    );
+    await flushMicrotasks();
+
+    const scrim = screen.getByTestId('camera-tile-scrim');
+    expect(scrim.className).toContain('bg-gradient-to-t');
+    expect(scrim.className).toContain('from-black/60');
+    expect(scrim.className).toContain('pointer-events-none');
+    // Above the image, below the labels (z-20) and buttons (z-30).
+    expect(scrim.className).toContain('z-[15]');
+
+    expect(screen.getByText('X1C-Lab').className).toContain('drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]');
+    const eta = screen.getByText(/42%/);
+    expect(eta.className).toContain('drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]');
+  });
 });
