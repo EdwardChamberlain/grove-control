@@ -692,6 +692,19 @@ async def _record_energy_start(archive, printer_id: int, db, *, context: str = "
         return False
 
 
+def _expected_print_keys(printer_id: int, filename: str) -> list[tuple[int, str]]:
+    """Every key register_expected_print stores for ``filename``.
+
+    Also used by on_print_start cleanup so registration and cleanup cannot drift.
+    """
+    keys = [(printer_id, filename)]
+    if filename.endswith(".3mf"):
+        base = filename[:-4]
+        keys.append((printer_id, base))
+        keys.append((printer_id, f"{base}.gcode"))
+    return keys
+
+
 def register_expected_print(
     printer_id: int,
     filename: str,
@@ -702,12 +715,8 @@ def register_expected_print(
 ):
     """Register an expected print from reprint/scheduled so we don't create duplicate archives."""
     # Store with multiple filename variations to catch different naming patterns
-    _expected_prints[(printer_id, filename)] = archive_id
-    # Also store without .3mf extension if present
-    if filename.endswith(".3mf"):
-        base = filename[:-4]
-        _expected_prints[(printer_id, base)] = archive_id
-        _expected_prints[(printer_id, f"{base}.gcode")] = archive_id
+    for key in _expected_print_keys(printer_id, filename):
+        _expected_prints[key] = archive_id
     # Store AMS mapping for usage tracking at print completion
     if ams_mapping is not None:
         _print_ams_mappings[archive_id] = ams_mapping
@@ -719,18 +728,12 @@ def register_expected_print(
     # Store created_by_id so the user start email can be sent even when the archive
     # itself has no created_by_id (e.g. library-file-based queue prints)
     if created_by_id is not None:
-        _expected_print_creators[(printer_id, filename)] = created_by_id
-        if filename.endswith(".3mf"):
-            base = filename[:-4]
-            _expected_print_creators[(printer_id, base)] = created_by_id
-            _expected_print_creators[(printer_id, f"{base}.gcode")] = created_by_id
+        for key in _expected_print_keys(printer_id, filename):
+            _expected_print_creators[key] = created_by_id
     # Record registration time for TTL-based eviction
     _registered_at = time.monotonic()
-    _expected_print_registered_at[(printer_id, filename)] = _registered_at
-    if filename.endswith(".3mf"):
-        base = filename[:-4]
-        _expected_print_registered_at[(printer_id, base)] = _registered_at
-        _expected_print_registered_at[(printer_id, f"{base}.gcode")] = _registered_at
+    for key in _expected_print_keys(printer_id, filename):
+        _expected_print_registered_at[key] = _registered_at
     logging.getLogger(__name__).info(
         f"Registered expected print: printer={printer_id}, file={filename}, archive={archive_id}, ams_mapping={ams_mapping}, plate_id={plate_id}"
     )
@@ -2796,14 +2799,22 @@ async def on_print_start(printer_id: int, data: dict):
             expected_keys.append((printer_id, f"{base}.3mf"))
 
         expected_archive_id = None
+        expected_creator: int | None = None
         for key in expected_keys:
             expected_archive_id = _expected_prints.pop(key, None)
             _expected_print_registered_at.pop(key, None)
             if expected_archive_id:
-                # Clean up other possible keys for this print
-                for other_key in expected_keys:
+                # Remove every key registered for this archive (whatever variant the
+                # printer reported) so nothing lingers until age eviction (#301).
+                stale_keys = {k for k, v in _expected_prints.items() if k[0] == printer_id and v == expected_archive_id}
+                stale_keys.update(expected_keys)
+                stale_keys.add(key)
+                for other_key in stale_keys:
                     _expected_prints.pop(other_key, None)
                     _expected_print_registered_at.pop(other_key, None)
+                    popped_creator = _expected_print_creators.pop(other_key, None)
+                    if expected_creator is None:
+                        expected_creator = popped_creator
                 break
 
         if expected_archive_id:
@@ -2944,12 +2955,8 @@ async def on_print_start(printer_id: int, data: dict):
                     # The queue item owns this job, even when someone else uploaded
                     # its source archive. Fall back to the archive creator for
                     # printer-initiated and legacy prints with no queue owner.
-                    # Pop ALL matching keys so no stale entries remain in the dict.
-                    fallback_creator = None
-                    for key in expected_keys:
-                        popped = _expected_print_creators.pop(key, None)
-                        if fallback_creator is None:
-                            fallback_creator = popped
+                    # Creator was read and all keys cleared when the match was consumed.
+                    fallback_creator = expected_creator
                     archive_data = {
                         "print_time_seconds": archive.print_time_seconds,
                         "created_by_id": archive.created_by_id or fallback_creator,
@@ -7227,16 +7234,17 @@ async def auth_middleware(request, call_next):
             from backend.app.core.auth import is_auth_enabled
 
             auth_enabled = await is_auth_enabled(db)
-
-        if not auth_enabled:
-            # Auth disabled, allow all requests
-            return await call_next(request)
     except Exception:
         logging.getLogger(__name__).exception("auth_middleware: failing closed on auth-probe error from %s", path)
         return JSONResponse(
             status_code=503,
             content={"detail": "Authentication service temporarily unavailable"},
         )
+
+    if not auth_enabled:
+        # Auth disabled, allow all requests. Called outside the probe's try
+        # block so route errors surface as normal 500s, not auth-probe failures.
+        return await call_next(request)
 
     # Auth is enabled - require valid token
     auth_header = request.headers.get("Authorization")
