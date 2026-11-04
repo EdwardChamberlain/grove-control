@@ -15,11 +15,16 @@ export function SpoolCatalogSettings() {
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Add/Edit form state
+  // Add form state (independent of the inline row editor below)
   const [showAddForm, setShowAddForm] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addWeight, setAddWeight] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  // Inline row editor state
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [formName, setFormName] = useState('');
-  const [formWeight, setFormWeight] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editWeight, setEditWeight] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Selection state
@@ -51,50 +56,50 @@ export function SpoolCatalogSettings() {
   );
 
   const handleAdd = async () => {
-    if (!formName.trim() || !formWeight) {
+    if (!addName.trim() || !addWeight) {
       showToast(t('settings.catalog.nameWeightRequired'), 'error');
       return;
     }
-    setSaving(true);
+    setAdding(true);
     try {
-      const entry = await api.addCatalogEntry({ name: formName.trim(), weight: parseInt(formWeight) });
+      const entry = await api.addCatalogEntry({ name: addName.trim(), weight: parseInt(addWeight) });
       setCatalog(prev => [...prev, entry].sort((a, b) => a.name.localeCompare(b.name)));
       setShowAddForm(false);
-      setFormName('');
-      setFormWeight('');
+      setAddName('');
+      setAddWeight('');
       showToast(t('settings.catalog.entryAdded'), 'success');
     } catch (err) {
       console.error('SpoolCatalogSettings.handleAdd failed:', err);
       showToast(t('settings.catalog.addFailed'), 'error');
     } finally {
-      setSaving(false);
+      setAdding(false);
     }
   };
 
   const startEdit = (entry: SpoolCatalogEntry) => {
     setEditingId(entry.id);
-    setFormName(entry.name);
-    setFormWeight(entry.weight.toString());
+    setEditName(entry.name);
+    setEditWeight(entry.weight.toString());
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setFormName('');
-    setFormWeight('');
+    setEditName('');
+    setEditWeight('');
   };
 
   const handleUpdate = async (id: number) => {
-    if (!formName.trim() || !formWeight) {
+    if (!editName.trim() || !editWeight) {
       showToast(t('settings.catalog.nameWeightRequired'), 'error');
       return;
     }
     setSaving(true);
     try {
-      const updated = await api.updateCatalogEntry(id, { name: formName.trim(), weight: parseInt(formWeight) });
+      const updated = await api.updateCatalogEntry(id, { name: editName.trim(), weight: parseInt(editWeight) });
       setCatalog(prev => prev.map(e => e.id === id ? updated : e).sort((a, b) => a.name.localeCompare(b.name)));
       setEditingId(null);
-      setFormName('');
-      setFormWeight('');
+      setEditName('');
+      setEditWeight('');
       showToast(t('settings.catalog.entryUpdated'), 'success');
     } catch (err) {
       console.error('SpoolCatalogSettings.handleUpdate failed:', err);
@@ -301,28 +306,28 @@ export function SpoolCatalogSettings() {
                   type="text"
                   className="w-full px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white placeholder-bambu-gray focus:border-bambu-green focus:outline-none"
                   placeholder={t('settings.catalog.namePlaceholder')}
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
+                  value={addName}
+                  onChange={(e) => setAddName(e.target.value)}
                 />
               </div>
               <input
                 type="number"
                 className="w-20 px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white text-center focus:border-bambu-green focus:outline-none"
                 placeholder="g"
-                value={formWeight}
-                onChange={(e) => setFormWeight(e.target.value)}
+                value={addWeight}
+                onChange={(e) => setAddWeight(e.target.value)}
               />
               <span className="text-bambu-gray shrink-0">g</span>
               <button
                 onClick={handleAdd}
-                disabled={saving}
+                disabled={adding}
                 className="px-3 py-2 bg-bambu-green text-white rounded-lg hover:bg-bambu-green/80 flex items-center gap-1 shrink-0"
               >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                 {t('common.add')}
               </button>
               <button
-                onClick={() => { setShowAddForm(false); setFormName(''); setFormWeight(''); }}
+                onClick={() => { setShowAddForm(false); setAddName(''); setAddWeight(''); }}
                 className="p-2 rounded-lg text-bambu-gray hover:text-white hover:bg-bambu-dark-tertiary"
               >
                 <X className="w-4 h-4" />
@@ -379,16 +384,16 @@ export function SpoolCatalogSettings() {
                             <input
                               type="text"
                               className="w-full px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white focus:border-bambu-green focus:outline-none"
-                              value={formName}
-                              onChange={(e) => setFormName(e.target.value)}
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
                             />
                           </td>
                           <td className="px-4 py-2">
                             <input
                               type="number"
                               className="w-full px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-right focus:border-bambu-green focus:outline-none"
-                              value={formWeight}
-                              onChange={(e) => setFormWeight(e.target.value)}
+                              value={editWeight}
+                              onChange={(e) => setEditWeight(e.target.value)}
                             />
                           </td>
                           <td className="px-4 py-2 text-center">

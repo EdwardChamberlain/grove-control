@@ -133,6 +133,54 @@ describe('SpoolCatalogSettings CRUD', () => {
     expect(screen.getByText('Reusable v2')).toBeInTheDocument();
   });
 
+  it('keeps the add form and the row editor independent when both are open', async () => {
+    const user = userEvent.setup();
+    render(<SpoolCatalogSettings />);
+    await screen.findByText('My Reusable Spool');
+
+    // Open the add form and type a draft.
+    await user.click(screen.getByRole('button', { name: /^Add$/ }));
+    const form = screen.getByText('Add New Entry').parentElement as HTMLElement;
+    const addName = within(form).getByPlaceholderText('Name (e.g., Bambu Lab - Plastic)');
+    const addWeight = within(form).getByPlaceholderText('g');
+    await user.type(addName, 'Draft Spool');
+    await user.type(addWeight, '111');
+
+    // Start editing a row: the add form must not change.
+    await user.click(within(rowOf('My Reusable Spool')).getAllByRole('button')[0]);
+    const editName = screen.getByDisplayValue('My Reusable Spool');
+    const editWeight = screen.getByDisplayValue('180');
+    expect(addName).toHaveValue('Draft Spool');
+    expect(addWeight).toHaveValue(111);
+
+    // Typing in the editor leaves the add form alone.
+    await user.clear(editName);
+    await user.type(editName, 'Edited Spool');
+    await user.clear(editWeight);
+    await user.type(editWeight, '222');
+    expect(addName).toHaveValue('Draft Spool');
+    expect(addWeight).toHaveValue(111);
+
+    // Typing in the add form leaves the editor alone.
+    await user.type(addName, ' 2');
+    await user.clear(addWeight);
+    await user.type(addWeight, '333');
+    expect(editName).toHaveValue('Edited Spool');
+    expect(editWeight).toHaveValue(222);
+
+    // Saving each sends its own body.
+    await user.click(within(form).getByRole('button', { name: /Add/ }));
+    expect(await screen.findByText('Entry added')).toBeInTheDocument();
+    expect(calls).toContainEqual({ method: 'POST', path: '/api/v1/inventory/catalog', body: { name: 'Draft Spool 2', weight: 333 } });
+    // The editor survives the add and keeps its values.
+    expect(screen.getByDisplayValue('Edited Spool')).toHaveValue('Edited Spool');
+    expect(screen.getByDisplayValue('222')).toBeInTheDocument();
+
+    await user.click(within(screen.getByDisplayValue('Edited Spool').closest('tr')!).getAllByRole('button')[0]);
+    expect(await screen.findByText('Entry updated')).toBeInTheDocument();
+    expect(calls).toContainEqual({ method: 'PUT', path: '/api/v1/inventory/catalog/3', body: { name: 'Edited Spool', weight: 222 } });
+  });
+
   it('deletes one entry after confirming', async () => {
     const user = userEvent.setup();
     render(<SpoolCatalogSettings />);
