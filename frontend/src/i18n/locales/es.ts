@@ -139,6 +139,7 @@ export default {
 
   // Printers page
   printers: {
+    moreActions: 'Más',
     addPreflight: {
       checking: 'Comprobando la conexión...',
       warning: 'Algunas comprobaciones de conexión fallaron. Esta impresora podría aparecer como desconectada. Revisa las comprobaciones de abajo, soluciona lo que puedas o guárdala de todos modos.',

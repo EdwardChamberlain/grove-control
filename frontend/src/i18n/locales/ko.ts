@@ -134,6 +134,7 @@ export default {
     right: '오른쪽'
   },
   printers: {
+    moreActions: '더 보기',
     title: '프린터',
     addPrinter: '프린터 추가',
     editPrinter: '프린터 편집',

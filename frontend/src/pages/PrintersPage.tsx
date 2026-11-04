@@ -569,10 +569,6 @@ function normalizePrinterPageViewMode(value: string | null, legacyCardSize: stri
 function IndicatorControlPopover({
   title,
   options = [],
-  unit,
-  customMin,
-  customMax,
-  customStep = 1,
   widthClass = 'w-[240px]',
   popoverWidth = 240,
   popoverHeight = 280,
@@ -583,10 +579,6 @@ function IndicatorControlPopover({
 }: {
   title: string;
   options?: Array<{ label: string; value: number }>;
-  unit?: string;
-  customMin?: number;
-  customMax?: number;
-  customStep?: number;
   widthClass?: string;
   popoverWidth?: number;
   popoverHeight?: number;
@@ -597,7 +589,6 @@ function IndicatorControlPopover({
 }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-  const [customValue, setCustomValue] = useState('');
 
   // Anchor to the trigger (the popover's DOM parent before portaling) so we
   // can position via fixed coords. Portaling to document.body escapes
@@ -623,14 +614,6 @@ function IndicatorControlPopover({
       window.removeEventListener('scroll', measure, true);
     };
   }, [popoverWidth, popoverHeight]);
-
-  const showCustomInput = unit !== undefined;
-  const submitCustom = () => {
-    const value = Number(customValue);
-    if (!Number.isFinite(value)) return;
-    const bounded = Math.min(customMax ?? value, Math.max(customMin ?? value, value));
-    onSubmit?.(Math.round(bounded));
-  };
 
   return (
     <>
@@ -667,36 +650,6 @@ function IndicatorControlPopover({
           </div>
         )}
         {children}
-        {showCustomInput && (
-          <>
-            <div className="shrink-0 h-px bg-bambu-dark-tertiary" />
-            <form
-              className="flex gap-1.5 px-3 pt-2.5 pb-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                submitCustom();
-              }}
-            >
-              <input
-                type="number"
-                min={customMin}
-                max={customMax}
-                step={customStep}
-                value={customValue}
-                onChange={e => setCustomValue(e.target.value)}
-                placeholder="Custom"
-                className="h-8 min-w-0 flex-1 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-2 text-xs text-white placeholder:text-bambu-gray/60 focus:border-bambu-green focus:outline-none"
-              />
-              <button
-                type="submit"
-                disabled={isPending || customValue.trim() === ''}
-                className="h-8 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-2 text-xs font-medium text-white transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Set
-              </button>
-            </form>
-          </>
-        )}
           </div>
         </>,
         document.body
@@ -1233,7 +1186,7 @@ function PrinterActionsMenu({
         variant="secondary"
         size="sm"
         onClick={onToggle}
-        title={t('common.more', 'More')}
+        title={t('printers.moreActions')}
         className={triggerClassName}
       >
         <MoreVertical className={iconClassName} />

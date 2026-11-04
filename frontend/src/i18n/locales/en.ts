@@ -139,6 +139,7 @@ export default {
 
   // Printers page
   printers: {
+    moreActions: 'More',
     title: 'Printers',
     addPrinter: 'Add Printer',
     addPreflight: {

@@ -139,6 +139,7 @@ export default {
 
   // Yazıcılar sayfası
   printers: {
+    moreActions: 'Daha fazla',
     title: 'Yazıcılar',
     addPrinter: 'Yazıcı Ekle',
     addPreflight: {
