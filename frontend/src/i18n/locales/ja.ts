@@ -138,6 +138,7 @@ export default {
   },
   // Printers page
   printers: {
+    moreActions: 'その他',
     addPreflight: {
       checking: '接続を確認しています...',
       warning: '一部の接続チェックに失敗しました。このプリンターはオフラインと表示される可能性があります。下のチェックを確認し、可能な範囲で修正するか、そのまま保存してください。',
