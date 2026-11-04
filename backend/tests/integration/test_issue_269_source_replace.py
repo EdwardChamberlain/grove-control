@@ -102,11 +102,12 @@ async def test_same_name_cancelled_commit_restores_existing_source(
         patcher.setattr(AsyncSession, "commit", cancel_commit)
         try:
             response = await _upload_source(async_client, "Gear box.3mf", _zip_bytes("second"))
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, RuntimeError):
+            # A cancelled request task surfaces either as the cancellation
+            # itself or as Starlette's "No response returned." RuntimeError
+            # (route errors are no longer swallowed by the auth-probe handler).
             pass
         else:
-            # The auth middleware fails closed with a 5xx when the request
-            # task is cancelled; some ASGI transports propagate cancellation.
             assert response.status_code >= 500
 
     assert commit_called

@@ -261,6 +261,33 @@ class TestExpectedPrintsDispatchedByGroveControl:
         assert (printer.id, "Benchy") not in main._expected_prints
         assert (printer.id, "Benchy.3mf") not in main._expected_prints
 
+    @pytest.mark.parametrize(
+        ("registered", "reported", "subtask"),
+        [
+            ("Benchy.3mf", "Benchy.3mf", ""),
+            ("Benchy.3mf", "Benchy.gcode", ""),
+            ("Benchy.3mf", "Benchy", ""),
+            ("Benchy.3mf", "/sdcard/cache/Benchy.3mf", ""),
+            ("Benchy.3mf", "/sdcard/cache/Benchy.gcode", ""),
+            ("Benchy.gcode.3mf", "Benchy.gcode.3mf", ""),
+            ("Benchy.gcode.3mf", "/sdcard/Benchy.gcode.3mf", "Benchy"),
+            ("Benchy.3mf", "", "Benchy"),
+        ],
+    )
+    async def test_consuming_expected_print_leaves_no_keys_behind(self, lifecycle, registered, reported, subtask):
+        """No key registered for the print may linger, whichever name the printer reports (#301)."""
+        printer = await lifecycle.make_printer()
+        archive = await lifecycle.make_archive(printer.id, status="queued")
+        main.register_expected_print(printer.id, registered, archive_id=archive.id, created_by_id=5)
+        assert (printer.id, registered[:-4] + ".gcode") in main._expected_prints
+
+        await main.on_print_start(printer.id, _start_data(subtask=subtask, filename=reported))
+
+        assert (await lifecycle.get(PrintArchive, archive.id)).status == "printing"
+        assert main._expected_prints == {}
+        assert main._expected_print_registered_at == {}
+        assert main._expected_print_creators == {}
+
     async def test_auto_archive_off_still_promotes_dispatched_print(self, lifecycle):
         printer = await lifecycle.make_printer(auto_archive=False)
         archive = await lifecycle.make_archive(printer.id, status="queued")
