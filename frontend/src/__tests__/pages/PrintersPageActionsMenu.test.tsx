@@ -85,6 +85,17 @@ beforeEach(() => {
   localStorage.removeItem('singlePrinterViewId');
 });
 
+describe('More button', () => {
+  it('has a plain "More" tooltip, not the raw "+{{count}} more" placeholder', async () => {
+    setup();
+    render(<PrintersPage />);
+    await screen.findAllByText('X1 Carbon');
+    const button = screen.getByTitle('More');
+    expect(button).toHaveAttribute('title', 'More');
+    expect(screen.queryByTitle(/\{\{count\}\}/)).not.toBeInTheDocument();
+  });
+});
+
 describe('Edit printer', () => {
   it('runs the connection check and saves the changes', async () => {
     const requests = setup();

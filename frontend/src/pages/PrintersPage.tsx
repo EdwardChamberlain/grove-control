@@ -1186,7 +1186,7 @@ function PrinterActionsMenu({
         variant="secondary"
         size="sm"
         onClick={onToggle}
-        title={t('common.more', 'More')}
+        title={t('printers.moreActions')}
         className={triggerClassName}
       >
         <MoreVertical className={iconClassName} />

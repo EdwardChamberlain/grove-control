@@ -139,6 +139,7 @@ export default {
 
   // Printers page
   printers: {
+    moreActions: '更多',
     addPreflight: {
       checking: '正在檢查連線...',
       warning: '部分連線檢查未通過。此印表機可能顯示為離線。請查看下方的檢查項目，盡量修復，或仍然儲存。',
