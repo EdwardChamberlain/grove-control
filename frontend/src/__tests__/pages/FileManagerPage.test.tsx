@@ -1110,13 +1110,14 @@ describe('FileManagerPage', () => {
       // Rendered after the last user folder in document order.
       const userFolder = await screen.findByText('Functional Parts');
       expect(userFolder.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      // Not inside the scrolling tree container, but pinned in its own footer.
-      expect(pinned.closest('.overflow-y-auto')).toBeNull();
-      const footer = pinned.parentElement as HTMLElement;
-      expect(footer).toHaveClass('shrink-0', 'border-t');
-      const scroller = userFolder.closest('.overflow-y-auto') as HTMLElement;
-      expect(scroller).not.toBeNull();
-      expect(scroller.parentElement).toBe(footer.parentElement);
+      // Pinned in its own footer, a sibling of (not inside) the scrolling tree.
+      const scroller = screen.getByTestId('folder-tree-scroller');
+      const footer = screen.getByTestId('temporary-files-footer');
+      expect(scroller).toContainElement(userFolder);
+      expect(scroller).not.toContainElement(pinned);
+      expect(footer).toContainElement(pinned);
+      expect(footer.parentElement).toBe(scroller.parentElement);
+      expect(scroller.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('lists Temporary Files last in the mobile folder picker', async () => {
@@ -1126,9 +1127,25 @@ describe('FileManagerPage', () => {
       const options = Array.from(document.querySelectorAll('select option')) as HTMLOptionElement[];
       expect(options.length).toBeGreaterThan(3);
       const last = options[options.length - 1];
-      expect(last).toHaveTextContent('Temporary Files');
-      expect(last.value).toBe('50');
+      expect(last).toHaveTextContent('Temporary Files (2)');
+      expect(last.value).toBe(String(temporaryFolder.id));
       expect(options.some((o) => o.textContent?.includes('Functional Parts'))).toBe(true);
+    });
+
+    it('omits the file count from the mobile picker when Temporary Files is empty', async () => {
+      server.use(
+        http.get('/api/v1/library/folders', () =>
+          HttpResponse.json([{ ...temporaryFolder, file_count: 0 }, ...mockFolders]),
+        ),
+      );
+      render(<FileManagerPage />);
+
+      await screen.findByTestId('temporary-files-folder');
+      const options = Array.from(document.querySelectorAll('select option')) as HTMLOptionElement[];
+      const last = options[options.length - 1];
+      expect(last.value).toBe(String(temporaryFolder.id));
+      expect(last).toHaveTextContent('Temporary Files');
+      expect(last.textContent).not.toMatch(/\(\d+\)/);
     });
 
     it('explains the folder and blocks uploads when it is selected', async () => {
