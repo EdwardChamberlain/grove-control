@@ -212,6 +212,39 @@ describe('useFloatingMenuPosition', () => {
     expect(result.current).toBe(before);
   });
 
+  it('still opens, and does not close, when the trigger starts off screen', () => {
+    // e.g. a focused select scrolled out of view, then opened from the keyboard.
+    const trigger = fakeTrigger(-200);
+    const onTriggerHidden = vi.fn();
+    const { result } = renderHook(() =>
+      useFloatingMenuPosition(true, { current: trigger }, { current: fakeMenu(100) }, { onTriggerHidden }),
+    );
+
+    expect(onTriggerHidden).not.toHaveBeenCalled();
+    expect(result.current.placement).toBe('below');
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(onTriggerHidden).not.toHaveBeenCalled();
+  });
+
+  it('measures against the visible height, leaving out a horizontal scrollbar', () => {
+    // innerHeight is 800 but a 15px scrollbar leaves 785px visible.
+    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(785);
+    const { result } = position(720, 200);
+
+    expect(result.current).toMatchObject({ placement: 'above', bottom: 785 - 720 + 4 });
+  });
+
+  it('never shrinks the menu below one row', () => {
+    // A 60px-tall screen with the trigger filling most of it.
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(60);
+    const { result } = position(10, 200);
+
+    expect(result.current.maxHeight).toBe(40);
+  });
+
   it('builds an inline style from the position', () => {
     expect(
       floatingMenuStyle({ left: 1, bottom: 2, minWidth: 3, maxHeight: 4, placement: 'above' }),

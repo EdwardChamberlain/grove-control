@@ -163,6 +163,24 @@ describe('dropdowns near the bottom of the screen', () => {
     expect(screen.getByRole('combobox', { name: 'Show' })).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('opens from the keyboard while its trigger is scrolled off the screen', async () => {
+    const user = userEvent.setup();
+    render(
+      <ReactSelect aria-label="Show" value="25" onChange={vi.fn()}>
+        <option value="25">25</option>
+        <option value="50">50</option>
+      </ReactSelect>,
+    );
+    const select = screen.getByRole('combobox', { name: 'Show' });
+    select.focus();
+    triggerTop = -200;
+
+    await user.keyboard('[ArrowDown]');
+
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    expect(select).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('closes ToolbarDropdown when its trigger is scrolled off the screen', async () => {
     const user = userEvent.setup();
     render(

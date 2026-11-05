@@ -3,8 +3,20 @@ import { useLayoutEffect, useRef, useState } from 'react';
 // The tallest a menu grows before it scrolls. The hook always sets maxHeight
 // inline, so this is the only place the limit lives.
 const MENU_MAX_HEIGHT = 288;
+// Never shrink below roughly one option row, even on a very short screen.
+const MENU_MIN_HEIGHT = 40;
 const MENU_GAP = 4;
 const VIEWPORT_MARGIN = 8;
+
+// The height position: fixed works against: the visible area without any
+// horizontal scrollbar. Falls back to innerHeight where layout isn't available.
+function viewportHeight() {
+  return document.documentElement.clientHeight || window.innerHeight;
+}
+
+function clampHeight(space: number) {
+  return Math.max(MENU_MIN_HEIGHT, Math.min(MENU_MAX_HEIGHT, space));
+}
 
 export type FloatingMenuPosition = {
   left: number;
@@ -18,7 +30,7 @@ export type FloatingMenuPosition = {
 export type FloatingMenuOptions = {
   /** Changes whenever the menu's content changes, so the menu is measured again. */
   contentKey?: unknown;
-  /** Called when the trigger scrolls fully out of view while the menu is open. */
+  /** Called when a scroll moves the trigger fully out of view while the menu is open. */
   onTriggerHidden?: () => void;
 };
 
@@ -59,19 +71,21 @@ export function useFloatingMenuPosition(
   useLayoutEffect(() => {
     if (!isOpen) return;
 
-    const updatePosition = () => {
+    const updatePosition = ({ fromScroll = false } = {}) => {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
 
-      const viewportHeight = window.innerHeight;
-      // A zero-size rect means the trigger isn't laid out, not that it scrolled away.
+      const height = viewportHeight();
+      // Only a scroll closes the menu: opening one whose trigger is off screen
+      // (e.g. from the keyboard) still works. A zero-size rect means the
+      // trigger isn't laid out, not that it scrolled away.
       const isLaidOut = rect.width > 0 || rect.height > 0;
-      if (isLaidOut && (rect.bottom <= 0 || rect.top >= viewportHeight)) {
+      if (fromScroll && isLaidOut && (rect.bottom <= 0 || rect.top >= height)) {
         onTriggerHiddenRef.current?.();
         return;
       }
 
-      const spaceBelow = viewportHeight - rect.bottom - MENU_GAP - VIEWPORT_MARGIN;
+      const spaceBelow = height - rect.bottom - MENU_GAP - VIEWPORT_MARGIN;
       const spaceAbove = rect.top - MENU_GAP - VIEWPORT_MARGIN;
       const menu = menuRef.current;
       // scrollHeight leaves out the border, so add it back on.
@@ -82,16 +96,16 @@ export function useFloatingMenuPosition(
       const next: FloatingMenuPosition = openAbove
         ? {
             left: rect.left,
-            bottom: viewportHeight - rect.top + MENU_GAP,
+            bottom: height - rect.top + MENU_GAP,
             minWidth: rect.width,
-            maxHeight: Math.max(0, Math.min(MENU_MAX_HEIGHT, spaceAbove)),
+            maxHeight: clampHeight(spaceAbove),
             placement: 'above',
           }
         : {
             left: rect.left,
             top: rect.bottom + MENU_GAP,
             minWidth: rect.width,
-            maxHeight: Math.max(0, Math.min(MENU_MAX_HEIGHT, spaceBelow)),
+            maxHeight: clampHeight(spaceBelow),
             placement: 'below',
           };
 
@@ -102,15 +116,16 @@ export function useFloatingMenuPosition(
     const handleScroll = (event: Event) => {
       // Scrolling inside the menu itself never moves the trigger.
       if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
-      updatePosition();
+      updatePosition({ fromScroll: true });
     };
+    const handleResize = () => updatePosition();
 
     updatePosition();
-    window.addEventListener('resize', updatePosition);
+    window.addEventListener('resize', handleResize);
     window.addEventListener('scroll', handleScroll, true);
 
     return () => {
-      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('resize', handleResize);
       window.removeEventListener('scroll', handleScroll, true);
     };
   }, [isOpen, triggerRef, menuRef, contentKey]);

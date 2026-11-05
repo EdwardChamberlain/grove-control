@@ -100,11 +100,11 @@ export function ToolbarDropdown<T extends string>({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const closeMenu = useCallback(() => setIsOpen(false), []);
   const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef, {
-    contentKey: menuContentKey(options),
+    // Only build the key while open; closed menus are never measured.
+    contentKey: isOpen ? menuContentKey(options) : undefined,
     onTriggerHidden: closeMenu,
   });
   const selectedOption = options.find(option => option.value === value) ?? options[0];
-
 
   return (
     <div className={`relative ${fullWidth ? 'w-full min-w-0' : ''}`}>
@@ -189,7 +189,8 @@ export function ReactSelect({
   const options = useMemo(() => parseSelectOptions(children), [children]);
   const closeMenu = useCallback(() => setIsOpen(false), []);
   const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef, {
-    contentKey: menuContentKey(options),
+    // Only build the key while open; closed menus are never measured.
+    contentKey: isOpen ? menuContentKey(options) : undefined,
     onTriggerHidden: closeMenu,
   });
   const controlledValue = Array.isArray(value)
@@ -325,7 +326,6 @@ export function ReactSelect({
   useEffect(() => () => {
     if (typeaheadTimeoutRef.current) window.clearTimeout(typeaheadTimeoutRef.current);
   }, []);
-
 
   const handleSelect = useCallback((nextValue: string) => {
     const option = options.find(candidate => candidate.value === nextValue);
