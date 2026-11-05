@@ -62,6 +62,7 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
   connected?: boolean;
   maintenanceMode?: boolean;
   smartPlugState?: 'ON' | 'OFF';
+  archiveCount?: number;
 } = {}) {
   const configuredPrinter = {
     ...printer,
@@ -198,7 +199,15 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
     } else if (pathname === '/api/v1/queue/') {
       await route.fulfill({ json: queueItems });
     } else if (pathname === '/api/v1/archives/') {
-      await route.fulfill({ json: [archive] });
+      const count = options.archiveCount ?? 1;
+      await route.fulfill({
+        json: Array.from({ length: count }, (_, i) => (i === 0 ? archive : {
+          ...archive,
+          id: i + 1,
+          filename: `part-${i + 1}.3mf`,
+          print_name: `Part ${i + 1}`,
+        })),
+      });
     } else if (pathname === '/api/v1/spoolman/settings') {
       await route.fulfill({ json: { spoolman_enabled: 'false', spoolman_url: '' } });
     } else if (pathname === '/api/v1/inventory/colors/map') {
@@ -615,4 +624,24 @@ test('preheating is visible in the queue with a stop action', async ({ page }) =
   await page.goto('/queue');
   await expect(page.getByText('Preheating', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /stop/i }).first()).toBeVisible();
+});
+
+test('archives "Show" page-size menu opens upwards when it would run off the screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mockApi(page, [], { archiveCount: 60 });
+  await page.goto('/archives');
+
+  const show = page.getByText('Show', { exact: true }).locator('..').getByRole('combobox');
+  await show.scrollIntoViewIfNeeded();
+  await show.click();
+
+  const listbox = page.getByRole('listbox');
+  await expect(listbox).toHaveAttribute('data-placement', 'above');
+  const box = await listbox.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(720);
+
+  await page.getByRole('option', { name: 'All' }).click();
+  await expect(page.getByText('60 prints', { exact: true })).toBeVisible();
 });
