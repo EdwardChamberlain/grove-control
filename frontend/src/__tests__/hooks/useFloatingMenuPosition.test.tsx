@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, renderHook, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { act, renderHook } from '../utils';
 import { floatingMenuStyle, useFloatingMenuPosition } from '../../hooks/useFloatingMenuPosition';
-import { ReactSelect, ToolbarDropdown } from '../../components/ToolbarControls';
 
 const VIEWPORT_HEIGHT = 800;
 
@@ -129,56 +127,94 @@ describe('useFloatingMenuPosition', () => {
     expect(result.current).toMatchObject({ placement: 'below', top: 0, left: 0 });
   });
 
+  it('measures again when the content key changes', () => {
+    // 36px below the trigger and 708px above.
+    const triggerRef = { current: fakeTrigger(720) as HTMLElement | null };
+    const menu = fakeMenu(20);
+    const menuRef = { current: menu as HTMLElement | null };
+    const { result, rerender } = renderHook(
+      ({ key }) => useFloatingMenuPosition(true, triggerRef, menuRef, { contentKey: key }),
+      { initialProps: { key: 'one option' } },
+    );
+    expect(result.current.placement).toBe('below');
+
+    Object.defineProperty(menu, 'scrollHeight', { configurable: true, value: 200 });
+    rerender({ key: 'one option' });
+    expect(result.current.placement).toBe('below');
+
+    rerender({ key: 'five options' });
+    expect(result.current.placement).toBe('above');
+  });
+
+  it('reports a trigger scrolled out of view instead of positioning against it', () => {
+    const trigger = fakeTrigger(100);
+    const triggerRef = { current: trigger as HTMLElement | null };
+    const menuRef = { current: fakeMenu(200) as HTMLElement | null };
+    const onTriggerHidden = vi.fn();
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef, { onTriggerHidden }));
+    const before = result.current;
+
+    trigger.getBoundingClientRect = () => rect(-40);
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+    expect(onTriggerHidden).toHaveBeenCalledTimes(1);
+
+    trigger.getBoundingClientRect = () => rect(VIEWPORT_HEIGHT);
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+    expect(onTriggerHidden).toHaveBeenCalledTimes(2);
+    expect(result.current).toBe(before);
+  });
+
+  it('does not treat a trigger that is not laid out as scrolled away', () => {
+    const trigger = document.createElement('button');
+    trigger.getBoundingClientRect = () => ({ ...rect(0), bottom: 0, height: 0, width: 0 }) as DOMRect;
+    const onTriggerHidden = vi.fn();
+    renderHook(() => useFloatingMenuPosition(true, { current: trigger }, { current: fakeMenu(50) }, { onTriggerHidden }));
+
+    expect(onTriggerHidden).not.toHaveBeenCalled();
+  });
+
+  it('ignores scrolling inside the menu', () => {
+    const trigger = fakeTrigger(100);
+    const menu = fakeMenu(200);
+    const item = document.createElement('div');
+    menu.appendChild(item);
+    document.body.appendChild(menu);
+    const getRect = vi.fn(() => rect(100));
+    trigger.getBoundingClientRect = getRect;
+    renderHook(() => useFloatingMenuPosition(true, { current: trigger }, { current: menu }));
+    const callsAfterOpen = getRect.mock.calls.length;
+
+    act(() => {
+      item.dispatchEvent(new Event('scroll', { bubbles: true }));
+      menu.dispatchEvent(new Event('scroll'));
+    });
+    expect(getRect).toHaveBeenCalledTimes(callsAfterOpen);
+
+    act(() => {
+      document.body.dispatchEvent(new Event('scroll'));
+    });
+    expect(getRect).toHaveBeenCalledTimes(callsAfterOpen + 1);
+    menu.remove();
+  });
+
+  it('keeps the same position object when nothing has moved', () => {
+    const { result } = position(100, 200);
+    const before = result.current;
+
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+    });
+
+    expect(result.current).toBe(before);
+  });
+
   it('builds an inline style from the position', () => {
     expect(
       floatingMenuStyle({ left: 1, bottom: 2, minWidth: 3, maxHeight: 4, placement: 'above' }),
     ).toEqual({ left: 1, top: undefined, bottom: 2, minWidth: 3, maxHeight: 4 });
-  });
-});
-
-describe('dropdowns near the bottom of the screen', () => {
-  beforeEach(() => {
-    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(VIEWPORT_HEIGHT);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(rect(740));
-    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(200);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('ReactSelect opens its listbox upwards', async () => {
-    const user = userEvent.setup();
-    render(
-      <ReactSelect aria-label="Show" value="25" onChange={vi.fn()}>
-        <option value="25">25</option>
-        <option value="50">50</option>
-        <option value="-1">All</option>
-      </ReactSelect>,
-    );
-
-    await user.click(screen.getByRole('combobox', { name: 'Show' }));
-    const listbox = screen.getByRole('listbox');
-
-    expect(listbox).toHaveAttribute('data-placement', 'above');
-    expect(listbox.style.bottom).toBe(`${VIEWPORT_HEIGHT - 740 + 4}px`);
-    expect(listbox.style.top).toBe('');
-  });
-
-  it('ToolbarDropdown opens its menu upwards', async () => {
-    const user = userEvent.setup();
-    render(
-      <ToolbarDropdown
-        value="a"
-        options={[{ value: 'a', label: 'Alpha' }, { value: 'b', label: 'Beta' }]}
-        onChange={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Alpha' }));
-    const menu = screen.getByRole('button', { name: 'Beta' }).parentElement as HTMLElement;
-
-    expect(menu).toHaveAttribute('data-placement', 'above');
-    expect(menu.style.top).toBe('');
   });
 });

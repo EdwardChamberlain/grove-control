@@ -26,6 +26,12 @@ export const toolbarControlClass =
 export const toolbarIconButtonClass =
   'h-8 w-8 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center justify-center';
 
+// A string that changes only when the options do, so menus re-measure when
+// their content changes but not on every parent render.
+function menuContentKey(options: { value: string; label: string; group?: string }[]) {
+  return options.map(option => `${option.group ?? ''}\u0000${option.value}\u0000${option.label}`).join('\u0001');
+}
+
 function getNodeText(node: ReactNode): string {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -92,7 +98,11 @@ export function ToolbarDropdown<T extends string>({
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef);
+  const closeMenu = useCallback(() => setIsOpen(false), []);
+  const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef, {
+    contentKey: menuContentKey(options),
+    onTriggerHidden: closeMenu,
+  });
   const selectedOption = options.find(option => option.value === value) ?? options[0];
 
 
@@ -115,7 +125,7 @@ export function ToolbarDropdown<T extends string>({
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
           <div
             ref={menuRef}
-            className="fixed z-50 max-h-72 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
+            className="fixed z-50 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
             data-placement={menuPosition.placement}
             style={floatingMenuStyle(menuPosition)}
           >
@@ -175,9 +185,13 @@ export function ReactSelect({
   const typeaheadRef = useRef('');
   const typeaheadTimeoutRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef);
   const [labelId, setLabelId] = useState<string | undefined>();
   const options = useMemo(() => parseSelectOptions(children), [children]);
+  const closeMenu = useCallback(() => setIsOpen(false), []);
+  const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef, {
+    contentKey: menuContentKey(options),
+    onTriggerHidden: closeMenu,
+  });
   const controlledValue = Array.isArray(value)
     ? String(value[0] ?? '')
     : value !== undefined
@@ -487,7 +501,7 @@ export function ReactSelect({
           <div
             ref={menuRef}
             id={listboxId}
-            className="fixed z-50 max-h-72 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
+            className="fixed z-50 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
             role="listbox"
             aria-labelledby={labelId}
             data-placement={menuPosition.placement}
