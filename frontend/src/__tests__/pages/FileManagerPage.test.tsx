@@ -1100,16 +1100,35 @@ describe('FileManagerPage', () => {
       );
     });
 
-    it('pins Temporary Files above the folder tree without folder actions', async () => {
+    it('pins Temporary Files below the folder tree, outside the scroll area, without folder actions', async () => {
       render(<FileManagerPage />);
 
       const pinned = await screen.findByTestId('temporary-files-folder');
       expect(pinned).toHaveTextContent('Temporary Files');
       expect(pinned).toHaveTextContent('2');
       expect(pinned.querySelector('button')).toBeNull();
-      // Pinned before the first user folder in document order.
-      const firstUserFolder = screen.getByText('Functional Parts');
-      expect(pinned.compareDocumentPosition(firstUserFolder) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Rendered after the last user folder in document order.
+      const userFolder = await screen.findByText('Functional Parts');
+      expect(userFolder.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Not inside the scrolling tree container, but pinned in its own footer.
+      expect(pinned.closest('.overflow-y-auto')).toBeNull();
+      const footer = pinned.parentElement as HTMLElement;
+      expect(footer).toHaveClass('shrink-0', 'border-t');
+      const scroller = userFolder.closest('.overflow-y-auto') as HTMLElement;
+      expect(scroller).not.toBeNull();
+      expect(scroller.parentElement).toBe(footer.parentElement);
+    });
+
+    it('lists Temporary Files last in the mobile folder picker', async () => {
+      render(<FileManagerPage />);
+
+      await screen.findByTestId('temporary-files-folder');
+      const options = Array.from(document.querySelectorAll('select option')) as HTMLOptionElement[];
+      expect(options.length).toBeGreaterThan(3);
+      const last = options[options.length - 1];
+      expect(last).toHaveTextContent('Temporary Files');
+      expect(last.value).toBe('50');
+      expect(options.some((o) => o.textContent?.includes('Functional Parts'))).toBe(true);
     });
 
     it('explains the folder and blocks uploads when it is selected', async () => {
