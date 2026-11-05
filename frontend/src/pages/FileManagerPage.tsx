@@ -1720,10 +1720,9 @@ export function FileManagerPage() {
 
   return (
     <div
-      // Fill the viewport below the layout's top bar. The sidebar is compact (with a
-      // 3.5rem top bar) under 1144px and a full-height side rail above, where there's
-      // no top bar to subtract. 1144px mirrors SIDEBAR_COMPACT_BREAKPOINT.
-      className="p-4 md:p-8 min-h-[calc(100vh-3.5rem)] lg:h-[calc(100vh-3.5rem)] min-[1144px]:min-h-screen min-[1144px]:h-screen flex flex-col relative"
+      // Layout gives <main> a bounded flex column on this route (see `fillViewport`),
+      // so the page just takes the space left below any banners.
+      className="p-4 md:p-8 flex-1 lg:min-h-0 flex flex-col relative"
       {...dragHandlers}
     >
       {/* Drag & Drop Overlay — page-wide file upload (#1510) */}
