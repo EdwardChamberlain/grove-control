@@ -1,6 +1,7 @@
 import { Children, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
+import { floatingMenuStyle, useFloatingMenuPosition } from '../hooks/useFloatingMenuPosition';
 
 export type ToolbarDropdownOption<T extends string> = {
   value: T;
@@ -24,6 +25,12 @@ export const toolbarControlClass =
 
 export const toolbarIconButtonClass =
   'h-8 w-8 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center justify-center';
+
+// A string that changes only when the options do, so menus re-measure when
+// their content changes but not on every parent render.
+function menuContentKey(options: { value: string; label: string; group?: string }[]) {
+  return options.map(option => `${option.group ?? ''}\u0000${option.value}\u0000${option.label}`).join('\u0001');
+}
 
 function getNodeText(node: ReactNode): string {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -90,31 +97,14 @@ export function ToolbarDropdown<T extends string>({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0, minWidth: 0 });
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const closeMenu = useCallback(() => setIsOpen(false), []);
+  const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef, {
+    // Only build the key while open; closed menus are never measured.
+    contentKey: isOpen ? menuContentKey(options) : undefined,
+    onTriggerHidden: closeMenu,
+  });
   const selectedOption = options.find(option => option.value === value) ?? options[0];
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const updatePosition = () => {
-      const rect = triggerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setMenuPosition({
-        left: rect.left,
-        top: rect.bottom + 4,
-        minWidth: rect.width,
-      });
-    };
-
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
-  }, [isOpen]);
 
   return (
     <div className={`relative ${fullWidth ? 'w-full min-w-0' : ''}`}>
@@ -134,12 +124,10 @@ export function ToolbarDropdown<T extends string>({
           <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
           <div
-            className="fixed z-50 max-h-72 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
-            style={{
-              left: menuPosition.left,
-              top: menuPosition.top,
-              minWidth: menuPosition.minWidth,
-            }}
+            ref={menuRef}
+            className="fixed z-50 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
+            data-placement={menuPosition.placement}
+            style={floatingMenuStyle(menuPosition)}
           >
             {options.map(option => (
               <button
@@ -196,9 +184,15 @@ export function ReactSelect({
   const hiddenSelectRef = useRef<HTMLSelectElement | null>(null);
   const typeaheadRef = useRef('');
   const typeaheadTimeoutRef = useRef<number | null>(null);
-  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0, minWidth: 0 });
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [labelId, setLabelId] = useState<string | undefined>();
   const options = useMemo(() => parseSelectOptions(children), [children]);
+  const closeMenu = useCallback(() => setIsOpen(false), []);
+  const menuPosition = useFloatingMenuPosition(isOpen, triggerRef, menuRef, {
+    // Only build the key while open; closed menus are never measured.
+    contentKey: isOpen ? menuContentKey(options) : undefined,
+    onTriggerHidden: closeMenu,
+  });
   const controlledValue = Array.isArray(value)
     ? String(value[0] ?? '')
     : value !== undefined
@@ -332,29 +326,6 @@ export function ReactSelect({
   useEffect(() => () => {
     if (typeaheadTimeoutRef.current) window.clearTimeout(typeaheadTimeoutRef.current);
   }, []);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const updatePosition = () => {
-      const rect = triggerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setMenuPosition({
-        left: rect.left,
-        top: rect.bottom + 4,
-        minWidth: rect.width,
-      });
-    };
-
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
-
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
-  }, [isOpen]);
 
   const handleSelect = useCallback((nextValue: string) => {
     const option = options.find(candidate => candidate.value === nextValue);
@@ -528,15 +499,13 @@ export function ReactSelect({
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
           <div
+            ref={menuRef}
             id={listboxId}
-            className="fixed z-50 max-h-72 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
+            className="fixed z-50 overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl"
             role="listbox"
             aria-labelledby={labelId}
-            style={{
-              left: menuPosition.left,
-              top: menuPosition.top,
-              minWidth: menuPosition.minWidth,
-            }}
+            data-placement={menuPosition.placement}
+            style={floatingMenuStyle(menuPosition)}
           >
             {options.map(option => {
               const showGroup = option.group && option.group !== lastGroup;
