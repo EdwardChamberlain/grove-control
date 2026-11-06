@@ -484,8 +484,18 @@ export function Layout() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  // Pages with internally-scrolling panes (the Files page) need a bounded height
+  // to fill, rather than growing with their content. From lg up, give the shell
+  // exactly one viewport and make <main> a flex column, so the page can take
+  // whatever the banners above it leave (`flex-1 min-h-0`) with no height maths.
+  // The compact top bar's space moves from main's margin to the shell's padding
+  // so it comes out of that viewport. Other pages keep scrolling the document.
+  const fillViewport = location.pathname === '/files';
+
   return (
-    <div className="flex min-h-screen">
+    <div className={`flex min-h-screen ${fillViewport ? 'lg:h-screen' : ''} ${
+      fillViewport && isSidebarCompact ? 'lg:pt-14' : ''
+    }`}>
       {/* Compact Header */}
       {isSidebarCompact && (
         <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary flex items-center px-4">
@@ -828,8 +838,8 @@ export function Layout() {
 
       {/* Main content */}
       <main className={`sidebar-content-transition flex-1 bg-bambu-dark overflow-auto ${
-        isSidebarCompact ? 'mt-14' : sidebarExpanded ? 'ml-64' : 'ml-16'
-      }`}>
+        isSidebarCompact ? (fillViewport ? 'mt-14 lg:mt-0' : 'mt-14') : sidebarExpanded ? 'ml-64' : 'ml-16'
+      } ${fillViewport ? 'min-w-0 flex flex-col lg:min-h-0' : ''}`}>
         {/* Debug logging indicator */}
         {debugLoggingState?.enabled && (
           <div className="bg-amber-500/20 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between">

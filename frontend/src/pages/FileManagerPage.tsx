@@ -1720,7 +1720,9 @@ export function FileManagerPage() {
 
   return (
     <div
-      className="p-4 md:p-8 min-h-[calc(100vh-64px)] lg:h-[calc(100vh-64px)] flex flex-col relative"
+      // Layout gives <main> a bounded flex column on this route (see `fillViewport`),
+      // so the page just takes the space left below any banners.
+      className="p-4 md:p-8 flex-1 lg:min-h-0 flex flex-col relative"
       {...dragHandlers}
     >
       {/* Drag & Drop Overlay — page-wide file upload (#1510) */}
