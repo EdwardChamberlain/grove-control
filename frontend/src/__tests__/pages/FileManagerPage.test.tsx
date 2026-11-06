@@ -1100,16 +1100,52 @@ describe('FileManagerPage', () => {
       );
     });
 
-    it('pins Temporary Files above the folder tree without folder actions', async () => {
+    it('pins Temporary Files below the folder tree, outside the scroll area, without folder actions', async () => {
       render(<FileManagerPage />);
 
       const pinned = await screen.findByTestId('temporary-files-folder');
       expect(pinned).toHaveTextContent('Temporary Files');
       expect(pinned).toHaveTextContent('2');
       expect(pinned.querySelector('button')).toBeNull();
-      // Pinned before the first user folder in document order.
-      const firstUserFolder = screen.getByText('Functional Parts');
-      expect(pinned.compareDocumentPosition(firstUserFolder) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Rendered after the last user folder in document order.
+      const userFolder = await screen.findByText('Functional Parts');
+      expect(userFolder.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // Pinned in its own footer, a sibling of (not inside) the scrolling tree.
+      const scroller = screen.getByTestId('folder-tree-scroller');
+      const footer = screen.getByTestId('temporary-files-footer');
+      expect(scroller).toContainElement(userFolder);
+      expect(scroller).not.toContainElement(pinned);
+      expect(footer).toContainElement(pinned);
+      expect(footer.parentElement).toBe(scroller.parentElement);
+      expect(scroller.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('lists Temporary Files last in the mobile folder picker', async () => {
+      render(<FileManagerPage />);
+
+      await screen.findByTestId('temporary-files-folder');
+      const options = Array.from(document.querySelectorAll('select option')) as HTMLOptionElement[];
+      expect(options.length).toBeGreaterThan(3);
+      const last = options[options.length - 1];
+      expect(last).toHaveTextContent('Temporary Files (2)');
+      expect(last.value).toBe(String(temporaryFolder.id));
+      expect(options.some((o) => o.textContent?.includes('Functional Parts'))).toBe(true);
+    });
+
+    it('omits the file count from the mobile picker when Temporary Files is empty', async () => {
+      server.use(
+        http.get('/api/v1/library/folders', () =>
+          HttpResponse.json([{ ...temporaryFolder, file_count: 0 }, ...mockFolders]),
+        ),
+      );
+      render(<FileManagerPage />);
+
+      await screen.findByTestId('temporary-files-folder');
+      const options = Array.from(document.querySelectorAll('select option')) as HTMLOptionElement[];
+      const last = options[options.length - 1];
+      expect(last.value).toBe(String(temporaryFolder.id));
+      expect(last).toHaveTextContent('Temporary Files');
+      expect(last.textContent).not.toMatch(/\(\d+\)/);
     });
 
     it('explains the folder and blocks uploads when it is selected', async () => {
