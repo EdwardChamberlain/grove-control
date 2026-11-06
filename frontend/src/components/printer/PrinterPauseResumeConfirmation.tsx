@@ -1,11 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { ConfirmModal } from '../ConfirmModal';
+import type { PauseResumeAction } from '../../hooks/usePrintControls';
 
 interface PrinterPauseResumeConfirmationProps {
   printerName: string;
   /** Which confirmation to show; null renders nothing. */
-  action: 'pause' | 'resume' | null;
-  onConfirm: (action: 'pause' | 'resume') => void;
+  action: PauseResumeAction | null;
+  onConfirm: () => void;
   onClose: () => void;
 }
 
@@ -32,7 +33,7 @@ export function PrinterPauseResumeConfirmation({
       confirmText={isPause ? t('printers.confirm.pauseButton') : t('printers.confirm.resumeButton')}
       variant="default"
       onConfirm={() => {
-        onConfirm(action);
+        onConfirm();
         onClose();
       }}
       onCancel={onClose}

@@ -19,7 +19,7 @@ describe('PrinterPauseResumeConfirmation', () => {
 
     await userEvent.setup().click(screen.getByRole('button', { name: button }));
 
-    expect(onConfirm).toHaveBeenCalledWith(action);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

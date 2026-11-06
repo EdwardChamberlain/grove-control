@@ -126,6 +126,7 @@ import {
 import { resolveAmsSlotModel } from '../components/printer/amsSlotModel';
 import { AmsSlot, AmsSlotControllerModals, useAmsSlotController } from '../hooks/useAmsSlotController';
 import { DRYING_PRESETS, useAmsDryingControls } from '../hooks/useAmsDryingControls';
+import { usePrintControls } from '../hooks/usePrintControls';
 import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
 import { getAmsLabel, getGlobalTrayId, getSlotPresetKey, getFillBarColor, installedNozzleDiameters } from '../utils/amsHelpers';
@@ -1434,7 +1435,6 @@ function SinglePrinterCockpit({
   const [showDiagnostic, setShowDiagnostic] = useState(false);
   const [showHMSModal, setShowHMSModal] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
-  const [pauseResumeConfirm, setPauseResumeConfirm] = useState<'pause' | 'resume' | null>(null);
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
   const [confirmMaintenanceEnter, setConfirmMaintenanceEnter] = useState(false);
   const [jogStep, setJogStep] = useState(10);
@@ -1661,30 +1661,8 @@ function SinglePrinterCockpit({
       maintenanceMutation.mutate(false);
     }
   };
-  const stopPrintMutation = useMutation({
-    mutationFn: () => api.stopPrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printStopped'));
-      invalidateStatus();
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToStopPrint'), 'error'),
-  });
-  const pausePrintMutation = useMutation({
-    mutationFn: () => api.pausePrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printPaused'));
-      invalidateStatus();
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToPausePrint'), 'error'),
-  });
-  const resumePrintMutation = useMutation({
-    mutationFn: () => api.resumePrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printResumed'));
-      invalidateStatus();
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToResumePrint'), 'error'),
-  });
+  const printControls = usePrintControls(printer.id, status?.state);
+  const { stopPrintMutation } = printControls;
   const clearPlateMutation = useMutation({
     mutationFn: () => api.clearPlate(printer.id),
     onSuccess: () => {
@@ -2030,7 +2008,7 @@ function SinglePrinterCockpit({
 
   const recentPrints = printEntries.slice(0, 4);
   const reprintableRecentPrints = recentPrints.filter(entry => entry.archive_id != null).slice(0, 3);
-  const controlBusy = stopPrintMutation.isPending || pausePrintMutation.isPending || resumePrintMutation.isPending;
+  const controlBusy = printControls.isBusy;
   const canControl = !!status?.connected && hasPermission('printers:control');
   const canUseMachineTools = !!status?.connected && canControl;
   const canJog = canUseMachineTools && !isPrintingOrPaused;
@@ -2302,7 +2280,7 @@ function SinglePrinterCockpit({
     <div className="grid grid-cols-2 gap-2">
       <button
         type="button"
-        onClick={() => setPauseResumeConfirm(isPaused ? 'resume' : 'pause')}
+        onClick={() => printControls.requestPauseResume(isPaused ? 'resume' : 'pause')}
         disabled={!canControl || controlBusy}
         className={`flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
           isPaused
@@ -2863,9 +2841,9 @@ function SinglePrinterCockpit({
     />
     <PrinterPauseResumeConfirmation
       printerName={printer.name}
-      action={pauseResumeConfirm}
-      onConfirm={(action) => (action === 'resume' ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
-      onClose={() => setPauseResumeConfirm(null)}
+      action={printControls.pauseResumeConfirm}
+      onConfirm={printControls.confirmPauseResume}
+      onClose={printControls.closePauseResume}
     />
     <AmsSlotControllerModals controller={amsSlotController} />
     {showNotHomedModal && (
@@ -3122,13 +3100,11 @@ function PrinterCard({
   // #1762: AMS Filament Backup status / control modal — opens from the badge.
   const [amsBackupModalOpen, setAmsBackupModalOpen] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
-  const [showPauseConfirm, setShowPauseConfirm] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState<number | null>(null);
   const [showAirductMenu, setShowAirductMenu] = useState<number | null>(null);
   const [showBedJogMenu, setShowBedJogMenu] = useState<number | null>(null);
   const [bedJogStep, setBedJogStep] = useState<number>(10);
   const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
-  const [showResumeConfirm, setShowResumeConfirm] = useState(false);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
   const [showPrinterInfo, setShowPrinterInfo] = useState(false);
@@ -3701,33 +3677,9 @@ function PrinterCard({
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
   });
 
-  // Print control mutations
-  const stopPrintMutation = useMutation({
-    mutationFn: () => api.stopPrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printStopped'));
-      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToStopPrint'), 'error'),
-  });
-
-  const pausePrintMutation = useMutation({
-    mutationFn: () => api.pausePrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printPaused'));
-      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToPausePrint'), 'error'),
-  });
-
-  const resumePrintMutation = useMutation({
-    mutationFn: () => api.resumePrint(printer.id),
-    onSuccess: () => {
-      showToast(t('printers.toast.printResumed'));
-      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToResumePrint'), 'error'),
-  });
+  // Print control mutations and pause/resume confirmation (shared with the cockpit)
+  const printControls = usePrintControls(printer.id, status?.state);
+  const { stopPrintMutation } = printControls;
 
   const clearPlateMutation = useMutation({
     mutationFn: () => api.clearPlate(printer.id),
@@ -4623,7 +4575,7 @@ function PrinterCard({
               const isRunning = status.state === 'RUNNING';
               const isPaused = status.state === 'PAUSE';
               const isPrinting = isRunning || isPaused;
-              const isControlBusy = stopPrintMutation.isPending || pausePrintMutation.isPending || resumePrintMutation.isPending;
+              const isControlBusy = printControls.isBusy;
               const unavailablePrintActionClass = 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed opacity-50';
               const iconControlClass = 'flex h-8 w-8 items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
               const printControlClass = 'flex h-8 w-20 items-center justify-center gap-1 px-2 rounded-lg text-xs font-medium transition-colors';
@@ -4905,7 +4857,7 @@ function PrinterCard({
                         const pauseUnavailable = !isPrinting || isControlBusy || !hasPermission('printers:control');
                         return (
                       <button
-                        onClick={() => isPaused ? setShowResumeConfirm(true) : setShowPauseConfirm(true)}
+                        onClick={() => printControls.requestPauseResume(isPaused ? 'resume' : 'pause')}
                         disabled={pauseUnavailable}
                         className={`
                           ${printControlClass}
@@ -5583,12 +5535,9 @@ function PrinterCard({
 
       <PrinterPauseResumeConfirmation
         printerName={printer.name}
-        action={showResumeConfirm ? 'resume' : showPauseConfirm ? 'pause' : null}
-        onConfirm={(action) => (action === 'resume' ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
-        onClose={() => {
-          setShowPauseConfirm(false);
-          setShowResumeConfirm(false);
-        }}
+        action={printControls.pauseResumeConfirm}
+        onConfirm={printControls.confirmPauseResume}
+        onClose={printControls.closePauseResume}
       />
 
       {/* Bed Jog — not-homed warning (Studio-style) */}
