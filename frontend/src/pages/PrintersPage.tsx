@@ -107,6 +107,7 @@ import { PrinterThermalControls } from '../components/printer/PrinterThermalCont
 import { PrinterAirductControl } from '../components/printer/PrinterAirductControl';
 import { PrinterPlateDetectionControl } from '../components/printer/PrinterPlateDetectionControl';
 import { PrinterStopPrintConfirmation } from '../components/printer/PrinterStopPrintConfirmation';
+import { PrinterPauseResumeConfirmation } from '../components/printer/PrinterPauseResumeConfirmation';
 import {
   AmsDryingControl,
   AmsDryingPopover,
@@ -1433,6 +1434,7 @@ function SinglePrinterCockpit({
   const [showDiagnostic, setShowDiagnostic] = useState(false);
   const [showHMSModal, setShowHMSModal] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [pauseResumeConfirm, setPauseResumeConfirm] = useState<'pause' | 'resume' | null>(null);
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
   const [confirmMaintenanceEnter, setConfirmMaintenanceEnter] = useState(false);
   const [jogStep, setJogStep] = useState(10);
@@ -2300,7 +2302,7 @@ function SinglePrinterCockpit({
     <div className="grid grid-cols-2 gap-2">
       <button
         type="button"
-        onClick={() => (isPaused ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
+        onClick={() => setPauseResumeConfirm(isPaused ? 'resume' : 'pause')}
         disabled={!canControl || controlBusy}
         className={`flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
           isPaused
@@ -2858,6 +2860,12 @@ function SinglePrinterCockpit({
       isOpen={showStopConfirm}
       onStop={() => stopPrintMutation.mutate()}
       onClose={() => setShowStopConfirm(false)}
+    />
+    <PrinterPauseResumeConfirmation
+      printerName={printer.name}
+      action={pauseResumeConfirm}
+      onConfirm={(action) => (action === 'resume' ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
+      onClose={() => setPauseResumeConfirm(null)}
     />
     <AmsSlotControllerModals controller={amsSlotController} />
     {showNotHomedModal && (
@@ -5573,35 +5581,15 @@ function PrinterCard({
         onClose={() => setShowStopConfirm(false)}
       />
 
-      {/* Pause Print Confirmation */}
-      {showPauseConfirm && (
-        <ConfirmModal
-          title={t('printers.confirm.pauseTitle')}
-          message={t('printers.confirm.pauseMessage', { name: printer.name })}
-          confirmText={t('printers.confirm.pauseButton')}
-          variant="default"
-          onConfirm={() => {
-            pausePrintMutation.mutate();
-            setShowPauseConfirm(false);
-          }}
-          onCancel={() => setShowPauseConfirm(false)}
-        />
-      )}
-
-      {/* Resume Print Confirmation */}
-      {showResumeConfirm && (
-        <ConfirmModal
-          title={t('printers.confirm.resumeTitle')}
-          message={t('printers.confirm.resumeMessage', { name: printer.name })}
-          confirmText={t('printers.confirm.resumeButton')}
-          variant="default"
-          onConfirm={() => {
-            resumePrintMutation.mutate();
-            setShowResumeConfirm(false);
-          }}
-          onCancel={() => setShowResumeConfirm(false)}
-        />
-      )}
+      <PrinterPauseResumeConfirmation
+        printerName={printer.name}
+        action={showResumeConfirm ? 'resume' : showPauseConfirm ? 'pause' : null}
+        onConfirm={(action) => (action === 'resume' ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
+        onClose={() => {
+          setShowPauseConfirm(false);
+          setShowResumeConfirm(false);
+        }}
+      />
 
       {/* Bed Jog — not-homed warning (Studio-style) */}
       {showNotHomedModal && (
