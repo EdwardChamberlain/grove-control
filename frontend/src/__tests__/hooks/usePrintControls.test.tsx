@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { api } from '../../api/client';
 import { ToastProvider } from '../../contexts/ToastContext';
 import { usePrintControls } from '../../hooks/usePrintControls';
 import { server } from '../mocks/server';
@@ -36,6 +37,8 @@ function renderControls(state: string | undefined) {
 }
 
 describe('usePrintControls', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it.each([
     ['pause', 'RUNNING'],
     ['resume', 'PAUSE'],
@@ -98,5 +101,58 @@ describe('usePrintControls', () => {
     const mutation = action === 'pause' ? 'pausePrintMutation' : 'resumePrintMutation';
     await waitFor(() => expect(result.current[mutation].isError).toBe(true));
     expect(result.current.isBusy).toBe(false);
+  });
+
+  it('stops a print and reports it', async () => {
+    const posts = recordPosts();
+    const { result } = renderControls('RUNNING');
+
+    act(() => result.current.stopPrintMutation.mutate());
+
+    await waitFor(() => expect(posts).toEqual(['/api/v1/printers/1/print/stop']));
+    expect(await screen.findByText('Print stopped')).toBeInTheDocument();
+  });
+
+  it('is busy while a request is in flight', async () => {
+    let finish: () => void = () => {};
+    vi.spyOn(api, 'pausePrint').mockReturnValue(
+      new Promise((resolve) => {
+        finish = () => resolve({ success: true, message: 'ok' });
+      }) as ReturnType<typeof api.pausePrint>,
+    );
+    const { result } = renderControls('RUNNING');
+
+    act(() => result.current.requestPauseResume('pause'));
+    act(() => result.current.confirmPauseResume());
+    await waitFor(() => expect(result.current.isBusy).toBe(true));
+
+    await act(async () => finish());
+    await waitFor(() => expect(result.current.isBusy).toBe(false));
+  });
+
+  it.each([
+    ['stopPrint', 'stopPrintMutation', 'Failed to stop print'],
+    ['pausePrint', 'pausePrintMutation', 'Failed to pause print'],
+    ['resumePrint', 'resumePrintMutation', 'Failed to resume print'],
+  ] as const)('falls back to a generic message when %s fails without one', async (method, mutation, message) => {
+    vi.spyOn(api, method).mockRejectedValue(new Error(''));
+    const { result } = renderControls('RUNNING');
+
+    act(() => result.current[mutation].mutate());
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+  });
+
+  it('shows the server message when a request is refused', async () => {
+    server.use(
+      http.post('*/api/v1/printers/1/print/pause', () =>
+        HttpResponse.json({ detail: 'Printer is busy homing' }, { status: 409 }),
+      ),
+    );
+    const { result } = renderControls('RUNNING');
+
+    act(() => result.current.pausePrintMutation.mutate());
+
+    expect(await screen.findByText('Printer is busy homing')).toBeInTheDocument();
   });
 });

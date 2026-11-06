@@ -15,7 +15,7 @@ export type PauseResumeAction = 'pause' | 'resume';
  * printer's state changes, so it can't send a pause or resume that no longer
  * applies (e.g. the print finished while the dialog was open).
  */
-export function usePrintControls(printerId: number, printerState: string | undefined) {
+export function usePrintControls(printerId: number, printerState: string | null | undefined) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
