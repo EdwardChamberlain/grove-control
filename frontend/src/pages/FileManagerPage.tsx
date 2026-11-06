@@ -487,7 +487,7 @@ interface TemporaryFilesFolderItemProps {
   t: TFunction;
 }
 
-/** Grove-managed Temporary Files (#237): pinned above the tree, no actions. */
+/** Grove-managed Temporary Files (#237): pinned to the bottom of the sidebar (last in the mobile picker), no actions. */
 function TemporaryFilesFolderItem({ folder, selected, onSelect, t }: TemporaryFilesFolderItemProps) {
   return (
     <div
@@ -1905,11 +1905,6 @@ export function FileManagerPage() {
             {folders?.some((f) => f.is_external) && (
               <option value="__top:external">🔗 {t('fileManager.allExternal')}</option>
             )}
-            {temporaryFolder && (
-              <option value={temporaryFolder.id}>
-                🕒 {t('fileManager.temporaryFiles')} {temporaryFolder.file_count > 0 ? `(${temporaryFolder.file_count})` : ''}
-              </option>
-            )}
             {sortedFolders && (() => {
               // Flatten folder tree for mobile selector
               const flattenFolders = (items: LibraryFolderTree[], depth = 0): { id: number; name: string; fileCount: number; depth: number }[] => {
@@ -1928,6 +1923,11 @@ export function FileManagerPage() {
                 </option>
               ));
             })()}
+            {temporaryFolder && (
+              <option value={temporaryFolder.id}>
+                🕒 {t('fileManager.temporaryFiles')} {temporaryFolder.file_count > 0 ? `(${temporaryFolder.file_count})` : ''}
+              </option>
+            )}
           </ReactSelect>
           <button
             type="button"
@@ -2051,7 +2051,7 @@ export function FileManagerPage() {
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-2">
+          <div data-testid="folder-tree-scroller" className="flex-1 overflow-y-auto p-2">
             {/* All Files = the user's own uploaded / managed-storage files
                 only. External folders are surfaced separately below to keep
                 a linked NAS from drowning the user's own uploads (#1621). */}
@@ -2090,17 +2090,6 @@ export function FileManagerPage() {
               </div>
             )}
 
-            {temporaryFolder && (
-              <div className="mt-1 mb-1 pb-1 border-b border-bambu-dark-tertiary">
-                <TemporaryFilesFolderItem
-                  folder={temporaryFolder}
-                  selected={isTemporarySelected}
-                  onSelect={setSelectedFolderId}
-                  t={t}
-                />
-              </div>
-            )}
-
             {/* Folder tree — re-key on the collapse toggle so flipping it
                 remounts every FolderTreeItem, which re-reads defaultExpanded
                 and makes the preference take effect immediately. */}
@@ -2121,6 +2110,19 @@ export function FileManagerPage() {
               />
             ))}
           </div>
+
+          {/* Temporary Files is pinned below the scrolling tree so it stays
+              visible however long the folder list is. */}
+          {temporaryFolder && (
+            <div data-testid="temporary-files-footer" className="shrink-0 border-t border-bambu-dark-tertiary p-2">
+              <TemporaryFilesFolderItem
+                folder={temporaryFolder}
+                selected={isTemporarySelected}
+                onSelect={setSelectedFolderId}
+                t={t}
+              />
+            </div>
+          )}
         </div>
 
         {/* Files area */}
