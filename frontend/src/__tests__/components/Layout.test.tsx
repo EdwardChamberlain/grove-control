@@ -2,7 +2,7 @@
  * Tests for the Layout component.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { Layout } from '../../components/Layout';
@@ -675,6 +675,71 @@ describe('Layout', () => {
       expect(sidebarLink('/files')).toBeNull();
       expect(sidebarLink('/archives')).toBeNull();
       expect(sidebarLink('/queue')).toBeNull();
+    });
+  });
+
+  describe('viewport-filling shell on the Files route', () => {
+    // Layout bounds the shell to one viewport on /files (from lg up) and makes <main>
+    // a flex column, so the page fills what the banners leave. Real pixel heights are
+    // covered by e2e/file-manager-layout.spec.ts; jsdom can't lay anything out, so
+    // these pin the classes that produce that layout.
+    const originalWidth = window.innerWidth;
+    const originalMatchMedia = window.matchMedia;
+    const renderAt = async (path: string, width: number) => {
+      window.history.pushState({}, '', path);
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+      // useIsSidebarCompact re-reads matchMedia in an effect, so stub it to agree with the width.
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: (query: string) => ({
+          matches: width < 1144,
+          media: query,
+          onchange: null,
+          addListener: () => {},
+          removeListener: () => {},
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => true,
+        }),
+      });
+      render(<Layout />);
+      await waitFor(() => {
+        expect(document.querySelector('main')).toBeInTheDocument();
+      });
+      const main = document.querySelector('main') as HTMLElement;
+      return { shell: main.parentElement as HTMLElement, main };
+    };
+
+    afterEach(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: originalWidth });
+      Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: originalMatchMedia });
+    });
+
+    it('bounds the shell and makes main a flex column beside the side rail', async () => {
+      const { shell, main } = await renderAt('/files', 1440);
+
+      expect(shell).toHaveClass('lg:h-screen');
+      expect(shell).not.toHaveClass('lg:pt-14');
+      expect(main).toHaveClass('flex', 'flex-col', 'min-w-0', 'lg:min-h-0');
+      expect(main).toHaveClass('ml-64');
+    });
+
+    it('moves the compact top bar space from main margin to shell padding from lg up', async () => {
+      const { shell, main } = await renderAt('/files', 1100);
+
+      expect(shell).toHaveClass('lg:h-screen', 'lg:pt-14');
+      expect(main).toHaveClass('mt-14', 'lg:mt-0', 'flex', 'flex-col');
+    });
+
+    it('leaves every other route scrolling the document as before', async () => {
+      const { shell, main } = await renderAt('/archives', 1100);
+
+      expect(shell).not.toHaveClass('lg:h-screen');
+      expect(shell).not.toHaveClass('lg:pt-14');
+      expect(main).toHaveClass('mt-14');
+      expect(main).not.toHaveClass('lg:mt-0');
+      expect(main).not.toHaveClass('flex-col');
     });
   });
 });
