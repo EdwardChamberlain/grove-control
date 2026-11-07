@@ -648,4 +648,47 @@ describe('StatsPage', () => {
       expect(printTime?.querySelector('svg[aria-label]')).toBeNull();
     });
   });
+
+  describe('energy tiles without energy tracking (#321)', () => {
+    const renderWithEnergy = async (energy: Record<string, unknown>) => {
+      server.use(
+        http.get('*/api/v1/archives/stats', () => HttpResponse.json({ ...mockStats, total_prints: 7, ...energy }))
+      );
+      render(<StatsPage />);
+      // Wait until the mocked stats have loaded, not just the default zeros.
+      await waitFor(() => {
+        expect(screen.getByText('Total Prints').nextElementSibling).toHaveTextContent('7');
+      });
+    };
+
+    it('hides Energy Used and Energy Cost when both are 0', async () => {
+      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0 });
+
+      expect(screen.queryByText('Energy Used')).not.toBeInTheDocument();
+      expect(screen.queryByText('Energy Cost')).not.toBeInTheDocument();
+      expect(screen.getByText('Filament Cost')).toBeInTheDocument();
+    });
+
+    it('shows both tiles when only energy used is non-zero', async () => {
+      await renderWithEnergy({ total_energy_kwh: 1.25, total_energy_cost: 0 });
+
+      expect(screen.getByText('Energy Used')).toBeInTheDocument();
+      expect(screen.getByText('Energy Cost')).toBeInTheDocument();
+    });
+
+    it('shows both tiles when only energy cost is non-zero', async () => {
+      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0.4 });
+
+      expect(screen.getByText('Energy Used')).toBeInTheDocument();
+      expect(screen.getByText('Energy Cost')).toBeInTheDocument();
+    });
+
+    it('keeps the tiles and their warning while energy data is warming up', async () => {
+      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0, energy_data_warming_up: true });
+
+      expect(screen.getByText('Energy Used')).toBeInTheDocument();
+      expect(screen.getByText('Energy Cost')).toBeInTheDocument();
+      expect(await screen.findAllByLabelText(/still collecting hourly snapshots/i)).toHaveLength(2);
+    });
+  });
 });

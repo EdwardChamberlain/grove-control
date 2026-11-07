@@ -141,13 +141,11 @@ function QuickStatsWidget({
 
   const warmingUp = stats?.energy_data_warming_up === true;
   const warmingUpTooltip = warmingUp ? t('stats.energyWarmingUpTooltip') : undefined;
+  // Without an energy-monitoring plug both totals stay at 0, so hide the pair
+  // (#321). Keep them while data is warming up so the warning stays visible.
+  const showEnergy = warmingUp || !!stats?.total_energy_kwh || !!stats?.total_energy_cost;
 
-  const items = [
-    { icon: Package, color: 'text-bambu-green', label: t('stats.totalPrints'), value: `${stats?.total_prints || 0}` },
-    { icon: Boxes, color: 'text-bambu-green', label: t('stats.successfulParts'), value: `${stats?.successful_parts || 0}` },
-    { icon: Clock, color: 'text-blue-400', label: t('stats.printTime'), value: `${stats?.total_print_time_hours?.toFixed(1) ?? '0'}h` },
-    { icon: Package, color: 'text-orange-400', label: t('stats.filamentUsed'), value: formatWeight(stats?.total_filament_grams || 0) },
-    { icon: DollarSign, color: 'text-green-400', label: t('stats.filamentCost'), value: `${currency} ${stats?.total_cost?.toFixed(2) ?? '0.00'}` },
+  const energyItems = [
     {
       icon: Zap,
       color: 'text-yellow-400',
@@ -164,6 +162,15 @@ function QuickStatsWidget({
       warning: warmingUp,
       tooltip: warmingUpTooltip,
     },
+  ];
+
+  const items = [
+    { icon: Package, color: 'text-bambu-green', label: t('stats.totalPrints'), value: `${stats?.total_prints || 0}` },
+    { icon: Boxes, color: 'text-bambu-green', label: t('stats.successfulParts'), value: `${stats?.successful_parts || 0}` },
+    { icon: Clock, color: 'text-blue-400', label: t('stats.printTime'), value: `${stats?.total_print_time_hours?.toFixed(1) ?? '0'}h` },
+    { icon: Package, color: 'text-orange-400', label: t('stats.filamentUsed'), value: formatWeight(stats?.total_filament_grams || 0) },
+    { icon: DollarSign, color: 'text-green-400', label: t('stats.filamentCost'), value: `${currency} ${stats?.total_cost?.toFixed(2) ?? '0.00'}` },
+    ...(showEnergy ? energyItems : []),
   ];
 
   return (
