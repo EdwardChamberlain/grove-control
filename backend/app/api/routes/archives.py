@@ -1087,21 +1087,21 @@ async def get_archive_stats(
     total_result = await db.execute(select(func.count(PrintLogEntry.id)).where(*base_conditions))
     total_prints = total_result.scalar() or 0
 
+    # Successful jobs and the parts they made, in one pass over completed runs.
+    # Parts sum the linked archive's quantity. The outer join keeps runs whose
+    # archive was deleted, and a missing, NULL or < 1 quantity counts as 1 part
+    # (a successful job made at least one). The join is on the archive's
+    # primary key, so it can't duplicate runs in the count.
     successful_result = await db.execute(
-        select(func.count(PrintLogEntry.id)).where(PrintLogEntry.status == "completed", *base_conditions)
-    )
-    successful_prints = successful_result.scalar() or 0
-
-    # Successful parts: sum the linked archive's quantity over completed runs.
-    # The outer join keeps runs whose archive was deleted, and a missing,
-    # NULL or < 1 quantity counts as 1 part (a successful job made at least one).
-    successful_parts_result = await db.execute(
-        select(func.coalesce(func.sum(case((PrintArchive.quantity >= 1, PrintArchive.quantity), else_=1)), 0))
+        select(
+            func.count(PrintLogEntry.id),
+            func.coalesce(func.sum(case((PrintArchive.quantity >= 1, PrintArchive.quantity), else_=1)), 0),
+        )
         .select_from(PrintLogEntry)
         .outerjoin(PrintArchive, PrintArchive.id == PrintLogEntry.archive_id)
         .where(PrintLogEntry.status == "completed", *base_conditions)
     )
-    successful_parts = int(successful_parts_result.scalar() or 0)
+    successful_prints, successful_parts = successful_result.one()
 
     failed_result = await db.execute(
         select(func.count(PrintLogEntry.id)).where(PrintLogEntry.status.in_(("failed", "aborted")), *base_conditions)
@@ -1273,7 +1273,52 @@ async def get_archive_stats(
         total_energy_kwh=round(total_energy_kwh, 3),
         total_energy_cost=round(total_energy_cost, 3),
         energy_data_warming_up=energy_data_warming_up,
+        energy_tracking_available=await _energy_tracking_available(db),
     )
+
+
+async def _energy_tracking_available(db: AsyncSession) -> bool:
+    """Whether energy tracking is set up, ignoring the stats filters (#321).
+
+    True when any of these holds:
+      * a plug has recorded a lifetime energy snapshot (the only signal for
+        Tasmota, whose config doesn't say whether the device meters energy);
+      * a past run has energy recorded, so history stays visible after a plug
+        is removed;
+      * an enabled HA, MQTT or REST plug has an energy source configured.
+    """
+    from backend.app.models.print_log import PrintLogEntry
+    from backend.app.models.smart_plug import SmartPlug
+    from backend.app.models.smart_plug_energy_snapshot import SmartPlugEnergySnapshot
+
+    def _is_set(column):
+        # Plug forms can save a cleared field as "" rather than NULL.
+        return and_(column.isnot(None), column != "")
+
+    configured_energy_source = or_(
+        and_(
+            SmartPlug.plug_type == "homeassistant",
+            or_(_is_set(SmartPlug.ha_energy_today_entity), _is_set(SmartPlug.ha_energy_total_entity)),
+        ),
+        and_(SmartPlug.plug_type == "mqtt", _is_set(SmartPlug.mqtt_energy_topic)),
+        and_(
+            SmartPlug.plug_type == "rest",
+            or_(
+                _is_set(SmartPlug.rest_energy_url),
+                _is_set(SmartPlug.rest_energy_path),
+                _is_set(SmartPlug.rest_energy_total_path),
+            ),
+        ),
+    )
+    checks = (
+        select(SmartPlugEnergySnapshot.id).limit(1),
+        select(PrintLogEntry.id).where(PrintLogEntry.energy_kwh.isnot(None)).limit(1),
+        select(SmartPlug.id).where(SmartPlug.enabled.is_(True), configured_energy_source).limit(1),
+    )
+    for check in checks:
+        if (await db.execute(check)).first() is not None:
+            return True
+    return False
 
 
 async def _sum_live_plug_totals(db: AsyncSession) -> float:

@@ -134,6 +134,7 @@ function QuickStatsWidget({
     total_energy_kwh: number;
     total_energy_cost: number;
     energy_data_warming_up?: boolean;
+    energy_tracking_available?: boolean;
   } | undefined;
   currency: string;
 }) {
@@ -141,9 +142,10 @@ function QuickStatsWidget({
 
   const warmingUp = stats?.energy_data_warming_up === true;
   const warmingUpTooltip = warmingUp ? t('stats.energyWarmingUpTooltip') : undefined;
-  // Without an energy-monitoring plug both totals stay at 0, so hide the pair
-  // (#321). Keep them while data is warming up so the warning stays visible.
-  const showEnergy = warmingUp || !!stats?.total_energy_kwh || !!stats?.total_energy_cost;
+  // Hide the pair when no energy tracking is set up (#321). The backend flag
+  // ignores filters, so a tracked-but-zero range keeps the tiles. Keep them
+  // while data is warming up so the warning stays visible.
+  const showEnergy = warmingUp || stats?.energy_tracking_available === true;
 
   const energyItems = [
     {

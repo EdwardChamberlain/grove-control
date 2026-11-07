@@ -34,6 +34,7 @@ const mockStats = {
   },
   total_energy_kwh: 45.5,
   total_energy_cost: 12.50,
+  energy_tracking_available: true,
 };
 
 const mockPrinters = [
@@ -661,30 +662,41 @@ describe('StatsPage', () => {
       });
     };
 
-    it('hides Energy Used and Energy Cost when both are 0', async () => {
-      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0 });
+    it('hides Energy Used and Energy Cost when energy tracking is not set up', async () => {
+      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0, energy_tracking_available: false });
 
       expect(screen.queryByText('Energy Used')).not.toBeInTheDocument();
       expect(screen.queryByText('Energy Cost')).not.toBeInTheDocument();
       expect(screen.getByText('Filament Cost')).toBeInTheDocument();
     });
 
-    it('shows both tiles when only energy used is non-zero', async () => {
-      await renderWithEnergy({ total_energy_kwh: 1.25, total_energy_cost: 0 });
+    it('hides the tiles when the backend sends no tracking flag', async () => {
+      const { energy_tracking_available: _omitted, ...statsWithoutFlag } = mockStats;
+      server.use(
+        http.get('*/api/v1/archives/stats', () => HttpResponse.json({ ...statsWithoutFlag, total_prints: 7 }))
+      );
+      render(<StatsPage />);
+      await waitFor(() => {
+        expect(screen.getByText('Total Prints').nextElementSibling).toHaveTextContent('7');
+      });
 
-      expect(screen.getByText('Energy Used')).toBeInTheDocument();
-      expect(screen.getByText('Energy Cost')).toBeInTheDocument();
+      expect(screen.queryByText('Energy Used')).not.toBeInTheDocument();
     });
 
-    it('shows both tiles when only energy cost is non-zero', async () => {
-      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0.4 });
+    it('keeps both tiles when tracking is set up but this range used no energy', async () => {
+      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0, energy_tracking_available: true });
 
-      expect(screen.getByText('Energy Used')).toBeInTheDocument();
+      expect(screen.getByText('Energy Used').nextElementSibling).toHaveTextContent('0.000 kWh');
       expect(screen.getByText('Energy Cost')).toBeInTheDocument();
     });
 
     it('keeps the tiles and their warning while energy data is warming up', async () => {
-      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0, energy_data_warming_up: true });
+      await renderWithEnergy({
+        total_energy_kwh: 0,
+        total_energy_cost: 0,
+        energy_tracking_available: false,
+        energy_data_warming_up: true,
+      });
 
       expect(screen.getByText('Energy Used')).toBeInTheDocument();
       expect(screen.getByText('Energy Cost')).toBeInTheDocument();

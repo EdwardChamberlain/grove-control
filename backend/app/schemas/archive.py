@@ -173,6 +173,11 @@ class ArchiveStats(BaseModel):
     # incomplete snapshot history — e.g. right after a fresh upgrade before the
     # hourly snapshot loop has built up a baseline. Frontend shows a tooltip.
     energy_data_warming_up: bool = False
+    # True when energy tracking is set up at all, whatever the filters: a plug
+    # has an energy source configured, has recorded a lifetime reading, or a
+    # past run has energy on it. Lets the UI tell "no energy plug" apart from
+    # "tracked, but 0 in this range" (#321).
+    energy_tracking_available: bool = False
 
 
 class ProjectPageImage(BaseModel):
