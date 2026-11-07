@@ -148,6 +148,10 @@ class ArchiveSlim(BaseModel):
 class ArchiveStats(BaseModel):
     total_prints: int
     successful_prints: int
+    # Parts made by completed runs: the sum of the linked archive's quantity,
+    # counting 1 when the archive is gone or its quantity is missing or < 1.
+    # Failed/stopped/cancelled runs add nothing; reprints count again.
+    successful_parts: int = 0
     failed_prints: int
     # User/system-stopped prints (PrintLogEntry.status in stopped/cancelled/
     # skipped). Defaulted so older clients that don't send this field still
@@ -169,6 +173,11 @@ class ArchiveStats(BaseModel):
     # incomplete snapshot history — e.g. right after a fresh upgrade before the
     # hourly snapshot loop has built up a baseline. Frontend shows a tooltip.
     energy_data_warming_up: bool = False
+    # True when energy tracking is set up at all, whatever the filters: a plug
+    # has an energy source configured, has recorded a lifetime reading, or a
+    # past run has energy on it. Lets the UI tell "no energy plug" apart from
+    # "tracked, but 0 in this range" (#321).
+    energy_tracking_available: bool = False
 
 
 class ProjectPageImage(BaseModel):

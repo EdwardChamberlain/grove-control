@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { render } from '../utils';
 import { StatsPage } from '../../pages/StatsPage';
 import { http, HttpResponse } from 'msw';
@@ -34,6 +34,7 @@ const mockStats = {
   },
   total_energy_kwh: 45.5,
   total_energy_cost: 12.50,
+  energy_tracking_available: true,
 };
 
 const mockPrinters = [
@@ -202,6 +203,37 @@ describe('StatsPage', () => {
         expect(screen.getByText('Filament Used')).toBeInTheDocument();
         expect(screen.getByText('5.5kg')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('successful parts', () => {
+    it('shows successful parts as a quick stat, separate from successful prints', async () => {
+      server.use(
+        http.get('*/api/v1/archives/stats', () => {
+          return HttpResponse.json({ ...mockStats, successful_prints: 3, successful_parts: 12 });
+        })
+      );
+      render(<StatsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Successful Parts')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Successful Parts').nextElementSibling).toHaveTextContent('12');
+      expect(screen.getByText('Successful:').nextElementSibling).toHaveTextContent('3');
+      // The Success Rate widget keeps its per-job breakdown only.
+      const successRateCard = screen.getByText('Successful:').closest('.space-y-2') as HTMLElement;
+      expect(within(successRateCard).queryByText(/parts/i)).not.toBeInTheDocument();
+    });
+
+    it('shows 0 successful parts when the field is missing', async () => {
+      const { successful_parts: _omitted, ...statsWithoutParts } = { ...mockStats, successful_parts: 5 };
+      server.use(http.get('*/api/v1/archives/stats', () => HttpResponse.json(statsWithoutParts)));
+      render(<StatsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Successful Parts')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Successful Parts').nextElementSibling).toHaveTextContent('0');
     });
   });
 
@@ -615,6 +647,78 @@ describe('StatsPage', () => {
       expect(totalPrints?.querySelector('svg[aria-label]')).toBeNull();
       const printTime = screen.getByText('Print Time').closest('div');
       expect(printTime?.querySelector('svg[aria-label]')).toBeNull();
+    });
+  });
+
+  describe('energy tiles without energy tracking (#321)', () => {
+    const renderWithEnergy = async (energy: Record<string, unknown>) => {
+      server.use(
+        http.get('*/api/v1/archives/stats', () => HttpResponse.json({ ...mockStats, total_prints: 7, ...energy }))
+      );
+      render(<StatsPage />);
+      // Wait until the mocked stats have loaded, not just the default zeros.
+      await waitFor(() => {
+        expect(screen.getByText('Total Prints').nextElementSibling).toHaveTextContent('7');
+      });
+    };
+
+    it('hides Energy Used and Energy Cost when energy tracking is not set up', async () => {
+      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0, energy_tracking_available: false });
+
+      expect(screen.queryByText('Energy Used')).not.toBeInTheDocument();
+      expect(screen.queryByText('Energy Cost')).not.toBeInTheDocument();
+      expect(screen.getByText('Filament Cost')).toBeInTheDocument();
+    });
+
+    it('hides the tiles when the backend sends no tracking flag', async () => {
+      const { energy_tracking_available: _omitted, ...statsWithoutFlag } = mockStats;
+      server.use(
+        http.get('*/api/v1/archives/stats', () => HttpResponse.json({ ...statsWithoutFlag, total_prints: 7 }))
+      );
+      render(<StatsPage />);
+      await waitFor(() => {
+        expect(screen.getByText('Total Prints').nextElementSibling).toHaveTextContent('7');
+      });
+
+      expect(screen.queryByText('Energy Used')).not.toBeInTheDocument();
+    });
+
+    it('keeps both tiles when tracking is set up but this range used no energy', async () => {
+      await renderWithEnergy({ total_energy_kwh: 0, total_energy_cost: 0, energy_tracking_available: true });
+
+      expect(screen.getByText('Energy Used').nextElementSibling).toHaveTextContent('0.000 kWh');
+      expect(screen.getByText('Energy Cost')).toBeInTheDocument();
+    });
+
+    it('falls back to zeros for every quick stat the backend leaves out', async () => {
+      server.use(
+        http.get('*/api/v1/archives/stats', () => HttpResponse.json({ energy_tracking_available: true }))
+      );
+      render(<StatsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Energy Used')).toBeInTheDocument();
+      });
+      const valueOf = (label: string) => screen.getByText(label).nextElementSibling;
+      expect(valueOf('Total Prints')).toHaveTextContent('0');
+      expect(valueOf('Successful Parts')).toHaveTextContent('0');
+      expect(valueOf('Print Time')).toHaveTextContent('0h');
+      expect(valueOf('Filament Cost')).toHaveTextContent('0.00');
+      expect(valueOf('Energy Used')).toHaveTextContent('0.000 kWh');
+      expect(valueOf('Energy Cost')).toHaveTextContent('0.00');
+    });
+
+    it('keeps the tiles and their warning while energy data is warming up', async () => {
+      await renderWithEnergy({
+        total_energy_kwh: 0,
+        total_energy_cost: 0,
+        energy_tracking_available: false,
+        energy_data_warming_up: true,
+      });
+
+      expect(screen.getByText('Energy Used')).toBeInTheDocument();
+      expect(screen.getByText('Energy Cost')).toBeInTheDocument();
+      expect(await screen.findAllByLabelText(/still collecting hourly snapshots/i)).toHaveLength(2);
     });
   });
 });

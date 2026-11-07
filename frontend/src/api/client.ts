@@ -756,6 +756,7 @@ export interface PrintLogResponse {
 export interface ArchiveStats {
   total_prints: number;
   successful_prints: number;
+  successful_parts: number;
   failed_prints: number;
   cancelled_prints: number;
   total_print_time_hours: number;
@@ -771,6 +772,9 @@ export interface ArchiveStats {
   // snapshot history (e.g. right after upgrade, before hourly snapshots have
   // a baseline). UI should explain why the number may undercount.
   energy_data_warming_up?: boolean;
+  // True when energy tracking is set up at all, whatever the filters. The
+  // Stats page hides its energy tiles when this is false (#321).
+  energy_tracking_available?: boolean;
 }
 
 export interface TagInfo {
