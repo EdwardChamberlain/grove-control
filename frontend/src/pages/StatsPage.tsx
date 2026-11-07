@@ -22,7 +22,9 @@ import {
   ChevronDown,
   Users,
   BarChart3,
+  Boxes,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -118,6 +120,15 @@ const RECHARTS_TOOLTIP_STYLE = {
 };
 
 // Widget Components
+interface QuickStatItem {
+  icon: LucideIcon;
+  color: string;
+  label: string;
+  value: string;
+  warning?: boolean;
+  tooltip?: string;
+}
+
 function QuickStatsWidget({
   stats,
   currency,
@@ -125,6 +136,7 @@ function QuickStatsWidget({
   stats: {
     total_prints: number;
     successful_prints: number;
+    successful_parts?: number;
     failed_prints: number;
     total_print_time_hours: number;
     total_filament_grams: number;
@@ -132,6 +144,7 @@ function QuickStatsWidget({
     total_energy_kwh: number;
     total_energy_cost: number;
     energy_data_warming_up?: boolean;
+    energy_tracking_available?: boolean;
   } | undefined;
   currency: string;
 }) {
@@ -139,12 +152,12 @@ function QuickStatsWidget({
 
   const warmingUp = stats?.energy_data_warming_up === true;
   const warmingUpTooltip = warmingUp ? t('stats.energyWarmingUpTooltip') : undefined;
+  // Hide the pair when no energy tracking is set up (#321). The backend flag
+  // ignores filters, so a tracked-but-zero range keeps the tiles. Keep them
+  // while data is warming up so the warning stays visible.
+  const showEnergy = warmingUp || stats?.energy_tracking_available === true;
 
-  const items = [
-    { icon: Package, color: 'text-bambu-green', label: t('stats.totalPrints'), value: `${stats?.total_prints || 0}` },
-    { icon: Clock, color: 'text-blue-400', label: t('stats.printTime'), value: `${stats?.total_print_time_hours?.toFixed(1) ?? '0'}h` },
-    { icon: Package, color: 'text-orange-400', label: t('stats.filamentUsed'), value: formatWeight(stats?.total_filament_grams || 0) },
-    { icon: DollarSign, color: 'text-green-400', label: t('stats.filamentCost'), value: `${currency} ${stats?.total_cost?.toFixed(2) ?? '0.00'}` },
+  const energyItems: QuickStatItem[] = [
     {
       icon: Zap,
       color: 'text-yellow-400',
@@ -161,6 +174,15 @@ function QuickStatsWidget({
       warning: warmingUp,
       tooltip: warmingUpTooltip,
     },
+  ];
+
+  const items: QuickStatItem[] = [
+    { icon: Package, color: 'text-bambu-green', label: t('stats.totalPrints'), value: `${stats?.total_prints || 0}` },
+    { icon: Boxes, color: 'text-bambu-green', label: t('stats.successfulParts'), value: `${stats?.successful_parts || 0}` },
+    { icon: Clock, color: 'text-blue-400', label: t('stats.printTime'), value: `${stats?.total_print_time_hours?.toFixed(1) ?? '0'}h` },
+    { icon: Package, color: 'text-orange-400', label: t('stats.filamentUsed'), value: formatWeight(stats?.total_filament_grams || 0) },
+    { icon: DollarSign, color: 'text-green-400', label: t('stats.filamentCost'), value: `${currency} ${stats?.total_cost?.toFixed(2) ?? '0.00'}` },
+    ...(showEnergy ? energyItems : []),
   ];
 
   return (
