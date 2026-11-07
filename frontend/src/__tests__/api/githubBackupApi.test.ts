@@ -26,6 +26,8 @@ describe('GitHub Backup API Types', () => {
     const config: GitHubBackupConfig = {
       id: 1,
       repository_url: 'https://github.com/test/repo',
+      provider: 'github',
+      allow_insecure_http: false,
       has_token: true,
       branch: 'main',
       schedule_enabled: true,
@@ -104,6 +106,8 @@ describe('GitHub Backup API Types', () => {
     const config: GitHubBackupConfig = {
       id: 2,
       repository_url: 'https://github.com/test/full-backup',
+      provider: 'github',
+      allow_insecure_http: false,
       has_token: true,
       branch: 'main',
       schedule_enabled: false,
@@ -164,6 +168,8 @@ describe('GitHub Backup API Endpoints', () => {
     const mockConfig: GitHubBackupConfig = {
       id: 1,
       repository_url: 'https://github.com/test/repo',
+      provider: 'github',
+      allow_insecure_http: false,
       has_token: true,
       branch: 'main',
       schedule_enabled: false,

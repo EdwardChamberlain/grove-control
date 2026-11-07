@@ -307,7 +307,7 @@ describe('Layout', () => {
       });
 
       // Click to go from dark → light
-      const lightBtn = document.querySelector('button[title="Switch to light mode"]')!;
+      const lightBtn = document.querySelector<HTMLButtonElement>('button[title="Switch to light mode"]')!;
       lightBtn.click();
 
       await waitFor(() => {
@@ -317,7 +317,7 @@ describe('Layout', () => {
       });
 
       // Click to go from light → system
-      const systemBtn = document.querySelector('button[title="Switch to system mode"]')!;
+      const systemBtn = document.querySelector<HTMLButtonElement>('button[title="Switch to system mode"]')!;
       systemBtn.click();
 
       await waitFor(() => {
@@ -327,7 +327,7 @@ describe('Layout', () => {
       });
 
       // Click to go from system → dark
-      const darkBtn = document.querySelector('button[title="Switch to dark mode"]')!;
+      const darkBtn = document.querySelector<HTMLButtonElement>('button[title="Switch to dark mode"]')!;
       darkBtn.click();
 
       await waitFor(() => {

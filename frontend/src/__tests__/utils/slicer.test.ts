@@ -2,17 +2,17 @@
  * Tests for the slicer utility functions.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { openInSlicer, detectPlatform, buildDownloadUrl } from '../../utils/slicer';
 
 describe('slicer utility', () => {
-  let clickSpy: ReturnType<typeof vi.fn>;
+  let clickSpy: Mock<() => void>;
   let appendSpy: ReturnType<typeof vi.fn>;
   let removeSpy: ReturnType<typeof vi.fn>;
   let createdLink: HTMLAnchorElement;
 
   beforeEach(() => {
-    clickSpy = vi.fn();
+    clickSpy = vi.fn<() => void>();
     appendSpy = vi.spyOn(document.body, 'appendChild').mockImplementation((node) => {
       createdLink = node as HTMLAnchorElement;
       return node;

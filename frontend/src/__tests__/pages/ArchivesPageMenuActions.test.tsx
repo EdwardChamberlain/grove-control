@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
 import { server } from '../mocks/server';
@@ -49,7 +49,7 @@ interface Calls {
   selected: string[];
 }
 
-function useArchives(overrides: Record<string, unknown> = {}, scan: unknown = { status: 'not_found', message: '' }) {
+function useArchives(overrides: Record<string, unknown> = {}, scan: JsonBodyType = { status: 'not_found', message: '' }) {
   const calls: Calls = { favorite: 0, patches: [], deletes: [], scans: 0, selected: [] };
   server.use(
     http.get('/api/v1/archives/', () => HttpResponse.json([{ ...baseArchive, ...overrides }])),

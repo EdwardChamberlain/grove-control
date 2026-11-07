@@ -9,18 +9,78 @@ import { render } from '../utils';
 import { EditArchiveModal } from '../../components/EditArchiveModal';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
+import type { Archive } from '../../api/client';
 
-const mockArchive = {
+function makeArchive(overrides: Partial<Archive> = {}): Archive {
+  return {
+    id: 1,
+    printer_id: null,
+    project_id: null,
+    project_name: null,
+    filename: 'benchy.gcode.3mf',
+    file_path: 'archives/benchy.gcode.3mf',
+    file_size: 0,
+    content_hash: null,
+    thumbnail_path: null,
+    timelapse_path: null,
+    source_3mf_path: null,
+    f3d_path: null,
+    duplicates: null,
+    duplicate_count: 0,
+    duplicate_sequence: 0,
+    original_archive_id: null,
+    object_count: null,
+    print_name: null,
+    print_time_seconds: null,
+    actual_time_seconds: null,
+    time_accuracy: null,
+    filament_used_grams: null,
+    filament_type: null,
+    filament_color: null,
+    layer_height: null,
+    total_layers: null,
+    nozzle_diameter: null,
+    bed_temperature: null,
+    bed_type: null,
+    nozzle_temperature: null,
+    sliced_for_model: null,
+    status: 'completed',
+    started_at: null,
+    completed_at: null,
+    extra_data: null,
+    makerworld_url: null,
+    designer: null,
+    external_url: null,
+    is_favorite: false,
+    tags: null,
+    notes: null,
+    cost: null,
+    photos: null,
+    failure_reason: null,
+    quantity: 1,
+    energy_kwh: null,
+    energy_cost: null,
+    created_at: '2024-01-01T00:00:00Z',
+    created_by_id: null,
+    created_by_username: null,
+    run_count: 0,
+    last_run_at: null,
+    total_filament_actual_grams: null,
+    successful_run_count: 0,
+    failed_run_count: 0,
+    ...overrides,
+  };
+}
+
+const mockArchive = makeArchive({
   id: 1,
   filename: 'benchy.gcode.3mf',
   print_name: 'Benchy',
   printer_id: 1,
-  printer_name: 'X1 Carbon',
   notes: 'Test notes',
-  rating: 4,
   project_id: null,
   tags: 'test,calibration',
-};
+});
 
 const mockProjects = [
   { id: 1, name: 'Functional Parts', color: '#00ae42' },
@@ -29,7 +89,6 @@ const mockProjects = [
 
 describe('EditArchiveModal', () => {
   const mockOnClose = vi.fn();
-  const mockOnSave = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -45,7 +104,7 @@ describe('EditArchiveModal', () => {
         ]);
       }),
       http.patch('/api/v1/archives/:id', async ({ request }) => {
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
         return HttpResponse.json({ ...mockArchive, ...body });
       })
     );
@@ -57,7 +116,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -69,7 +127,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -85,7 +142,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -100,7 +156,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -115,7 +170,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -130,7 +184,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -144,7 +197,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -159,7 +211,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -171,7 +222,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -184,7 +234,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -199,7 +248,6 @@ describe('EditArchiveModal', () => {
         <EditArchiveModal
           archive={mockArchive}
           onClose={mockOnClose}
-          onSave={mockOnSave}
         />
       );
 
@@ -222,13 +270,13 @@ describe('EditArchiveModal', () => {
     const legacyArchive = { ...mockArchive, status: 'failed', failure_reason: 'Filament runout' };
 
     it('preselects the option when the stored value is already a camelCase key', () => {
-      render(<EditArchiveModal archive={failedArchive} onClose={mockOnClose} onSave={mockOnSave} />);
+      render(<EditArchiveModal archive={failedArchive} onClose={mockOnClose} />);
       const select = screen.getByLabelText(/failure reason/i) as HTMLSelectElement;
       expect(select.value).toBe('filamentRunout');
     });
 
     it('reverse-looks-up a legacy translated value back to its key', () => {
-      render(<EditArchiveModal archive={legacyArchive} onClose={mockOnClose} onSave={mockOnSave} />);
+      render(<EditArchiveModal archive={legacyArchive} onClose={mockOnClose} />);
       const select = screen.getByLabelText(/failure reason/i) as HTMLSelectElement;
       expect(select.value).toBe('filamentRunout');
     });
@@ -243,7 +291,7 @@ describe('EditArchiveModal', () => {
         }),
       );
 
-      render(<EditArchiveModal archive={failedArchive} onClose={mockOnClose} onSave={mockOnSave} />);
+      render(<EditArchiveModal archive={failedArchive} onClose={mockOnClose} />);
       const select = screen.getByLabelText(/failure reason/i);
       await user.click(select);
       await user.click(await screen.findByRole('option', { name: /clogged nozzle/i }));

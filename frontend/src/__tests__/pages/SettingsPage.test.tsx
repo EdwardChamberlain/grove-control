@@ -85,7 +85,7 @@ describe('SettingsPage', () => {
         return HttpResponse.json(mockSettings);
       }),
       http.put('/api/v1/settings/', async ({ request }) => {
-        const body = await request.json();
+        const body = await request.json() as Record<string, unknown>;
         return HttpResponse.json({ ...mockSettings, ...body });
       }),
       http.get('/api/v1/printers/', () => {
@@ -180,7 +180,7 @@ describe('SettingsPage', () => {
       await screen.findByText('preview-100.3mf');
       await user.clear(input);
       expect(input).toHaveValue(null);
-      expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
       expect(saveRequests).toEqual([]);
 
       await user.type(input, '200');
@@ -189,13 +189,13 @@ describe('SettingsPage', () => {
       expect(previewCounts).toContain(200);
       expect(saveRequests).toEqual([]);
 
-      await user.click(screen.getByRole('button', { name: 'Apply', exact: true }));
+      await user.click(screen.getByRole('button', { name: 'Apply' }));
       await waitFor(() => expect(saveRequests).toEqual([
         { enabled: true, days: 365, mode: 'count', max_count: 200, purge_stats: false },
       ]));
-      await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel', exact: true })).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument());
       expect(input).toHaveValue(200);
-      expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
     });
 
     it.each(['', '0', '1.5', '100001'])('rejects invalid count draft %j without saving or previewing it', async (value) => {
@@ -208,7 +208,7 @@ describe('SettingsPage', () => {
       fireEvent.blur(input);
 
       expect(screen.getByText('Enter a whole number from 1 to 100,000.')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
       expect(previewCounts).toEqual([100]);
       expect(saveRequests).toEqual([]);
     });
@@ -224,10 +224,10 @@ describe('SettingsPage', () => {
       await user.click(screen.getByLabelText(/Also remove from statistics/));
       await waitFor(() => expect(saveRequests).toHaveLength(1));
       expect(saveRequests[0]).toMatchObject({ max_count: 100, purge_stats: true });
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled());
       expect(input).toHaveValue(200);
 
-      await user.click(screen.getByRole('button', { name: 'Apply', exact: true }));
+      await user.click(screen.getByRole('button', { name: 'Apply' }));
       await waitFor(() => expect(saveRequests).toHaveLength(2));
       expect(saveRequests[1]).toMatchObject({ max_count: 200, purge_stats: true });
     });
@@ -240,12 +240,12 @@ describe('SettingsPage', () => {
       const input = await screen.findByLabelText('Maximum number of archive files to keep');
       fireEvent.change(input, { target: { value: '200' } });
       await screen.findByText('preview-200.3mf');
-      await user.click(screen.getByRole('button', { name: 'Apply', exact: true }));
+      await user.click(screen.getByRole('button', { name: 'Apply' }));
       await waitFor(() => expect(saveRequests).toHaveLength(1));
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled());
       expect(input).toHaveValue(200);
 
-      await user.click(screen.getByRole('button', { name: 'Cancel', exact: true }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(input).toHaveValue(100);
       expect(saveRequests).toHaveLength(1);
     });
@@ -517,7 +517,7 @@ describe('SettingsPage', () => {
       const printers = screen.getAllByText('Printers').find(element => element.closest('[draggable="true"]'));
 
       expect(printers).toBeDefined();
-      expect(docs.compareDocumentPosition(printers) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(docs.compareDocumentPosition(printers!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('saves mixed Sidebar order when items are dragged', async () => {

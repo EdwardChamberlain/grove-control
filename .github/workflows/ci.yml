@@ -297,7 +297,7 @@ jobs:
 
       - name: Run TypeScript check
         working-directory: frontend
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
   frontend-test-shards:
     name: Frontend Test Shards (${{ matrix.shard }}/3)

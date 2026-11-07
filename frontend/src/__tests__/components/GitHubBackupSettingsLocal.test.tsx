@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { GitHubBackupSettings } from '../../components/GitHubBackupSettings';
@@ -23,7 +23,7 @@ let calls: { method: string; path: string; body: unknown }[];
 
 beforeEach(() => {
   calls = [];
-  const record = (response: unknown = {}) =>
+  const record = (response: JsonBodyType = {}) =>
     async ({ request }: { request: Request }) => {
       const text = request.headers.get('content-type')?.includes('json') ? await request.text() : '';
       calls.push({ method: request.method, path: decodeURIComponent(new URL(request.url).pathname), body: text ? JSON.parse(text) : null });

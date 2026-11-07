@@ -6,7 +6,7 @@
  * for, the missing-spool toast, keepalive pings and error/close handling.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { renderHook, act, screen } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -42,7 +42,9 @@ class FakeSocket {
   });
   addEventListener = vi.fn();
   removeEventListener = vi.fn();
-  constructor(public url: string) {
+  url: string;
+  constructor(url: string) {
+    this.url = url;
     sockets.push(this);
   }
   open() {
@@ -62,7 +64,9 @@ let queryClient: QueryClient;
 let originalWebSocket: typeof WebSocket;
 
 function wrapper({ children }: { children: React.ReactNode }) {
-  return React.createElement(ToastProvider, {}, React.createElement(QueryClientProvider, { client: queryClient }, children));
+  return React.createElement(ToastProvider, {
+    children: React.createElement(QueryClientProvider, { client: queryClient }, children),
+  });
 }
 
 async function connected() {
@@ -73,7 +77,7 @@ async function connected() {
   return { hook, ws };
 }
 
-function invalidatedKeys(spy: ReturnType<typeof vi.spyOn>) {
+function invalidatedKeys(spy: MockInstance<QueryClient['invalidateQueries']>) {
   return spy.mock.calls.map((call) => JSON.stringify((call[0] as { queryKey: unknown[] }).queryKey));
 }
 

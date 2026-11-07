@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { PrintersPage } from '../../pages/PrintersPage';
 import { server } from '../mocks/server';
@@ -41,7 +41,7 @@ interface Requests {
   statusReads: number;
 }
 
-function setup({ printerOverrides = {}, state = 'IDLE', diagnostic = passing as unknown, diagnosticStatus = 200 } = {}) {
+function setup({ printerOverrides = {}, state = 'IDLE', diagnostic = passing as JsonBodyType, diagnosticStatus = 200 } = {}) {
   const requests: Requests = { patches: [], diagnose: [], deletes: [], connects: 0, refreshes: 0, statusReads: 0 };
   server.use(
     http.get('/api/v1/printers/', () => HttpResponse.json([{ ...printer, ...printerOverrides }])),

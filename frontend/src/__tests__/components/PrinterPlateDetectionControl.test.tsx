@@ -12,6 +12,7 @@ const checkResult: PlateDetectionResult = {
   confidence: 0.94,
   difference_percent: 1.2,
   message: 'Plate is clear',
+  has_debug_image: false,
   needs_calibration: false,
   reference_count: 1,
   max_references: 5,
@@ -39,7 +40,7 @@ describe('PrinterPlateDetectionControl', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(api, 'getPlateReferences').mockResolvedValue({
-      references: [{ index: 0, label: 'Smooth PEI', timestamp: '2025-01-01T00:00:00Z' }],
+      references: [{ index: 0, label: 'Smooth PEI', timestamp: '2025-01-01T00:00:00Z', has_image: true, thumbnail_url: '/reference-thumbnail' }],
       max_references: 5,
     });
     vi.spyOn(api, 'getPlateReferenceThumbnailUrl').mockReturnValue('/reference-thumbnail');
@@ -61,7 +62,7 @@ describe('PrinterPlateDetectionControl', () => {
   it('shows the plate check result and restores the light when the dialog closes', async () => {
     const user = userEvent.setup();
     const checkPlateEmpty = vi.spyOn(api, 'checkPlateEmpty').mockResolvedValue(checkResult);
-    const setChamberLight = vi.spyOn(api, 'setChamberLight').mockResolvedValue({ success: true });
+    const setChamberLight = vi.spyOn(api, 'setChamberLight').mockResolvedValue({ success: true, message: 'ok' });
 
     renderControl({ status: { chamber_light: false } as PrinterStatus });
     await user.click(screen.getAllByRole('button')[1]);
@@ -131,7 +132,7 @@ describe('PrinterPlateDetectionControl', () => {
   it('returns the chamber light to its prior state when a check fails', async () => {
     const user = userEvent.setup();
     vi.spyOn(api, 'checkPlateEmpty').mockRejectedValue(new Error('Camera unavailable'));
-    const setChamberLight = vi.spyOn(api, 'setChamberLight').mockResolvedValue({ success: true });
+    const setChamberLight = vi.spyOn(api, 'setChamberLight').mockResolvedValue({ success: true, message: 'ok' });
 
     renderControl({ status: { chamber_light: false } as PrinterStatus });
     await user.click(screen.getAllByRole('button')[1]);

@@ -72,10 +72,15 @@ Run from `frontend/`:
 ```bash
 npx vitest run src/__tests__/pages/QueuePage.test.tsx   # one file
 npx vitest related src/pages/QueuePage.tsx --run        # tests that import a file
-npx tsc --noEmit && npm run lint                        # types + lint
+npm run typecheck && npm run lint                       # types + lint
 npm run test:run                                        # full suite + coverage + i18n parity
 npm run test:browser                                    # Playwright (run `npm run setup:browser` once)
 ```
+
+`npm run typecheck` (`tsc -b`) type-checks the app, the tests (`src/__tests__/`, `e2e/`) and the
+`*.config.ts` files, through the projects referenced from `frontend/tsconfig.json`. Test fixtures must
+match the real API types. A new top-level TypeScript folder must be added to one of those projects'
+`include`; `scripts/check-typecheck-coverage.mjs` fails the check if a project lists no files of its own.
 
 ### Everything
 

@@ -62,7 +62,7 @@ describe('actions that were hover-only (#86)', () => {
       render(<ProjectsPage />);
       await waitFor(() => expect(screen.getByText('Functional Parts')).toBeInTheDocument());
 
-      const card = screen.getByText('Functional Parts').closest('div.group')!;
+      const card = screen.getByText('Functional Parts').closest<HTMLElement>('div.group')!;
       const menuButton = within(card).getAllByRole('button').slice(-1)[0];
 
       expect(menuButton.className).not.toMatch(UNCONDITIONALLY_HIDDEN);
@@ -73,7 +73,7 @@ describe('actions that were hover-only (#86)', () => {
       render(<ProjectsPage />);
       await waitFor(() => expect(screen.getByText('Functional Parts')).toBeInTheDocument());
 
-      const card = screen.getByText('Functional Parts').closest('div.group')!;
+      const card = screen.getByText('Functional Parts').closest<HTMLElement>('div.group')!;
       const user = userEvent.setup();
       await user.click(within(card).getAllByRole('button').slice(-1)[0]);
 
@@ -118,8 +118,8 @@ describe('actions that were hover-only (#86)', () => {
       render(<FileManagerPage />);
       await waitFor(() => expect(screen.getByText('Brackets')).toBeInTheDocument());
 
-      const row = screen.getByText('Brackets').closest('div.group')!;
-      const actions = within(row).getAllByRole('button').slice(-1)[0].closest('div.flex-shrink-0')!;
+      const row = screen.getByText('Brackets').closest<HTMLElement>('div.group')!;
+      const actions = within(row).getAllByRole('button').slice(-1)[0].closest<HTMLElement>('div.flex-shrink-0')!;
 
       expect(actions.className).not.toMatch(UNCONDITIONALLY_HIDDEN);
       expect(actions.className).toContain('can-hover:opacity-0');

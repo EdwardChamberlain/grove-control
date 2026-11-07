@@ -93,6 +93,10 @@ function makeSpool(overrides: Partial<InventorySpool> & { id: number }): Invento
     updated_at: '2025-01-01T00:00:00Z',
     k_profiles: [],
     cost_per_kg: null,
+    last_scale_weight: null,
+    last_weighed_at: null,
+    category: null,
+    low_stock_threshold_pct: null,
     ...overrides,
   };
 }
@@ -220,6 +224,7 @@ describe('computeDisplayItems', () => {
     ];
     const assignmentMap: Record<number, SpoolAssignment> = {
       2: {
+        id: 1,
         spool_id: 2,
         printer_id: 1,
         printer_name: 'P1S',
@@ -228,6 +233,7 @@ describe('computeDisplayItems', () => {
         configured: true,
         fingerprint_color: null,
         fingerprint_type: null,
+        created_at: '2025-01-01T00:00:00Z',
       },
     };
     const items = computeDisplayItems(spools, assignmentMap);

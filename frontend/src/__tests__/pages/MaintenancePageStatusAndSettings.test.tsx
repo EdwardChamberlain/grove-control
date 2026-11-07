@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { MaintenancePage } from '../../pages/MaintenancePage';
@@ -66,7 +66,7 @@ let calls: { method: string; path: string; body: unknown }[];
 
 beforeEach(() => {
   calls = [];
-  const record = (status = 200, response: unknown = {}) =>
+  const record = (status = 200, response: JsonBodyType = {}) =>
     async ({ request }: { request: Request }) => {
       const text = await request.text();
       const url = new URL(request.url);

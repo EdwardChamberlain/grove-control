@@ -12,7 +12,7 @@ export default defineConfig({
     colorScheme: 'dark',
     deviceScaleFactor: 2,
     locale: 'en-GB',
-    reducedMotion: 'reduce',
+    contextOptions: { reducedMotion: 'reduce' },
     serviceWorkers: 'block',
     timezoneId: 'UTC',
     viewport: { width: 1512, height: 857 },

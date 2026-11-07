@@ -56,6 +56,8 @@ function buildProvider(overrides: Partial<NotificationProvider> = {}): Notificat
     on_queue_job_failed: false,
     on_queue_completed: false,
     on_stock_reorder_alert: false,
+    on_ha_sensor_alert: false,
+    on_location_ha_sensor_alert: false,
     on_stock_break_alert: false,
     quiet_hours_enabled: false,
     quiet_hours_start: null,
@@ -116,7 +118,7 @@ describe('NotificationProviderCard — AI Failure Detection toggle', () => {
 
     // The toggle label "AI Failure Detection" is unique to this row.
     const label = await screen.findByText('AI Failure Detection');
-    const row = label.closest('div.flex')!;
+    const row = label.closest<HTMLElement>('div.flex')!;
     const toggle = within(row).getByRole('switch');
     await user.click(toggle);
 

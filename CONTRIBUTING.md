@@ -205,8 +205,8 @@ cd frontend
 # Lint
 npm run lint
 
-# Type check
-npx tsc --noEmit
+# Type check (app, tests, e2e and config files)
+npm run typecheck
 ```
 
 ### Pre-commit Hooks

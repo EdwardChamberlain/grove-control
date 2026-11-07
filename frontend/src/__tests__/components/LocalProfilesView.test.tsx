@@ -1,7 +1,6 @@
 /**
  * Tests for LocalProfilesView component.
  */
-import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent, render as rawRender } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';

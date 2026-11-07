@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { setAuthToken } from '../../api/client';
 import { server } from '../mocks/server';
 import { SettingsPage } from '../../pages/SettingsPage';
@@ -42,7 +42,7 @@ interface Calls {
   disabled: number;
 }
 
-function useUsersTab(itemCounts: unknown = { archives: 0, queue_items: 0, library_files: 0 }) {
+function useUsersTab(itemCounts: JsonBodyType = { archives: 0, queue_items: 0, library_files: 0 }) {
   const calls: Calls = { created: [], updated: [], deletedUsers: [], deletedGroups: [], passwords: [], settings: [], disabled: 0 };
   setAuthToken('test-token');
   window.history.replaceState({}, '', '/settings?tab=users');

@@ -9,6 +9,7 @@ import { render } from '../utils';
 import { PrintersPage } from '../../pages/PrintersPage';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
+import type { PrinterStatus } from '../../api/client';
 
 const mockPrinters = [
   {
@@ -77,7 +78,7 @@ describe('PrintersPage', () => {
   it('uses the shared queue-work summary when cached status has no queued work', async () => {
     server.use(http.get('/api/v1/printers/queue-work', () => HttpResponse.json({ 1: true, 2: false })));
     render(<PrintersPage />);
-    expect(await screen.findByRole('button', { name: 'Queue Job', exact: true })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Queue Job' })).toBeInTheDocument();
   });
 
   afterEach(() => {
@@ -339,7 +340,10 @@ describe('PrintersPage', () => {
       big_fan2_speed: 53,
     };
 
-    const renderWithPrinter = (printer: typeof mockPrinters[number], status = statusWithFans) => {
+    const renderWithPrinter = (
+      printer: typeof mockPrinters[number],
+      status: Partial<PrinterStatus> = statusWithFans,
+    ) => {
       server.use(
         http.get('/api/v1/printers/', () => HttpResponse.json([printer])),
         http.get('/api/v1/printers/:id/status', () => HttpResponse.json(status)),
@@ -490,7 +494,7 @@ describe('PrintersPage', () => {
 
       render(<PrintersPage />);
 
-      const card = (await screen.findByText('X1 Carbon')).closest('[id="printer-card-1"]');
+      const card = (await screen.findByText('X1 Carbon')).closest<HTMLElement>('[id="printer-card-1"]');
       expect(card).toBeInTheDocument();
 
       await waitFor(() => {
@@ -875,7 +879,7 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'Detail cards' }));
 
-      const card = (await screen.findByText('X1 Carbon')).closest('[id="printer-card-1"]');
+      const card = (await screen.findByText('X1 Carbon')).closest<HTMLElement>('[id="printer-card-1"]');
       expect(card).toBeInTheDocument();
       fireEvent.drop(card!, {
         dataTransfer: {
@@ -903,7 +907,7 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'Detail cards' }));
 
-      const card = (await screen.findByText('X1 Carbon')).closest('[id="printer-card-1"]');
+      const card = (await screen.findByText('X1 Carbon')).closest<HTMLElement>('[id="printer-card-1"]');
       expect(card).toBeInTheDocument();
       fireEvent.drop(card!, {
         dataTransfer: {
