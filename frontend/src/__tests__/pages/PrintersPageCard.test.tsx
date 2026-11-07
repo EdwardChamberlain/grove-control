@@ -163,6 +163,19 @@ describe('Print controls', () => {
     expect(await screen.findByText('Print resumed')).toBeInTheDocument();
   });
 
+  it('does not resume when the confirmation is cancelled', async () => {
+    setup({ state: 'PAUSE', progress: 40 });
+    const resumes = recordPost('*/api/v1/printers/1/print/resume');
+    const card = await openCard();
+    const user = userEvent.setup();
+
+    await user.click(within(card).getByRole('button', { name: 'Resume' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('button', { name: 'Resume Print' })).not.toBeInTheDocument();
+    expect(resumes).toHaveLength(0);
+  });
+
   it('stops a running print after confirmation', async () => {
     setup({ state: 'RUNNING', progress: 40 });
     const stops = recordPost('*/api/v1/printers/1/print/stop');

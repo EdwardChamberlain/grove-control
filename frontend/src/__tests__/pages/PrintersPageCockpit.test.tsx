@@ -198,16 +198,31 @@ describe('Cockpit chamber light', () => {
 });
 
 describe('Cockpit print controls', () => {
-  it('pauses a running print straight from the cockpit', async () => {
+  it('pauses a running print only after confirmation', async () => {
     setup({ state: 'RUNNING', progress: 25 });
     const pauses = recordPost('*/api/v1/printers/1/print/pause');
     await openCockpit();
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(pauses).toHaveLength(0);
+    await user.click(await screen.findByRole('button', { name: 'Pause Print' }));
 
     await waitFor(() => expect(pauses).toHaveLength(1));
     expect(await screen.findByText('Print paused')).toBeInTheDocument();
+  });
+
+  it('does not pause when the cockpit confirmation is cancelled', async () => {
+    setup({ state: 'RUNNING', progress: 25 });
+    const pauses = recordPost('*/api/v1/printers/1/print/pause');
+    await openCockpit();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('button', { name: 'Pause Print' })).not.toBeInTheDocument();
+    expect(pauses).toHaveLength(0);
   });
 
   it('stops a running print after confirmation', async () => {
@@ -223,16 +238,31 @@ describe('Cockpit print controls', () => {
     expect(await screen.findByText('Print stopped')).toBeInTheDocument();
   });
 
-  it('resumes a paused print straight from the cockpit', async () => {
+  it('resumes a paused print only after confirmation', async () => {
     setup({ state: 'PAUSE', progress: 25 });
     const resumes = recordPost('*/api/v1/printers/1/print/resume');
     await openCockpit();
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(resumes).toHaveLength(0);
+    await user.click(await screen.findByRole('button', { name: 'Resume Print' }));
 
     await waitFor(() => expect(resumes).toHaveLength(1));
     expect(await screen.findByText('Print resumed')).toBeInTheDocument();
+  });
+
+  it('does not resume when the cockpit confirmation is cancelled', async () => {
+    setup({ state: 'PAUSE', progress: 25 });
+    const resumes = recordPost('*/api/v1/printers/1/print/resume');
+    await openCockpit();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('button', { name: 'Resume Print' })).not.toBeInTheDocument();
+    expect(resumes).toHaveLength(0);
   });
 
   it('keeps the printer on screen after a stop is refused', async () => {
