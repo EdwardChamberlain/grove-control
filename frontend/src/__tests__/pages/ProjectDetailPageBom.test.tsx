@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { ProjectDetailPage } from '../../pages/ProjectDetailPage';
@@ -44,7 +44,7 @@ let current: ReturnType<typeof project>;
 beforeEach(() => {
   calls = [];
   current = project();
-  const record = (response: unknown = {}) =>
+  const record = (response: JsonBodyType = {}) =>
     async ({ request }: { request: Request }) => {
       const text = await request.text();
       calls.push({ method: request.method, path: new URL(request.url).pathname, body: text ? JSON.parse(text) : null });

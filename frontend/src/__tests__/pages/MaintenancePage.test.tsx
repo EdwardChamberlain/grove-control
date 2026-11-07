@@ -260,10 +260,11 @@ describe('MaintenancePage', () => {
           const created = {
             ...mockManualLogEntry,
             id: 3,
-            title: createRequest.title,
-            notes: createRequest.notes,
-            occurred_at: createRequest.occurred_at,
-            hours_at_maintenance: createRequest.hours_at_maintenance,
+            // The mock server echoes the posted JSON body back as the new entry.
+            title: createRequest.title as string,
+            notes: createRequest.notes as string,
+            occurred_at: createRequest.occurred_at as string,
+            hours_at_maintenance: createRequest.hours_at_maintenance as number,
           };
           entries = [created, ...entries];
           return HttpResponse.json(created, { status: 201 });

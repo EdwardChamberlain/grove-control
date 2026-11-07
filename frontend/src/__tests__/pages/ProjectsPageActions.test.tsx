@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { ProjectsPage } from '../../pages/ProjectsPage';
@@ -36,7 +36,7 @@ beforeEach(() => {
       },
     });
   }
-  const record = (response: unknown = {}) =>
+  const record = (response: JsonBodyType = {}) =>
     async ({ request }: { request: Request }) => {
       const url = new URL(request.url);
       // Multipart uploads are not JSON; empty bodies (DELETE) have nothing to parse.

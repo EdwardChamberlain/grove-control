@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { render } from '../utils';
 import { HeaterHistoryModal } from '../../components/HeaterHistoryModal';
-import { api } from '../../api/client';
+import { api, type HeaterSensorKind } from '../../api/client';
 
 vi.mock('../../api/client', () => ({
   api: {
@@ -67,7 +67,7 @@ const defaultProps = {
   printerId: 1,
   printerName: 'Test Printer',
   initialKind: 'nozzle' as const,
-  availableKinds: ['nozzle', 'bed', 'chamber'] as const,
+  availableKinds: ['nozzle', 'bed', 'chamber'] satisfies HeaterSensorKind[],
 };
 
 describe('HeaterHistoryModal', () => {

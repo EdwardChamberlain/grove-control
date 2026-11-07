@@ -37,15 +37,20 @@ vi.mock('../../api/client', () => ({
 
 // Import mocked module
 import { virtualPrinterApi } from '../../api/client';
+import type { VirtualPrinterSettings as VirtualPrinterSettingsData } from '../../api/client';
 
 // Mock data factory
-const createMockSettings = (overrides = {}) => ({
+const createMockSettings = (
+  overrides: Partial<VirtualPrinterSettingsData> = {},
+): VirtualPrinterSettingsData => ({
   enabled: false,
   access_code_set: false,
-  mode: 'archive' as const,
+  mode: 'archive',
   model: 'BL-P001',
-  target_printer_id: null as number | null,
-  remote_interface_ip: null as string | null,
+  target_printer_id: null,
+  remote_interface_ip: null,
+  tailscale_disabled: false,
+  archive_name_source: 'metadata',
   status: {
     enabled: false,
     running: false,

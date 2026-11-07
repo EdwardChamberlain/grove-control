@@ -16,14 +16,14 @@ import { ForecastPanel } from '../../components/ForecastPanel';
 import type { InventorySpool } from '../../api/client';
 
 const base: InventorySpool = {
-  id: 0, material: 'PLA', subtype: null, brand: null, color_name: null, rgba: 'FF0000FF',
+  id: 0, material: 'PLA', subtype: null, brand: null, color_name: null, rgba: 'FF0000FF', extra_colors: null, effect_type: null,
   label_weight: 1000, core_weight: 250, core_weight_catalog_id: null, weight_used: 0,
   slicer_filament: null, slicer_filament_name: null, nozzle_temp_min: null, nozzle_temp_max: null,
   note: null, added_full: null, last_used: null, encode_time: null, tag_uid: null, tray_uuid: null,
   data_origin: 'manual', tag_type: null, archived_at: null, created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z', k_profiles: [], cost_per_kg: null, last_scale_weight: null,
-  last_weighed_at: null, weight_locked: false, category: 'Active', low_stock_threshold_pct: null,
-} as InventorySpool;
+  last_weighed_at: null, category: 'Active', low_stock_threshold_pct: null,
+};
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
 

@@ -31,6 +31,11 @@ const mockPrinters = [
 const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueueItem => ({
   id: 1,
   printer_id: 1,
+  target_model: null,
+  target_location: null,
+  required_filament_types: null,
+  waiting_reason: null,
+  library_file_id: null,
   archive_id: 1,
   position: 1,
   scheduled_time: null,
@@ -39,8 +44,11 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   auto_off_after: false,
   gcode_injection: false,
   manual_start: false,
+  filament_short: false,
+  skip_filament_check: false,
   force_color_match: true,
   ams_mapping: null,
+  filament_overrides: null,
   plate_id: null,
   bed_levelling: 'on',
   flow_cali: 'off',
@@ -48,7 +56,9 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   layer_inspect: false,
   timelapse: false,
   use_ams: true,
+  nozzle_offset_cali: 'auto',
   status: 'pending',
+  dispatched_at: null,
   started_at: null,
   completed_at: null,
   error_message: null,
@@ -156,7 +166,7 @@ describe('PrintModal', () => {
     });
 
     it('defaults farm assignment to the model the file was sliced for', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       const user = userEvent.setup();
       server.use(
         http.get('/api/v1/archives/:id', () => HttpResponse.json({ sliced_for_model: 'X2D' })),
@@ -189,7 +199,7 @@ describe('PrintModal', () => {
     });
 
     it('updates the archive model assignment when sliced metadata loads after printers', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       const user = userEvent.setup();
       server.use(
         http.get('/api/v1/archives/:id', async () => {
@@ -225,7 +235,7 @@ describe('PrintModal', () => {
     });
 
     it('updates the library-file model assignment when sliced metadata loads after printers', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       const user = userEvent.setup();
       server.use(
         http.get('/api/v1/library/files/:id', async () => {
@@ -267,7 +277,7 @@ describe('PrintModal', () => {
     });
 
     it('falls back to specific-printer assignment when printer models are unknown', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/', () => HttpResponse.json([
@@ -297,7 +307,7 @@ describe('PrintModal', () => {
     });
 
     it('keeps direct-print flows assigned to their preselected printer', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       const user = userEvent.setup();
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -323,7 +333,7 @@ describe('PrintModal', () => {
     });
 
     it('allows direct-print flows to switch to another specific printer', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       const user = userEvent.setup();
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -350,7 +360,7 @@ describe('PrintModal', () => {
     });
 
     it('allows direct-print flows to switch to any matching machine', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       const user = userEvent.setup();
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -534,7 +544,7 @@ describe('PrintModal', () => {
     });
 
     it('queues a postponed print with the selected UTC start time', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -569,7 +579,7 @@ describe('PrintModal', () => {
     });
 
     it('queues a postponed model-assigned print with its target model', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -591,7 +601,7 @@ describe('PrintModal', () => {
     });
 
     it('persists model filament overrides and the colour-match policy', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () => HttpResponse.json({
           filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 }],
@@ -623,7 +633,7 @@ describe('PrintModal', () => {
     });
 
     it('keeps the original model filament profile as an exact-match wait requirement', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () => HttpResponse.json({
           filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 }],
@@ -659,7 +669,7 @@ describe('PrintModal', () => {
     });
 
     it('queues printer-targeted jobs with force colour matching enabled by default', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () =>
           HttpResponse.json({
@@ -709,7 +719,7 @@ describe('PrintModal', () => {
     });
 
     it('uses the sliced profile by default so specific-printer jobs can wait for loading', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () =>
           HttpResponse.json({
@@ -757,7 +767,7 @@ describe('PrintModal', () => {
     });
 
     it('preserves an explicit per-slot force colour opt-out', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () =>
           HttpResponse.json({
@@ -798,7 +808,7 @@ describe('PrintModal', () => {
     });
 
     it('persists a manually selected printer filament as the enforced profile', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () =>
           HttpResponse.json({
@@ -865,7 +875,7 @@ describe('PrintModal', () => {
     });
 
     it('clears a printer-specific filament profile when switching printers', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () =>
           HttpResponse.json({
@@ -1010,7 +1020,7 @@ describe('PrintModal', () => {
         return HttpResponse.json({ id: 1, status: 'pending' });
       }));
       const user = userEvent.setup();
-      render(<PrintModal mode="create" archiveId={1} initialSelectedPrinterIds={[1]} onClose={mockOnClose} />);
+      render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" initialSelectedPrinterIds={[1]} onClose={mockOnClose} />);
       await user.click(screen.getByRole('button', { name: /queue options/i }));
       const toggle = screen.getByRole('checkbox', { name: 'Chamber heat-soak' });
       expect(toggle).not.toBeChecked();
@@ -1033,7 +1043,7 @@ describe('PrintModal', () => {
 
     it('restores heat-soak settings when editing and rejects invalid ranges', async () => {
       const user = userEvent.setup();
-      render(<PrintModal mode="edit-queue-item" queueItem={createMockQueueItem({ chamber_heat_soak: true, heat_soak_temperature: 50, heat_soak_minutes: 10 })} onClose={mockOnClose} />);
+      render(<PrintModal mode="edit-queue-item" archiveName="Benchy" queueItem={createMockQueueItem({ chamber_heat_soak: true, heat_soak_temperature: 50, heat_soak_minutes: 10 })} onClose={mockOnClose} />);
       await user.click(screen.getByRole('button', { name: /queue options/i }));
       expect(screen.getByRole('checkbox', { name: 'Chamber heat-soak' })).toBeChecked();
       const temperature = screen.getByRole('spinbutton', { name: 'Target temperature (°C)' });
@@ -1066,7 +1076,7 @@ describe('PrintModal', () => {
     });
 
     it('submits the wait-for-drying queue policy', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
@@ -1338,7 +1348,7 @@ describe('PrintModal', () => {
     });
 
     it('preserves a long-future scheduled time when saving an existing queue item', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -1361,7 +1371,7 @@ describe('PrintModal', () => {
     });
 
     it('preserves an existing model assignment when editing a queue item', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -1380,7 +1390,7 @@ describe('PrintModal', () => {
     });
 
     it('clears a scheduled time when postponing is disabled during edit', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -2581,7 +2591,7 @@ describe('PrintModal', () => {
     });
 
     it('includes project_id in queue item when printing a library file with projectId set', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -2617,7 +2627,7 @@ describe('PrintModal', () => {
     });
 
     it('queues archive prints through the scheduler path', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -2652,7 +2662,7 @@ describe('PrintModal', () => {
     });
 
     it('adds prints to the top of the queue when selected', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -2690,7 +2700,7 @@ describe('PrintModal', () => {
     });
 
     it('adds prints to the back by default and supports manual start', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
@@ -2756,7 +2766,7 @@ describe('PrintModal', () => {
     });
 
     it('omits cleanup_library_after_dispatch from queue requests', async () => {
-      let capturedBody: Record<string, unknown> | null = null;
+      let capturedBody = null as Record<string, unknown> | null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;

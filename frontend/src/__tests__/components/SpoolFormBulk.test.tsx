@@ -13,7 +13,6 @@
  * - validateForm with quickAdd=true only requires material
  */
 
-import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { render } from '../utils';
@@ -90,6 +89,10 @@ const existingSpool: InventorySpool = {
   updated_at: '2025-01-01T00:00:00Z',
   k_profiles: [],
   cost_per_kg: null,
+  last_scale_weight: null,
+  last_weighed_at: null,
+  category: null,
+  low_stock_threshold_pct: null,
 };
 
 describe('validateForm with quickAdd', () => {

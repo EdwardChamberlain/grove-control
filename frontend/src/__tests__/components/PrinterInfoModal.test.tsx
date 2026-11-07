@@ -26,6 +26,7 @@ function mockPrinter(): Printer {
     is_active: true,
     auto_archive: true,
     external_camera_url: null,
+    external_camera_snapshot_url: null,
     external_camera_type: null,
     external_camera_enabled: false,
     camera_rotation: 0,

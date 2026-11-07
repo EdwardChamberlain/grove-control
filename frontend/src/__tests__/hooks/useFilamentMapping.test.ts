@@ -11,7 +11,30 @@ import {
   computeAmsMapping,
 } from '../../hooks/useFilamentMapping';
 import { effectivePreferLowest } from '../../utils/amsHelpers';
-import type { PrinterStatus } from '../../api/client';
+import type { AMSTray, AMSUnit, PrinterStatus } from '../../api/client';
+
+// Fill in the fields a test does not care about so fixtures match AMSTray.
+function tray(overrides: Partial<AMSTray> = {}): AMSTray {
+  return {
+    id: 0,
+    tray_color: null,
+    tray_type: null,
+    tray_sub_brands: null,
+    tray_id_name: null,
+    tray_info_idx: null,
+    remain: -1,
+    k: null,
+    cali_idx: null,
+    tag_uid: null,
+    tray_uuid: null,
+    nozzle_temp_min: null,
+    nozzle_temp_max: null,
+    drying_temp: null,
+    drying_time: null,
+    state: null,
+    ...overrides,
+  };
+}
 
 // Helper to create a minimal printer status with AMS data
 function createPrinterStatus(ams: PrinterStatus['ams'], vt_tray: PrinterStatus['vt_tray'] = []): PrinterStatus {
@@ -19,6 +42,34 @@ function createPrinterStatus(ams: PrinterStatus['ams'], vt_tray: PrinterStatus['
     ams,
     vt_tray,
   } as PrinterStatus;
+}
+
+// The single external spool is reported without an id (the hook defaults it to
+// 254), so drop the id the tray() defaults add. The cast is deliberate: the
+// payload really does omit a field the AMSTray type marks as required.
+function externalTray(overrides: Partial<AMSTray> = {}): AMSTray {
+  const { id: _id, ...rest } = tray(overrides);
+  return rest as AMSTray;
+}
+
+function amsUnit(overrides: Partial<AMSUnit> = {}): AMSUnit {
+  return {
+    id: 0,
+    humidity: null,
+    temp: null,
+    is_ams_ht: false,
+    tray: [],
+    serial_number: '',
+    sw_ver: '',
+    dry_time: 0,
+    dry_status: 0,
+    dry_sub_status: 0,
+    dry_sf_reason: [],
+    dry_target_temp: null,
+    dry_filament: null,
+    module_type: 'ams',
+    ...overrides,
+  };
 }
 
 describe('buildLoadedFilaments', () => {
@@ -29,13 +80,13 @@ describe('buildLoadedFilaments', () => {
 
   it('extracts filaments from AMS units', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00' },
-          { id: 1, tray_type: 'PETG', tray_color: '00FF00', tray_info_idx: 'GFA01' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00' }),
+          tray({ id: 1, tray_type: 'PETG', tray_color: '00FF00', tray_info_idx: 'GFA01' }),
         ],
-      },
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -59,12 +110,12 @@ describe('buildLoadedFilaments', () => {
 
   it('includes tray_info_idx from AMS trays', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'P4d64437' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'P4d64437' }),
         ],
-      },
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -74,12 +125,12 @@ describe('buildLoadedFilaments', () => {
 
   it('handles missing tray_info_idx', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000' },  // No tray_info_idx
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }),  // No tray_info_idx
         ],
-      },
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -89,13 +140,13 @@ describe('buildLoadedFilaments', () => {
 
   it('includes tray_sub_brands from AMS trays', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFL99', tray_sub_brands: 'PLA Basic' },
-          { id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFL05', tray_sub_brands: 'PLA Matte' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFL99', tray_sub_brands: 'PLA Basic' }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFL05', tray_sub_brands: 'PLA Matte' }),
         ],
-      },
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -106,12 +157,12 @@ describe('buildLoadedFilaments', () => {
 
   it('handles missing tray_sub_brands', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00' }),
         ],
-      },
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -122,7 +173,7 @@ describe('buildLoadedFilaments', () => {
   it('includes tray_sub_brands from external spool', () => {
     const status = createPrinterStatus(
       [],
-      [{ tray_type: 'PETG', tray_color: '00FF00', tray_info_idx: 'GFG00', tray_sub_brands: 'PETG HF' }]
+      [externalTray({ tray_type: 'PETG', tray_color: '00FF00', tray_info_idx: 'GFG00', tray_sub_brands: 'PETG HF' })]
     );
 
     const result = buildLoadedFilaments(status);
@@ -133,7 +184,7 @@ describe('buildLoadedFilaments', () => {
   it('extracts external spool with tray_info_idx', () => {
     const status = createPrinterStatus(
       [],
-      [{ tray_type: 'TPU', tray_color: '0000FF', tray_info_idx: 'EXT001' }]
+      [externalTray({ tray_type: 'TPU', tray_color: '0000FF', tray_info_idx: 'EXT001' })]
     );
 
     const result = buildLoadedFilaments(status);
@@ -149,14 +200,14 @@ describe('buildLoadedFilaments', () => {
 
   it('skips empty trays', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00' },
-          { id: 1, tray_type: '', tray_color: '' },  // Empty tray
-          { id: 2 },  // No tray_type
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00' }),
+          tray({ id: 1, tray_type: '', tray_color: '' }),  // Empty tray
+          tray({ id: 2 }),  // No tray_type
         ],
-      },
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -167,12 +218,12 @@ describe('buildLoadedFilaments', () => {
 
   it('marks AMS-HT units correctly', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 128,  // AMS-HT typically has high ID
         tray: [
-          { id: 0, tray_type: 'PLA-CF', tray_color: '000000', tray_info_idx: 'HT001' },
+          tray({ id: 0, tray_type: 'PLA-CF', tray_color: '000000', tray_info_idx: 'HT001' }),
         ],  // Single tray = AMS-HT
-      },
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -185,10 +236,10 @@ describe('buildLoadedFilaments', () => {
 describe('computeAmsMapping', () => {
   it('returns undefined for empty filament requirements', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
     ]);
 
     expect(computeAmsMapping(undefined, status)).toBeUndefined();
@@ -211,14 +262,14 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA00' },  // Same color, wrong idx
-          { id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA01' },  // Exact idx match
-          { id: 2, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA02' },  // Same color, wrong idx
+          tray({ id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA00' }),  // Same color, wrong idx
+          tray({ id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA01' }),  // Exact idx match
+          tray({ id: 2, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA02' }),  // Same color, wrong idx
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -234,15 +285,15 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA00' },
-          { id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA01' },
-          { id: 2, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA02' },
-          { id: 3, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA03' },  // This one
+          tray({ id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA00' }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA01' }),
+          tray({ id: 2, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA02' }),
+          tray({ id: 3, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA03' }),  // This one
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -257,13 +308,13 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: '00FF00', tray_info_idx: 'GFA00' },  // Wrong color
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA01' },  // Color match
+          tray({ id: 0, tray_type: 'PLA', tray_color: '00FF00', tray_info_idx: 'GFA00' }),  // Wrong color
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA01' }),  // Color match
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -278,12 +329,12 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'NEW_SPOOL' },  // Different idx, same color
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'NEW_SPOOL' }),  // Different idx, same color
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -298,12 +349,12 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: '0000FF' },  // Same type, different color
+          tray({ id: 0, tray_type: 'PLA', tray_color: '0000FF' }),  // Same type, different color
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -318,12 +369,12 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }),
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -339,12 +390,12 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000' },  // Only one PLA
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }),  // Only one PLA
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -360,14 +411,14 @@ describe('computeAmsMapping', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA00' },
-          { id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA01' },
-          { id: 2, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA02' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA00' }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA01' }),
+          tray({ id: 2, tray_type: 'PLA', tray_color: '000000', tray_info_idx: 'GFA02' }),
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status);
@@ -383,7 +434,7 @@ describe('computeAmsMapping', () => {
     };
     const status = createPrinterStatus(
       [],
-      [{ tray_type: 'TPU', tray_color: '0000FF', tray_info_idx: 'EXT001' }]
+      [externalTray({ tray_type: 'TPU', tray_color: '0000FF', tray_info_idx: 'EXT001' })]
     );
 
     const result = computeAmsMapping(reqs, status);
@@ -395,14 +446,14 @@ describe('computeAmsMapping', () => {
 describe('buildLoadedFilaments - nozzle awareness', () => {
   it('sets extruderId from ams_extruder_map', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
-      {
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
+      amsUnit({
         id: 1,
-        tray: [{ id: 0, tray_type: 'PETG', tray_color: '00FF00' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PETG', tray_color: '00FF00' })],
+      }),
     ]);
     (status as any).ams_extruder_map = { '0': 1, '1': 0 };
 
@@ -414,10 +465,10 @@ describe('buildLoadedFilaments - nozzle awareness', () => {
 
   it('leaves extruderId undefined when no ams_extruder_map', () => {
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
     ]);
 
     const result = buildLoadedFilaments(status);
@@ -435,14 +486,14 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,  // Left nozzle
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
-      {
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
+      amsUnit({
         id: 1,  // Right nozzle
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
     ]);
     (status as any).ams_extruder_map = { '0': 1, '1': 0 };
 
@@ -458,14 +509,14 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,  // Left nozzle
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
-      {
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
+      amsUnit({
         id: 1,  // Right nozzle
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
     ]);
     (status as any).ams_extruder_map = { '0': 1, '1': 0 };
 
@@ -483,10 +534,10 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,  // Right nozzle only
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
     ]);
     (status as any).ams_extruder_map = { '0': 0 };  // AMS 0 → right nozzle, none on left
 
@@ -503,14 +554,14 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,  // Left nozzle - only PETG
-        tray: [{ id: 0, tray_type: 'PETG', tray_color: '00FF00' }],
-      },
-      {
+        tray: [tray({ id: 0, tray_type: 'PETG', tray_color: '00FF00' })],
+      }),
+      amsUnit({
         id: 1,  // Right nozzle - has PLA
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
     ]);
     (status as any).ams_extruder_map = { '0': 1, '1': 0 };
 
@@ -526,14 +577,14 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
-        tray: [{ id: 0, tray_type: 'PETG', tray_color: '00FF00' }],
-      },
-      {
+        tray: [tray({ id: 0, tray_type: 'PETG', tray_color: '00FF00' })],
+      }),
+      amsUnit({
         id: 1,
-        tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }],
-      },
+        tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })],
+      }),
     ]);
     (status as any).ams_extruder_map = { '0': 1, '1': 0 };
 
@@ -551,18 +602,18 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,  // Left nozzle
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }),
         ],
-      },
-      {
+      }),
+      amsUnit({
         id: 1,  // Right nozzle
         tray: [
-          { id: 0, tray_type: 'PETG', tray_color: '00FF00' },
+          tray({ id: 0, tray_type: 'PETG', tray_color: '00FF00' }),
         ],
-      },
+      }),
     ]);
     (status as any).ams_extruder_map = { '0': 1, '1': 0 };
 
@@ -584,14 +635,14 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,  // Without FTS, this AMS would be left/extruder 1; ams_extruder_map
                 // is empty because the printer reports info bits 8-11 = 0xE.
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000' },
-          { id: 1, tray_type: 'PETG', tray_color: '00FF00' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }),
+          tray({ id: 1, tray_type: 'PETG', tray_color: '00FF00' }),
         ],
-      },
+      }),
     ]);
     (status as any).ams_extruder_map = {};
     (status as any).fila_switch = {
@@ -679,8 +730,8 @@ describe('computeAmsMapping - nozzle filtering', () => {
       ],
     };
     const status = createPrinterStatus([
-      { id: 0, tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }] },
-      { id: 1, tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }] },
+      amsUnit({ id: 0, tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })] }),
+      amsUnit({ id: 1, tray: [tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' })] }),
     ]);
     (status as any).ams_extruder_map = { '0': 1, '1': 0 };
     (status as any).fila_switch = null;
@@ -708,51 +759,51 @@ describe('computeAmsMapping - nozzle filtering', () => {
 function createH2DStatus(): PrinterStatus {
   const status = createPrinterStatus(
     [
-      {
+      amsUnit({
         id: 0, // LEFT nozzle (extruder 1)
         humidity: 24,
         temp: 21.4,
         tray: [
-          { id: 0, tray_type: 'PETG', tray_color: 'FFFFFFFF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' },
-          { id: 1, tray_type: 'PLA', tray_color: 'C8C8C8FF', tray_info_idx: 'GFA06', tray_sub_brands: 'PLA Silk+' },
-          { id: 2, tray_type: 'PETG', tray_color: '875718FF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' },
-          { id: 3, tray_type: 'PLA', tray_color: '000000FF', tray_info_idx: 'GFA00', tray_sub_brands: 'PLA Basic' },
+          tray({ id: 0, tray_type: 'PETG', tray_color: 'FFFFFFFF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'C8C8C8FF', tray_info_idx: 'GFA06', tray_sub_brands: 'PLA Silk+' }),
+          tray({ id: 2, tray_type: 'PETG', tray_color: '875718FF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' }),
+          tray({ id: 3, tray_type: 'PLA', tray_color: '000000FF', tray_info_idx: 'GFA00', tray_sub_brands: 'PLA Basic' }),
         ],
-      },
-      {
+      }),
+      amsUnit({
         id: 1, // RIGHT nozzle (extruder 0)
         humidity: 25,
         temp: 21.7,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FFFFFFFF', tray_info_idx: 'GFA00', tray_sub_brands: 'PLA Basic' },
-          { id: 1, tray_type: 'PETG', tray_color: '000000FF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' },
-          { id: 2, tray_type: 'PLA', tray_color: '5F6367FF', tray_info_idx: 'GFA06', tray_sub_brands: 'PLA Silk+' },
-          { id: 3, tray_type: 'PLA', tray_color: 'B39B84FF', tray_info_idx: 'GFA02', tray_sub_brands: 'PLA Metal' },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FFFFFFFF', tray_info_idx: 'GFA00', tray_sub_brands: 'PLA Basic' }),
+          tray({ id: 1, tray_type: 'PETG', tray_color: '000000FF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' }),
+          tray({ id: 2, tray_type: 'PLA', tray_color: '5F6367FF', tray_info_idx: 'GFA06', tray_sub_brands: 'PLA Silk+' }),
+          tray({ id: 3, tray_type: 'PLA', tray_color: 'B39B84FF', tray_info_idx: 'GFA02', tray_sub_brands: 'PLA Metal' }),
         ],
-      },
-      {
+      }),
+      amsUnit({
         id: 128, // AMS-HT, RIGHT nozzle (extruder 0) — empty
         humidity: 48,
         temp: 21.4,
         tray: [
-          { id: 0 }, // empty tray
+          tray({ id: 0 }), // empty tray
         ],
-      },
-      {
+      }),
+      amsUnit({
         id: 2, // LEFT nozzle (extruder 1)
         humidity: 18,
         temp: 24.0,
         tray: [
-          { id: 0, tray_type: 'PLA-S', tray_color: 'FFFFFFFF', tray_info_idx: 'P8aa1726' },
-          { id: 1, tray_type: 'PLA', tray_color: '56B7E6FF', tray_info_idx: 'PFUS9924' },
-          { id: 2, tray_type: 'PETG', tray_color: '6EE53CFF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' },
-          { id: 3, tray_type: 'PLA', tray_color: 'FF0000FF', tray_info_idx: 'PFUS9ac9' },
+          tray({ id: 0, tray_type: 'PLA-S', tray_color: 'FFFFFFFF', tray_info_idx: 'P8aa1726' }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: '56B7E6FF', tray_info_idx: 'PFUS9924' }),
+          tray({ id: 2, tray_type: 'PETG', tray_color: '6EE53CFF', tray_info_idx: 'GFG02', tray_sub_brands: 'PETG HF' }),
+          tray({ id: 3, tray_type: 'PLA', tray_color: 'FF0000FF', tray_info_idx: 'PFUS9ac9' }),
         ],
-      },
+      }),
     ],
     [
-      { id: 254, tray_type: 'PLA', tray_color: '000000FF', tray_info_idx: 'P4d64437' }, // Ext-L (loaded)
-      { id: 255, tray_type: '', tray_color: '00000000' }, // Ext-R (empty)
+      tray({ id: 254, tray_type: 'PLA', tray_color: '000000FF', tray_info_idx: 'P4d64437' }), // Ext-L (loaded)
+      tray({ id: 255, tray_type: '', tray_color: '00000000' }), // Ext-R (empty)
     ]
   );
   (status as any).ams_extruder_map = { '0': 1, '1': 0, '2': 1, '128': 0 };
@@ -771,31 +822,31 @@ function createH2DStatus(): PrinterStatus {
 function createX1CStatus(): PrinterStatus {
   const status = createPrinterStatus(
     [
-      {
+      amsUnit({
         id: 0,
         humidity: 23,
         temp: 26.1,
         tray: [
-          { id: 0 }, // empty (has tray_color but no tray_type)
-          { id: 1 }, // empty
-          { id: 2 }, // empty (has tray_color FFFFFFFF but no tray_type)
-          { id: 3 }, // empty
+          tray({ id: 0 }), // empty (has tray_color but no tray_type)
+          tray({ id: 1 }), // empty
+          tray({ id: 2 }), // empty (has tray_color FFFFFFFF but no tray_type)
+          tray({ id: 3 }), // empty
         ],
-      },
-      {
+      }),
+      amsUnit({
         id: 1,
         humidity: 20,
         temp: 25.9,
         tray: [
-          { id: 0 }, // empty
-          { id: 1, tray_type: 'PLA', tray_color: 'EBCFA6FF', tray_info_idx: 'PFUS22b2' },
-          { id: 2, tray_type: 'PLA', tray_color: 'FCECD6FF', tray_info_idx: 'P4d64437' },
-          { id: 3, tray_type: 'PLA', tray_color: '0066FFFF', tray_info_idx: 'P4d64437' },
+          tray({ id: 0 }), // empty
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'EBCFA6FF', tray_info_idx: 'PFUS22b2' }),
+          tray({ id: 2, tray_type: 'PLA', tray_color: 'FCECD6FF', tray_info_idx: 'P4d64437' }),
+          tray({ id: 3, tray_type: 'PLA', tray_color: '0066FFFF', tray_info_idx: 'P4d64437' }),
         ],
-      },
+      }),
     ],
     [
-      { id: 254, tray_type: '', tray_color: '00000000' }, // empty
+      tray({ id: 254, tray_type: '', tray_color: '00000000' }), // empty
     ]
   );
   (status as any).ams_extruder_map = { '0': 0, '1': 0 };
@@ -1000,13 +1051,13 @@ describe('computeAmsMapping preferLowest', () => {
       filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10 }],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 },
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 25 },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 25 }),
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status, true);
@@ -1018,13 +1069,13 @@ describe('computeAmsMapping preferLowest', () => {
       filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10 }],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 },
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 25 },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 25 }),
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status, false);
@@ -1036,13 +1087,13 @@ describe('computeAmsMapping preferLowest', () => {
       filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10 }],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000' },  // No remain (defaults to -1)
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 60 },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000' }),  // No remain (defaults to -1)
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 60 }),
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status, true);
@@ -1065,13 +1116,13 @@ describe('computeAmsMapping preferLowest with inventory map (#1766)', () => {
       filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, tray_info_idx: 'GFA00' }],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 100 },
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 100 },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 100 }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 100 }),
         ],
-      },
+      }),
     ]);
     const inventory = new Map<number, number>([[0, 950], [1, 50]]);
 
@@ -1088,13 +1139,13 @@ describe('computeAmsMapping preferLowest with inventory map (#1766)', () => {
       filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, tray_info_idx: 'GFA00' }],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 20 },
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 80 },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 20 }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', tray_info_idx: 'GFA00', remain: 80 }),
         ],
-      },
+      }),
     ]);
     const inventory = new Map<number, number>([[1, 100]]); // Only tray 1 bound
 
@@ -1110,13 +1161,13 @@ describe('computeAmsMapping preferLowest with inventory map (#1766)', () => {
       filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10 }],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 },
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 25 },
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 25 }),
         ],
-      },
+      }),
     ]);
 
     const result = computeAmsMapping(reqs, status, true, undefined);
@@ -1157,14 +1208,14 @@ describe('effectivePreferLowest gate (#1766)', () => {
     };
     const status = createPrinterStatus(
       [
-        {
+        amsUnit({
           id: 0,
           tray: [
-            { id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: -1 },  // priority 0
+            tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: -1 }),  // priority 0
           ],
-        },
+        }),
       ],
-      [{ id: 254, tray_type: 'PLA', tray_color: 'FF0000', remain: -1 }],  // priority 10_000
+      [tray({ id: 254, tray_type: 'PLA', tray_color: 'FF0000', remain: -1 })],  // priority 10_000
     );
     const result = computeAmsMapping(reqs, status, true);
     expect(result).toEqual([0]); // AMS slot wins the tie; VT does not.
@@ -1178,13 +1229,13 @@ describe('effectivePreferLowest gate (#1766)', () => {
       filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10 }],
     };
     const status = createPrinterStatus([
-      {
+      amsUnit({
         id: 0,
         tray: [
-          { id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 },
-          { id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 5 },  // near-empty
+          tray({ id: 0, tray_type: 'PLA', tray_color: 'FF0000', remain: 80 }),
+          tray({ id: 1, tray_type: 'PLA', tray_color: 'FF0000', remain: 5 }),  // near-empty
         ],
-      },
+      }),
     ]);
     const gated = effectivePreferLowest(true, false);
     const result = computeAmsMapping(reqs, status, gated);

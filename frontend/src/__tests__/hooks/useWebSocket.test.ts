@@ -104,15 +104,13 @@ function createTestQueryClient() {
 // Wrapper with QueryClient and ToastProvider for hook testing
 function createWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
-    return React.createElement(
-      ToastProvider,
-      {},
-      React.createElement(
+    return React.createElement(ToastProvider, {
+      children: React.createElement(
         QueryClientProvider,
         { client: queryClient },
         children
-      )
-    );
+      ),
+    });
   };
 }
 
@@ -301,7 +299,7 @@ describe('useWebSocket hook', () => {
       queryClient.setQueryData(
         ['printerStatus', 1],
         (old: Record<string, unknown> | undefined) => {
-          const statusData = { state: 'RUNNING', wifi_signal: null };
+          const statusData: Record<string, unknown> = { state: 'RUNNING', wifi_signal: null };
           const merged = { ...old, ...statusData };
           // This is the preservation logic from useWebSocket
           if (merged.wifi_signal == null && old?.wifi_signal != null) {

@@ -35,6 +35,8 @@ const mockSpool: InventorySpool = {
   brand: 'Polymaker',
   color_name: 'Red',
   rgba: 'FF0000FF',
+  extra_colors: null,
+  effect_type: null,
   label_weight: 1000,
   core_weight: 250,
   core_weight_catalog_id: null,
@@ -58,7 +60,6 @@ const mockSpool: InventorySpool = {
   cost_per_kg: null,
   last_scale_weight: null,
   last_weighed_at: null,
-  weight_locked: false,
   category: 'Active',
   low_stock_threshold_pct: null,
 };

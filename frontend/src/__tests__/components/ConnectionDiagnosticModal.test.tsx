@@ -12,7 +12,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nextProvider } from 'react-i18next';
 import i18n from '../../i18n';
 import { ConnectionDiagnosticModal } from '../../components/ConnectionDiagnostic';
-import { api, type PrinterDiagnosticResult } from '../../api/client';
+import { api, type DiagnosticCheck, type PrinterDiagnosticResult } from '../../api/client';
+
+// The backend emits an `external_storage` check, but the client's
+// DiagnosticCheck['id'] union does not list it yet. Widen through `string`
+// (not `unknown`) so the cast stays an explicit, narrow gap in the app type.
+const EXTERNAL_STORAGE_ID = 'external_storage' as string as DiagnosticCheck['id'];
 
 const PROBLEM_RESULT: PrinterDiagnosticResult = {
   printer_id: 1,
@@ -127,7 +132,7 @@ describe('ConnectionDiagnosticModal', () => {
     const spy = vi.spyOn(api, 'diagnosePrinter').mockResolvedValue({
       ...PROBLEM_RESULT,
       overall: 'warnings',
-      checks: [{ id: 'external_storage', status: 'skip', params: { reason: 'unsupported_model' } }],
+      checks: [{ id: EXTERNAL_STORAGE_ID, status: 'skip', params: { reason: 'unsupported_model' } }],
     });
 
     renderModal({ printerId: 1, printerName: 'Test P1S', onClose: vi.fn() });
@@ -173,7 +178,7 @@ describe('ConnectionDiagnosticModal', () => {
     const spy = vi.spyOn(api, 'diagnosePrinter').mockResolvedValue({
       ...PROBLEM_RESULT,
       overall: 'warnings',
-      checks: [{ id: 'external_storage', status: 'skip', params: {} }],
+      checks: [{ id: EXTERNAL_STORAGE_ID, status: 'skip', params: {} }],
     });
 
     renderModal({ printerId: 1, printerName: 'Test X1C', onClose: vi.fn() });

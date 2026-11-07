@@ -54,6 +54,8 @@ const createMockPrinter = (overrides: Partial<VirtualPrinterConfig> = {}): Virtu
   target_printer_id: null,
   auto_dispatch: true,
   queue_force_color_match: true,
+  gcode_injection: false,
+  tailscale_disabled: false,
   bind_ip: null,
   remote_interface_ip: null,
   position: 0,

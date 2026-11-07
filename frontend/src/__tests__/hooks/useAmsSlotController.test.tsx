@@ -70,12 +70,12 @@ describe('useAmsSlotController', () => {
     act(() => bindings.spoolman?.onLinkSpool?.());
     expect(result.current.linkModal).toEqual({ tagUid: 'tag-1', trayUuid: 'uuid-1', amsId: 2, trayId: 1 });
 
-    act(() => bindings.inventory?.onAssignSpool());
+    act(() => bindings.inventory?.onAssignSpool?.());
     expect(result.current.assignModal?.trayInfo).toEqual({
       type: 'PLA', material: 'PLA', profile: 'Generic PLA', color: 'FF0000FF', location: 'AMS-C Slot 2',
     });
 
-    act(() => bindings.configureSlot.onConfigure());
+    act(() => bindings.configureSlot.onConfigure?.());
     expect(result.current.configureModal).toMatchObject({
       amsId: 2, trayId: 1, trayCount: 4, trayType: 'PLA', extruderId: 1, caliIdx: 3, savedPresetId: 'preset-1',
     });
@@ -96,7 +96,7 @@ describe('useAmsSlotController', () => {
     act(() => bindings.onAssignSpool?.());
     expect(result.current.assignModal?.trayInfo).toEqual({ type: '', profile: '', color: '', location: 'External Slot 2' });
 
-    act(() => bindings.configureSlot.onConfigure());
+    act(() => bindings.configureSlot.onConfigure?.());
     expect(result.current.configureModal).toEqual({ amsId: 255, trayId: 1, trayCount: 1, extruderId: 0 });
     expect(bindings.spoolman).toBeUndefined();
   });

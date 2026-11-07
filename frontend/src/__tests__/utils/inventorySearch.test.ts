@@ -9,6 +9,8 @@ function makeSpool(overrides: Partial<InventorySpool> = {}): InventorySpool {
     subtype: 'Basic',
     color_name: 'Red',
     rgba: 'FF0000FF',
+    extra_colors: null,
+    effect_type: null,
     brand: 'Bambu Lab',
     label_weight: 1000,
     core_weight: 250,

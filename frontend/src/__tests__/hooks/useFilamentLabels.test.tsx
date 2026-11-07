@@ -61,10 +61,11 @@ describe('extractMaterialHint', () => {
 
 describe('useFilamentLabels', () => {
   it('returns [] for undefined or empty inputs', () => {
+    type Props = { reqs: undefined | Array<{ type: string; color: string }> };
+    const initialProps: Props = { reqs: undefined };
     const { result, rerender } = renderHook(
-      ({ reqs }: { reqs: undefined | Array<{ type: string; color: string }> }) =>
-        useFilamentLabels(reqs),
-      { wrapper: makeWrapper(), initialProps: { reqs: undefined } },
+      ({ reqs }: Props) => useFilamentLabels(reqs),
+      { wrapper: makeWrapper(), initialProps },
     );
     expect(result.current).toEqual([]);
 

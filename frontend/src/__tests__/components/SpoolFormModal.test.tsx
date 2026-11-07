@@ -6,7 +6,6 @@
  * cache values from overwriting usage-tracked weight data on the backend.
  */
 
-import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { render } from '../utils';
@@ -120,6 +119,11 @@ const existingSpool: InventorySpool = {
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
   k_profiles: [],
+  cost_per_kg: null,
+  last_scale_weight: null,
+  last_weighed_at: null,
+  category: null,
+  low_stock_threshold_pct: null,
 };
 
 describe('SpoolFormModal weightTouched', () => {
@@ -203,7 +207,7 @@ describe('SpoolFormModal weightTouched', () => {
 
   it('includes weight_used when creating a new spool', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -279,15 +283,15 @@ describe('SpoolFormModal weightTouched', () => {
 
   it('includes core_weight_catalog_id when selecting from catalog', async () => {
     const mockCatalog = [
-      { id: 1, name: 'Generic 250g', weight: 250 },
-      { id: 2, name: 'Bambu Lab 250g', weight: 250 },
-      { id: 3, name: 'Standard 300g', weight: 300 },
+      { id: 1, name: 'Generic 250g', weight: 250, is_default: false },
+      { id: 2, name: 'Bambu Lab 250g', weight: 250, is_default: false },
+      { id: 3, name: 'Standard 300g', weight: 300, is_default: false },
     ];
 
     vi.mocked(api.getSpoolCatalog).mockResolvedValue(mockCatalog);
 
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -580,9 +584,9 @@ describe('SpoolFormModal weightTouched', () => {
     };
 
     const mockCatalog = [
-      { id: 1, name: 'Generic 250g', weight: 250 },
-      { id: 2, name: 'Bambu Lab 250g', weight: 250 },
-      { id: 3, name: 'Standard 300g', weight: 300 },
+      { id: 1, name: 'Generic 250g', weight: 250, is_default: false },
+      { id: 2, name: 'Bambu Lab 250g', weight: 250, is_default: false },
+      { id: 3, name: 'Standard 300g', weight: 300, is_default: false },
     ];
 
     vi.mocked(api.getSpoolCatalog).mockResolvedValue(mockCatalog);
@@ -610,7 +614,7 @@ describe('SpoolFormModal weightTouched', () => {
 
     // Should display "Bambu Lab 250g" (by ID), not "Generic 250g" (first match by weight)
     await waitFor(() => {
-      const weightInputs = screen.getAllByDisplayValue(/250|Bambu/i);
+      const weightInputs = screen.getAllByDisplayValue<HTMLInputElement>(/250|Bambu/i);
       const bambuFound = weightInputs.some(input =>
         input.value === 'Bambu Lab 250g' || input.getAttribute('value') === 'Bambu Lab 250g'
       );
@@ -621,35 +625,40 @@ describe('SpoolFormModal weightTouched', () => {
 
 describe('SpoolFormModal Spoolman K-profile support', () => {
   const spoolmanSpool: InventorySpool = {
-    ...{
-      id: 42,
-      material: 'PLA',
-      subtype: 'Basic',
-      brand: 'BrandX',
-      color_name: 'Black',
-      rgba: '000000FF',
-      label_weight: 1000,
-      core_weight: 250,
-      core_weight_catalog_id: null,
-      weight_used: 200,
-      slicer_filament: '',
-      slicer_filament_name: '',
-      nozzle_temp_min: null,
-      nozzle_temp_max: null,
-      note: null,
-      added_full: null,
-      last_used: null,
-      encode_time: null,
-      tag_uid: null,
-      tray_uuid: null,
-      data_origin: 'spoolman',
-      tag_type: 'spoolman',
-      archived_at: null,
-      created_at: '2025-01-01T00:00:00Z',
-      updated_at: '2025-01-01T00:00:00Z',
-      k_profiles: [],
-    },
-  } as InventorySpool;
+    id: 42,
+    material: 'PLA',
+    subtype: 'Basic',
+    brand: 'BrandX',
+    color_name: 'Black',
+    rgba: '000000FF',
+    extra_colors: null,
+    effect_type: null,
+    label_weight: 1000,
+    core_weight: 250,
+    core_weight_catalog_id: null,
+    weight_used: 200,
+    slicer_filament: '',
+    slicer_filament_name: '',
+    nozzle_temp_min: null,
+    nozzle_temp_max: null,
+    note: null,
+    added_full: null,
+    last_used: null,
+    encode_time: null,
+    tag_uid: null,
+    tray_uuid: null,
+    data_origin: 'spoolman',
+    tag_type: 'spoolman',
+    archived_at: null,
+    created_at: '2025-01-01T00:00:00Z',
+    updated_at: '2025-01-01T00:00:00Z',
+    k_profiles: [],
+    cost_per_kg: null,
+    last_scale_weight: null,
+    last_weighed_at: null,
+    category: null,
+    low_stock_threshold_pct: null,
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -767,7 +776,7 @@ describe('SpoolFormModal — SpoolmanFilamentPicker integration (T2)', () => {
 
   it('renders SpoolmanFilamentPicker in Spoolman create mode', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -782,7 +791,7 @@ describe('SpoolFormModal — SpoolmanFilamentPicker integration (T2)', () => {
 
   it('does NOT render SpoolmanFilamentPicker in local inventory mode', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -797,7 +806,7 @@ describe('SpoolFormModal — SpoolmanFilamentPicker integration (T2)', () => {
 
   it('prefills form fields when a filament is selected from the picker', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -819,7 +828,7 @@ describe('SpoolFormModal — SpoolmanFilamentPicker integration (T2)', () => {
 
   it('includes spoolman_filament_id in the submit payload when a filament is pre-selected', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -849,7 +858,7 @@ describe('SpoolFormModal — SpoolmanFilamentPicker integration (T2)', () => {
 
   it('clears spoolman_filament_id and shows unlink toast when user edits a linked field', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -1080,7 +1089,7 @@ describe('SpoolFormModal locationIdTouched', () => {
 
   it('includes location_id when creating a new spool', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
@@ -1214,7 +1223,7 @@ describe('SpoolFormModal header spool ID (#1385)', () => {
 
   it('does not show an ID when creating a new spool', async () => {
     render(
-      <SpoolFormModal
+      <SpoolFormModal mode="create"
         isOpen={true}
         onClose={vi.fn()}
         currencySymbol="$"
