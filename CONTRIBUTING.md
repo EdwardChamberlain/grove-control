@@ -205,7 +205,7 @@ cd frontend
 # Lint
 npm run lint
 
-# Type check
+# Type check (app, tests, e2e and config files)
 npm run typecheck
 ```
 

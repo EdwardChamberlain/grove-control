@@ -49,7 +49,7 @@ pushes to both.
 | `Backend Coverage` | Full pytest run with `--cov-fail-under` | Yes |
 | `Frontend Lint` | ESLint | Yes |
 | `Frontend Security Audit` | `npm audit --audit-level=high` | Yes |
-| `Frontend Type Check` | `npm run typecheck` (`tsc -b`) | Yes |
+| `Frontend Type Check` | `npm run typecheck` (`tsc -b` over app, tests, e2e and configs, plus a no-op guard) | Yes |
 | `Frontend Tests` | Vitest with coverage thresholds, i18n parity, Playwright browser tests | Yes |
 | `Frontend Build` | Vite production build | Yes |
 | `Docker Smoke Test` | Builds the image, checks imports, static files and `/health` | No |

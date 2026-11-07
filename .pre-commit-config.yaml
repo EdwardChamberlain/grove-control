@@ -50,5 +50,7 @@ repos:
         entry: bash -c 'cd frontend && npm run typecheck'
         language: system
         pass_filenames: false
-        files: ^frontend/src/
-        types_or: [ts, tsx]
+        # Everything `tsc -b` checks or reads: app, tests, e2e, screenshot specs,
+        # the tsconfig projects and the *.config.ts files.
+        files: ^frontend/(src/|e2e/|screenshot-generation/|tsconfig[^/]*\.json$|[^/]+\.config\.ts$)
+        types_or: [ts, tsx, json]
