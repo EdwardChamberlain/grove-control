@@ -690,6 +690,24 @@ describe('StatsPage', () => {
       expect(screen.getByText('Energy Cost')).toBeInTheDocument();
     });
 
+    it('falls back to zeros for every quick stat the backend leaves out', async () => {
+      server.use(
+        http.get('*/api/v1/archives/stats', () => HttpResponse.json({ energy_tracking_available: true }))
+      );
+      render(<StatsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Energy Used')).toBeInTheDocument();
+      });
+      const valueOf = (label: string) => screen.getByText(label).nextElementSibling;
+      expect(valueOf('Total Prints')).toHaveTextContent('0');
+      expect(valueOf('Successful Parts')).toHaveTextContent('0');
+      expect(valueOf('Print Time')).toHaveTextContent('0h');
+      expect(valueOf('Filament Cost')).toHaveTextContent('0.00');
+      expect(valueOf('Energy Used')).toHaveTextContent('0.000 kWh');
+      expect(valueOf('Energy Cost')).toHaveTextContent('0.00');
+    });
+
     it('keeps the tiles and their warning while energy data is warming up', async () => {
       await renderWithEnergy({
         total_energy_kwh: 0,

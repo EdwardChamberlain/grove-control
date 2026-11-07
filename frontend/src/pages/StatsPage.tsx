@@ -24,6 +24,7 @@ import {
   BarChart3,
   Boxes,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -119,6 +120,15 @@ const RECHARTS_TOOLTIP_STYLE = {
 };
 
 // Widget Components
+interface QuickStatItem {
+  icon: LucideIcon;
+  color: string;
+  label: string;
+  value: string;
+  warning?: boolean;
+  tooltip?: string;
+}
+
 function QuickStatsWidget({
   stats,
   currency,
@@ -147,7 +157,7 @@ function QuickStatsWidget({
   // while data is warming up so the warning stays visible.
   const showEnergy = warmingUp || stats?.energy_tracking_available === true;
 
-  const energyItems = [
+  const energyItems: QuickStatItem[] = [
     {
       icon: Zap,
       color: 'text-yellow-400',
@@ -166,7 +176,7 @@ function QuickStatsWidget({
     },
   ];
 
-  const items = [
+  const items: QuickStatItem[] = [
     { icon: Package, color: 'text-bambu-green', label: t('stats.totalPrints'), value: `${stats?.total_prints || 0}` },
     { icon: Boxes, color: 'text-bambu-green', label: t('stats.successfulParts'), value: `${stats?.successful_parts || 0}` },
     { icon: Clock, color: 'text-blue-400', label: t('stats.printTime'), value: `${stats?.total_print_time_hours?.toFixed(1) ?? '0'}h` },
