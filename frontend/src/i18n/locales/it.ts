@@ -1366,7 +1366,7 @@ export default {
     failureAnalysis: 'Analisi guasti',
     timeAccuracy: 'Accuratezza tempo',
     successful: 'Riuscite:',
-    successfulParts: 'Parti riuscite:',
+    successfulParts: 'Parti riuscite',
     failed: 'Fallite:',
     cancelled: 'Annullate:',
     perfectEstimate: '100% = stima perfetta',

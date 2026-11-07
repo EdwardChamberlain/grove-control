@@ -1366,7 +1366,7 @@ export default {
     failureAnalysis: 'Análisis de fallos',
     timeAccuracy: 'Precisión temporal',
     successful: 'Con éxito:',
-    successfulParts: 'Piezas con éxito:',
+    successfulParts: 'Piezas con éxito',
     failed: 'Fallidas:',
     cancelled: 'Canceladas:',
     perfectEstimate: '100% = estimación perfecta',

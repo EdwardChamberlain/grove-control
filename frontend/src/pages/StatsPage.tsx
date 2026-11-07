@@ -126,6 +126,7 @@ function QuickStatsWidget({
   stats: {
     total_prints: number;
     successful_prints: number;
+    successful_parts?: number;
     failed_prints: number;
     total_print_time_hours: number;
     total_filament_grams: number;
@@ -143,6 +144,7 @@ function QuickStatsWidget({
 
   const items = [
     { icon: Package, color: 'text-bambu-green', label: t('stats.totalPrints'), value: `${stats?.total_prints || 0}` },
+    { icon: Boxes, color: 'text-bambu-green', label: t('stats.successfulParts'), value: `${stats?.successful_parts || 0}` },
     { icon: Clock, color: 'text-blue-400', label: t('stats.printTime'), value: `${stats?.total_print_time_hours?.toFixed(1) ?? '0'}h` },
     { icon: Package, color: 'text-orange-400', label: t('stats.filamentUsed'), value: formatWeight(stats?.total_filament_grams || 0) },
     { icon: DollarSign, color: 'text-green-400', label: t('stats.filamentCost'), value: `${currency} ${stats?.total_cost?.toFixed(2) ?? '0.00'}` },
@@ -192,7 +194,6 @@ function SuccessRateWidget({
   stats: {
     total_prints: number;
     successful_prints: number;
-    successful_parts?: number;
     failed_prints: number;
     cancelled_prints?: number;
     prints_by_printer: Record<string, number>;
@@ -248,11 +249,6 @@ function SuccessRateWidget({
             <CheckCircle className="w-4 h-4 text-status-ok flex-shrink-0" />
             <span className="text-sm text-bambu-gray">{t('stats.successful')}</span>
             <span className="text-sm text-white font-medium">{stats?.successful_prints || 0}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Boxes className="w-4 h-4 text-status-ok flex-shrink-0" />
-            <span className="text-sm text-bambu-gray">{t('stats.successfulParts')}</span>
-            <span className="text-sm text-white font-medium">{stats?.successful_parts || 0}</span>
           </div>
           <div className="flex items-center gap-2">
             <XCircle className="w-4 h-4 text-status-error flex-shrink-0" />

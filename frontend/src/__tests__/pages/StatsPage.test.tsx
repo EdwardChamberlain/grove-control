@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { render } from '../utils';
 import { StatsPage } from '../../pages/StatsPage';
 import { http, HttpResponse } from 'msw';
@@ -205,8 +205,8 @@ describe('StatsPage', () => {
     });
   });
 
-  describe('success rate', () => {
-    it('shows successful parts next to successful prints', async () => {
+  describe('successful parts', () => {
+    it('shows successful parts as a quick stat, separate from successful prints', async () => {
       server.use(
         http.get('*/api/v1/archives/stats', () => {
           return HttpResponse.json({ ...mockStats, successful_prints: 3, successful_parts: 12 });
@@ -215,12 +215,28 @@ describe('StatsPage', () => {
       render(<StatsPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Successful parts:')).toBeInTheDocument();
+        expect(screen.getByText('Successful Parts')).toBeInTheDocument();
       });
+      expect(screen.getByText('Successful Parts').nextElementSibling).toHaveTextContent('12');
       expect(screen.getByText('Successful:').nextElementSibling).toHaveTextContent('3');
-      expect(screen.getByText('Successful parts:').nextElementSibling).toHaveTextContent('12');
+      // The Success Rate widget keeps its per-job breakdown only.
+      const successRateCard = screen.getByText('Successful:').closest('.space-y-2') as HTMLElement;
+      expect(within(successRateCard).queryByText(/parts/i)).not.toBeInTheDocument();
     });
 
+    it('shows 0 successful parts when the field is missing', async () => {
+      const { successful_parts: _omitted, ...statsWithoutParts } = { ...mockStats, successful_parts: 5 };
+      server.use(http.get('*/api/v1/archives/stats', () => HttpResponse.json(statsWithoutParts)));
+      render(<StatsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Successful Parts')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Successful Parts').nextElementSibling).toHaveTextContent('0');
+    });
+  });
+
+  describe('success rate', () => {
     it('shows success rate widget', async () => {
       render(<StatsPage />);
 
