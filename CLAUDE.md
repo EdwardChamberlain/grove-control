@@ -72,7 +72,7 @@ Run from `frontend/`:
 ```bash
 npx vitest run src/__tests__/pages/QueuePage.test.tsx   # one file
 npx vitest related src/pages/QueuePage.tsx --run        # tests that import a file
-npx tsc --noEmit && npm run lint                        # types + lint
+npm run typecheck && npm run lint                         # types + lint
 npm run test:run                                        # full suite + coverage + i18n parity
 npm run test:browser                                    # Playwright (run `npm run setup:browser` once)
 ```

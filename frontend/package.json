@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc -b",
     "build": "tsc -b && vite build && npm run check:baseline && npm run check:spoolbuddy-removal",
     "check:spoolbuddy-removal": "node scripts/check-spoolbuddy-removal.mjs",
     "lint": "eslint .",
