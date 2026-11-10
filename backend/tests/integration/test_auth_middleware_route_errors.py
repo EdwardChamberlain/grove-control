@@ -55,12 +55,13 @@ class TestAuthMiddlewareRouteErrors:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_failing_auth_probe_still_fails_closed(self, lenient_client, caplog):
+    @pytest.mark.parametrize("request_path", ["/api/v1/printers/", "/grove/api/v1/printers/"])
+    async def test_failing_auth_probe_still_fails_closed(self, lenient_client, caplog, request_path):
         with (
             patch("backend.app.core.auth.is_auth_enabled", AsyncMock(side_effect=RuntimeError("db down"))),
             caplog.at_level(logging.ERROR),
         ):
-            resp = await lenient_client.get("/api/v1/printers/")
+            resp = await lenient_client.get(request_path)
 
         assert resp.status_code == 503
         assert resp.json() == {"detail": "Authentication service temporarily unavailable"}

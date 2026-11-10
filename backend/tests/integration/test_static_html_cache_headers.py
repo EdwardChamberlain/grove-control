@@ -125,27 +125,32 @@ async def test_prefixed_login_shell_keeps_the_reverse_proxy_base(async_client: A
 
 
 @pytest.mark.asyncio
-async def test_path_preserving_proxy_prefix_normalizes_asset_path():
-    from starlette.requests import Request
-    from starlette.responses import Response
+@pytest.mark.parametrize(
+    ("request_path", "root_path"),
+    [
+        ("/assets/orca.js", ""),
+        ("/grove/assets/orca.js", ""),
+        ("/grove/assets/orca.js", "/grove"),
+        ("/assets/orca.js", "/grove"),
+    ],
+    ids=["unprefixed", "inferred-root", "configured-root", "stripped-prefix"],
+)
+async def test_proxy_serves_mounted_assets(tmp_path, request_path, root_path):
+    from fastapi import FastAPI
+    from fastapi.staticfiles import StaticFiles
+    from httpx import ASGITransport
 
-    from backend.app import main as main_mod
+    from backend.app.main import subpath_proxy_middleware
 
-    scope = {
-        "type": "http",
-        "path": "/grove/assets/orca.js",
-        "raw_path": b"/grove/assets/orca.js",
-        "root_path": "",
-    }
-    request = Request(scope)
+    bundle = "window.orcaBundleLoaded = true;"
+    (tmp_path / "orca.js").write_text(bundle)
+    static_app = FastAPI()
+    static_app.middleware("http")(subpath_proxy_middleware)
+    static_app.mount("/assets", StaticFiles(directory=tmp_path))
 
-    async def dispatch(normalized_request):
-        assert normalized_request.scope["root_path"] == "/grove"
-        assert normalized_request.scope["path"] == "/assets/orca.js"
-        assert normalized_request.scope["raw_path"] == b"/assets/orca.js"
-        return Response("window.orcaBundleLoaded = true;")
-
-    response = await main_mod.subpath_proxy_middleware(request, dispatch)
+    transport = ASGITransport(app=static_app, root_path=root_path)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(request_path)
 
     assert response.status_code == 200
-    assert response.body.decode() == "window.orcaBundleLoaded = true;"
+    assert response.text == bundle

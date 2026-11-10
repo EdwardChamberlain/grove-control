@@ -948,22 +948,20 @@ export function PrintModal({
           ...printOptions,
           project_id: projectId ?? undefined,
         });
-        const receipt = readQueueReceipt(response, quantity);
-        const hasDuplicateId = receipt.queueItemIds.some((id) => queueItemIds.includes(id));
-        receipt.queueItemIds.forEach((id) => {
-          if (!queueItemIds.includes(id)) queueItemIds.push(id);
-        });
-        if ((!receipt.certain && onResult) || hasDuplicateId) {
-          onResult?.({
-            outcome: 'uncertain',
-            queueItemIds,
-            message: 'Grove could not confirm every created queue item. Check the Grove queue before trying again.',
-          });
-          if (queueItemIds.length > 0) invalidateQueueState();
-          showToast('Grove could not confirm every created queue item. Check the queue before trying again.', 'error');
-          return;
+        if (onResult) {
+          const receipt = readQueueReceipt(response, quantity);
+          if (!receipt.certain) {
+            onResult({
+              outcome: 'uncertain',
+              queueItemIds: receipt.queueItemIds,
+              message: 'Grove could not confirm every created queue item. Check the Grove queue before trying again.',
+            });
+            if (receipt.queueItemIds.length > 0) invalidateQueueState();
+            showToast('Grove could not confirm every created queue item. Check the queue before trying again.', 'error');
+            return;
+          }
+          onResult({ outcome: 'success', queueItemIds: receipt.queueItemIds });
         }
-        onResult?.({ outcome: 'success', queueItemIds });
         showToast(t('printModal.variants.queued', { count: candidates.length }), 'success');
         invalidateQueueState();
         onSuccess?.();
@@ -1082,33 +1080,33 @@ export function PrintModal({
     };
 
     let progressCounter = 0;
-    const submitQueueData = async (queueData: PrintQueueItemCreate, label: string) => {
+    const submitQueueData = async (queueData: PrintQueueItemCreate, label?: string) => {
       if (isCancelRequested() || uncertainOutcome || sessionExpired) return;
       progressCounter++;
       setSubmitProgress({ current: progressCounter, total: totalCount });
       try {
         const response = await addToQueueMutation.mutateAsync(queueData);
-        const receipt = readQueueReceipt(response, queueData.quantity ?? 1);
-        const duplicateId = receipt.queueItemIds.some((id) => queueItemIds.includes(id));
-        receipt.queueItemIds.forEach((id) => {
-          if (!queueItemIds.includes(id)) queueItemIds.push(id);
-        });
-        if ((!receipt.certain && onResult) || duplicateId) {
-          uncertainOutcome = true;
-          results.errors.push(`${label}: Grove did not return a complete queue receipt`);
-          return;
+        if (onResult) {
+          const receipt = readQueueReceipt(response, queueData.quantity ?? 1);
+          const duplicateId = receipt.queueItemIds.some((id) => queueItemIds.includes(id));
+          receipt.queueItemIds.forEach((id) => {
+            if (!queueItemIds.includes(id)) queueItemIds.push(id);
+          });
+          if (!receipt.certain || duplicateId) {
+            uncertainOutcome = true;
+            return;
+          }
         }
         results.success++;
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        if (isUncertainQueueError(error)) {
+        if (onResult && isUncertainQueueError(error)) {
           uncertainOutcome = true;
-          results.errors.push(`${label}: ${detail}`);
           return;
         }
-        if (error instanceof ApiError && error.status === 401) sessionExpired = true;
+        if (onResult && error instanceof ApiError && error.status === 401) sessionExpired = true;
+        const detail = error instanceof Error ? error.message : String(error);
         results.failed++;
-        results.errors.push(`${label}: ${detail}`);
+        results.errors.push(label ? `${label}: ${detail}` : detail);
       }
     };
 
@@ -1121,7 +1119,7 @@ export function PrintModal({
         const plateQuantity = quantityForPlate(plateId);
         if (plateQuantity > 1) queueData.quantity = plateQuantity;
         applyTopInsertion(queueData, null, plateQuantity);
-        await submitQueueData(queueData, plate ? (plate.name || `Plate ${plate.index}`) : 'Queue request');
+        await submitQueueData(queueData, plate ? (plate.name || `Plate ${plate.index}`) : undefined);
       }
     } else {
       // Printer-based assignment: loop through plates × printers.

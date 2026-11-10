@@ -482,7 +482,6 @@ function VerifiedPrintProviders({
             libraryFileId={initialization.library_file_id}
             archiveName={filename}
             initialPlateId={initialization.plate_id ?? undefined}
-            cleanupLibraryAfterDispatch
             cancelRequested={cancelRequested}
             cancelRequestedRef={cancelRequestedRef}
             onSubmissionStateChange={notifySubmissionStateChange}
