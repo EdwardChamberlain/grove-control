@@ -268,7 +268,7 @@ class TestOidcReloginAfterDelete:
         # ── Second OIDC login with the same sub: auto_create must run again ──
         # The helper already asserts a 302 with oidc_token=… — that alone proves
         # auto_create fired (otherwise the callback would have redirected to
-        # /?oidc_error=account_inactive and the helper would have failed).
+        # /login?oidc_error=account_inactive and the helper would have failed).
         await _trigger_oidc_callback(
             async_client,
             db_session,

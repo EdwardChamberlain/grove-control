@@ -117,11 +117,24 @@ async def test_api_routes_unaffected_by_html_cache_headers(async_client: AsyncCl
 
 
 @pytest.mark.asyncio
-async def test_prefixed_login_shell_keeps_the_reverse_proxy_base(async_client: AsyncClient, fake_static_index):
-    response = await async_client.get("/grove/login")
+@pytest.mark.parametrize("prefix", ["", "/grove"], ids=["root", "reverse-proxy"])
+async def test_oidc_cancel_returns_to_login_shell(async_client: AsyncClient, fake_static_index, db_session, prefix):
+    from backend.app.models.settings import Settings
 
+    external_url = f"http://test{prefix}"
+    db_session.add(Settings(key="external_url", value=external_url))
+    await db_session.commit()
+
+    response = await async_client.get(
+        f"{prefix}/api/v1/auth/oidc/callback",
+        params={"error": "access_denied"},
+        follow_redirects=True,
+    )
+
+    assert [redirect.status_code for redirect in response.history] == [302]
+    assert str(response.url) == f"{external_url}/login?oidc_error=oidc_provider_error"
     assert response.status_code == 200
-    assert '<base href="/grove/" />' in response.text
+    assert f'<base href="{prefix}/" />' in response.text
 
 
 @pytest.mark.asyncio

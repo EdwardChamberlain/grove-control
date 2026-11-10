@@ -1734,13 +1734,13 @@ class TestOIDCEndToEnd:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_oidc_callback_invalid_state_redirects_error(self, async_client: AsyncClient):
-        """An unknown state token must redirect to /?oidc_error=invalid_state."""
+        """An unknown state token must return to login with an invalid-state error."""
         resp = await async_client.get(
             "/api/v1/auth/oidc/callback?code=x&state=totally-bogus-state",
             follow_redirects=False,
         )
         assert resp.status_code == 302
-        assert "invalid_state" in resp.headers.get("location", "")
+        assert resp.headers["location"].endswith("/login?oidc_error=invalid_state")
 
     @pytest.mark.asyncio
     @pytest.mark.integration

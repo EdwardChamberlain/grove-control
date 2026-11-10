@@ -1729,7 +1729,7 @@ async def oidc_callback(
 ) -> RedirectResponse:
     """Handle the OIDC authorization code callback from the identity provider."""
     external_url = await _get_base_external_url(db)
-    frontend_error_url = f"{external_url}/?oidc_error="
+    frontend_error_url = f"{external_url}/login?oidc_error="
 
     try:
         if error:
