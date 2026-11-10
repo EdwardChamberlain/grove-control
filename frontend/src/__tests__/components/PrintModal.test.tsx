@@ -2421,10 +2421,10 @@ describe('PrintModal', () => {
     });
 
     it('submits the supplied plate without selecting another plate', async () => {
-      let submitted: Record<string, unknown> | null = null;
+      const submitted = vi.fn();
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
-          submitted = await request.json() as Record<string, unknown>;
+          submitted(await request.json());
           return HttpResponse.json({ id: 61, status: 'pending', created_queue_item_ids: [61] });
         }),
       );
@@ -2442,8 +2442,9 @@ describe('PrintModal', () => {
 
       await screen.findByText('Plate 2');
       await user.click(document.querySelector('button[type="submit"]') as HTMLElement);
-      await waitFor(() => expect(submitted).not.toBeNull());
-      expect(submitted?.plate_id).toBe(2);
+      await waitFor(() => expect(submitted).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ plate_id: 2 }),
+      ));
     });
 
     it('blocks submission when the supplied plate is unavailable', async () => {

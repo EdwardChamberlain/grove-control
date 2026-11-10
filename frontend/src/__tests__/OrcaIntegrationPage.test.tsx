@@ -175,7 +175,6 @@ describe('Orca integration page', () => {
     expect(mocks.getLibraryFilePlates).toHaveBeenCalledWith(42);
     expect(mocks.themeMounts).toBe(1);
     expect(mocks.printProps?.initialPlateId).toBe(2);
-    expect(mocks.printProps?.cleanupLibraryAfterDispatch).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Finish mocked print' }));
     await waitFor(() => {

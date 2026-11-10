@@ -7119,12 +7119,18 @@ def _frame_ancestors(default_value: str, extra_sources: tuple[str, ...] = ()) ->
     return f"frame-ancestors {default_value};"
 
 
-def _is_orca_print_request(request) -> bool:
+def _app_route_path(request: Request) -> str:
+    """Return the path inside the app for middleware that classifies routes."""
+    path = request.scope["path"]
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    if root_path and (path == root_path or path.startswith(root_path + "/")):
+        return path[len(root_path) :] or "/"
+    return path
+
+
+def _is_orca_print_request(request: Request) -> bool:
     """Whether this request is the versioned Orca Print document route."""
-    path = request.url.path.rstrip("/")
-    root_path = str(request.scope.get("root_path", "")).rstrip("/")
-    if root_path and path.startswith(root_path + "/"):
-        path = path[len(root_path) :]
+    path = _app_route_path(request).rstrip("/")
     if not path.endswith("/integrations/orca"):
         return False
     params = request.query_params
@@ -7172,7 +7178,8 @@ async def security_headers_middleware(request, call_next):
     #   - img-src data: / blob:: base64 thumbnails and Blob-URL timelapse previews.
     #   - media-src blob:: timelapse video player uses Blob URLs.
     #   - font-src data:: some icon fonts are embedded as data URIs.
-    if request.url.path.startswith("/gcode-viewer"):
+    path = _app_route_path(request)
+    if path.startswith("/gcode-viewer"):
         # The gcode viewer is embedded in an iframe served by this same origin,
         # so frame-ancestors must allow 'self'.  prettygcode.js also uses eval()
         # internally, so script-src needs 'unsafe-eval'.
@@ -7188,7 +7195,7 @@ async def security_headers_middleware(request, call_next):
             "base-uri 'self'; "
             "frame-src 'self' http: https:; " + _frame_ancestors("'self'")
         )
-    elif request.url.path in ("/docs", "/redoc", "/docs/oauth2-redirect"):
+    elif path in ("/docs", "/redoc", "/docs/oauth2-redirect"):
         # FastAPI's built-in Swagger UI / ReDoc pages load assets from
         # cdn.jsdelivr.net and bootstrap with an inline <script>, so the
         # default CSP would render a blank page.
@@ -7231,7 +7238,7 @@ async def auth_middleware(request, call_next):
     """
     from starlette.responses import JSONResponse
 
-    path = request.url.path
+    path = _app_route_path(request)
 
     # Only apply to API routes
     if not path.startswith("/api/"):
@@ -7443,8 +7450,8 @@ _PREFIXED_APP_PATH_MARKERS = tuple(
 )
 
 
-def _prefixed_app_path(path: str) -> tuple[str, str, str] | None:
-    """Split a path-preserving proxy prefix from a known Grove route root."""
+def _infer_app_root_path(path: str) -> str | None:
+    """Find a path-preserving proxy prefix before a known Grove route root."""
     # A normal Grove route may contain another marker later in its path. For
     # example, ``/api/v1/auth/login`` must stay on the API router instead of
     # being interpreted as a proxy prefix ending in ``/api/v1/auth``.
@@ -7457,55 +7464,30 @@ def _prefixed_app_path(path: str) -> tuple[str, str, str] | None:
             index = path.rfind(marker, 0, search_from)
             if index <= 0:
                 break
-            suffix = path[index:]
             remainder = path[index + len(marker) :]
             if not remainder or remainder.startswith("/"):
-                return path[:index].rstrip("/"), suffix, marker
+                return path[:index].rstrip("/") or None
             search_from = index
     return None
 
 
 @app.middleware("http")
 async def subpath_proxy_middleware(request, call_next):
-    """Route path-preserving subpath proxy requests to Grove's root routes.
-
-    The browser keeps the external prefix in its URL and uses it as the
-    document base. Strip that prefix only for recognized Grove mount points,
-    while retaining it as ASGI ``root_path`` for generated URLs and redirects.
-    Proxies that already set ``root_path`` are normalized the same way.
-    """
+    """Set the ASGI root for proxy requests while keeping the full path for mounts."""
     scope = request.scope
-    path = str(scope.get("path", ""))
-    root_path = str(scope.get("root_path", "")).rstrip("/")
+    path = scope["path"]
+    root_path = scope.get("root_path", "").rstrip("/")
 
-    prefix = root_path
-    suffix = path
-    marker = ""
-    if root_path and path == root_path:
-        suffix = "/"
-    elif root_path and path.startswith(root_path + "/"):
-        suffix = path[len(root_path) :]
-        prefixed = _prefixed_app_path(path)
-        if prefixed:
-            marker = prefixed[2]
-    elif not root_path:
-        prefixed = _prefixed_app_path(path)
-        if prefixed:
-            prefix, suffix, marker = prefixed
-
-    if prefix and suffix != path:
-        scope["root_path"] = prefix
-        scope["path"] = suffix
-        raw_path = scope.get("raw_path")
-        marker_bytes = marker.encode("ascii") if marker else b""
-        if isinstance(raw_path, bytes) and marker_bytes:
-            marker_index = raw_path.rfind(marker_bytes)
-            if marker_index >= 0:
-                scope["raw_path"] = raw_path[marker_index:]
-            else:
-                scope["raw_path"] = suffix.encode("utf-8")
-        else:
-            scope["raw_path"] = suffix.encode("utf-8")
+    if not root_path:
+        inferred_root = _infer_app_root_path(path)
+        if inferred_root:
+            scope["root_path"] = inferred_root
+    elif path != root_path and not path.startswith(root_path + "/"):
+        # Some ASGI servers supply root_path separately from a stripped path.
+        # Starlette's nested mounts need both the external path and root_path.
+        scope["path"] = root_path + path
+        if scope.get("raw_path") is not None:
+            scope["raw_path"] = root_path.encode("utf-8") + scope["raw_path"]
 
     return await call_next(request)
 

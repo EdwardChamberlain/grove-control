@@ -154,9 +154,9 @@ async def test_path_preserving_proxy_prefix_reaches_api_route(async_client: Asyn
 
 
 def test_unprefixed_api_login_path_is_not_treated_as_proxy_prefix():
-    from backend.app.main import _prefixed_app_path
+    from backend.app.main import _infer_app_root_path
 
-    assert _prefixed_app_path("/api/v1/auth/login") is None
+    assert _infer_app_root_path("/api/v1/auth/login") is None
 
 
 @pytest.mark.asyncio
