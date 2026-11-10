@@ -225,6 +225,9 @@ export function LoginPage() {
 
     if (!oidcToken && !oidcError) return;
 
+    // Consuming the callback clears its URL marker. Keep automatic sign-in
+    // suppressed so an error can be retried manually and MFA can finish.
+    autologinAttemptedRef.current = true;
     const savedRememberMe = consumeSavedRememberMe();
 
     if (oidcError) {

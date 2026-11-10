@@ -460,6 +460,7 @@ describe('LoginPage', () => {
   });
 
   describe('OIDC with Remember Me', () => {
+    const locationDescriptor = Object.getOwnPropertyDescriptor(window, 'location')!;
     const mockUser = {
       id: 1,
       username: 'oidcuser',
@@ -474,6 +475,7 @@ describe('LoginPage', () => {
     });
 
     afterEach(() => {
+      Object.defineProperty(window, 'location', locationDescriptor);
       window.location.hash = '';
       window.history.pushState({}, '', '/login');
       sessionStorage.clear();
@@ -637,6 +639,34 @@ describe('LoginPage', () => {
       await waitFor(() => {
         expect(sessionStorage.getItem('auth_remember_me')).toBe('1');
       });
+    });
+
+    it('allows a manual OIDC retry after cancellation without restarting autologin', async () => {
+      const authorize = vi.fn(() => HttpResponse.json({ detail: 'Provider unavailable' }, { status: 502 }));
+      server.use(
+        http.get('/api/v1/auth/advanced-auth/status', () =>
+          HttpResponse.json({ local_login_enabled: false, autologin_provider_id: 42 })
+        ),
+        http.get('/api/v1/auth/oidc/providers', () =>
+          HttpResponse.json([{ id: 42, name: 'Grove SSO', has_icon: false }])
+        ),
+        http.get('/api/v1/auth/oidc/authorize/42', authorize),
+      );
+      const returnTo = '/integrations/orca?mode=connect&protocol_version=1&request_id=orca-request';
+      sessionStorage.setItem('auth_post_login_redirect', returnTo);
+      window.history.pushState({}, '', '/login?oidc_error=oidc_provider_error');
+      const user = userEvent.setup();
+      render(<LoginPage />);
+
+      expect(await screen.findByText('The identity provider returned an error')).toBeVisible();
+      expect(await screen.findByText(/Local sign-in is disabled/)).toBeVisible();
+      expect(window.location.search).toBe('');
+      expect(authorize).not.toHaveBeenCalled();
+
+      await user.click(await screen.findByRole('button', { name: /Grove SSO/ }));
+
+      await waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+      expect(sessionStorage.getItem('auth_post_login_redirect')).toBe(returnTo);
     });
 
     it('preserves the Orca return URL through automatic OIDC sign-in', async () => {
