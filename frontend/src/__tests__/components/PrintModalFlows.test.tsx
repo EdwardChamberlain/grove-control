@@ -252,3 +252,128 @@ describe('PrintModal dismissal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('PrintModal hosted queue receipts', () => {
+  const twoPrinters = [
+    ...singleNozzlePrinters,
+    { id: 2, name: 'P1S', model: 'P1S', ip_address: '192.168.1.101', enabled: true, is_active: true, nozzle_count: 1 },
+  ];
+
+  it.each([
+    {
+      name: 'the response is lost',
+      respond: () => HttpResponse.error(),
+      outcome: 'uncertain',
+      message: /Check the queue before trying again/,
+    },
+    {
+      name: 'Grove fails with a server error',
+      respond: () => HttpResponse.json({ detail: 'Service unavailable' }, { status: 503 }),
+      outcome: 'uncertain',
+      message: /Check the queue before trying again/,
+    },
+    {
+      name: 'the session expires',
+      respond: () => HttpResponse.json({ detail: 'Session expired' }, { status: 401 }),
+      outcome: 'session_expired',
+      message: /Reconnect your Grove account/,
+    },
+  ])('stops sending queue requests when $name', async ({ respond, outcome, message }) => {
+    const captured = setup({ printers: twoPrinters });
+    const onResult = vi.fn();
+    server.use(http.post('/api/v1/queue/', async ({ request }) => {
+      captured.queueBodies.push(await request.json() as Record<string, unknown>);
+      return respond();
+    }));
+
+    const user = userEvent.setup();
+    render(
+      <PrintModal
+        mode="create"
+        libraryFileId={5}
+        archiveName="Benchy"
+        initialSelectedPrinterIds={[1, 2]}
+        onClose={onClose}
+        onResult={onResult}
+      />,
+    );
+    await user.click(await screen.findByRole('button', { name: /^print$/i }));
+
+    await waitFor(() => expect(onResult).toHaveBeenCalledExactlyOnceWith({
+      outcome,
+      queueItemIds: [],
+      message: expect.stringMatching(message),
+    }));
+    expect(captured.queueBodies.map((body) => body.printer_id)).toEqual([1]);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('sends no POST when Orca cancels before the first request', async () => {
+    const captured = setup();
+    const onResult = vi.fn();
+    const cancelRequestedRef = { current: false };
+    const user = userEvent.setup();
+    render(
+      <PrintModal
+        mode="create"
+        libraryFileId={5}
+        archiveName="Benchy"
+        initialSelectedPrinterIds={[1]}
+        onClose={onClose}
+        onResult={onResult}
+        onSubmissionStateChange={(active) => {
+          if (active) cancelRequestedRef.current = true;
+        }}
+        cancelRequestedRef={cancelRequestedRef}
+      />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: /^print$/i }));
+
+    await waitFor(() => expect(onResult).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'cancelled',
+      queueItemIds: [],
+    }));
+    expect(captured.queueBodies).toHaveLength(0);
+  });
+
+  it('returns a partial receipt when cancellation arrives during a POST', async () => {
+    const captured = setup({ printers: twoPrinters });
+    const onResult = vi.fn();
+    const cancelRequestedRef = { current: false };
+    let finishPost!: () => void;
+    const pendingPost = new Promise<void>((resolve) => { finishPost = resolve; });
+    server.use(http.post('/api/v1/queue/', async ({ request }) => {
+      captured.queueBodies.push(await request.json() as Record<string, unknown>);
+      await pendingPost;
+      return HttpResponse.json({ id: 41, status: 'pending', created_queue_item_ids: [41] });
+    }));
+
+    const user = userEvent.setup();
+    render(
+      <PrintModal
+        mode="create"
+        libraryFileId={5}
+        archiveName="Benchy"
+        initialSelectedPrinterIds={[1, 2]}
+        onClose={onClose}
+        onResult={onResult}
+        cancelRequestedRef={cancelRequestedRef}
+      />,
+    );
+    await user.click(await screen.findByRole('button', { name: /^print$/i }));
+    try {
+      await waitFor(() => expect(captured.queueBodies).toHaveLength(1));
+      expect(onResult).not.toHaveBeenCalled();
+      cancelRequestedRef.current = true;
+    } finally {
+      finishPost();
+    }
+
+    await waitFor(() => expect(onResult).toHaveBeenCalledExactlyOnceWith({
+      outcome: 'partial',
+      queueItemIds: [41],
+    }));
+    expect(captured.queueBodies.map((body) => body.printer_id)).toEqual([1]);
+  });
+});
