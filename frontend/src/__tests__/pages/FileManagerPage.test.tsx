@@ -1268,4 +1268,30 @@ describe('FileManagerPage', () => {
       expect(includeRootValues).toContain('false');
     });
   });
+
+  it('disables Generate Thumbnail while the previous request is pending', async () => {
+    const user = userEvent.setup();
+    let requests = 0;
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    server.use(http.post('/api/v1/library/generate-stl-thumbnails', async () => {
+      requests++;
+      await pending;
+      return HttpResponse.json({ succeeded: 1, processed: 1, failed: 0, results: [{ file_id: 2 }] });
+    }));
+
+    try {
+      render(<FileManagerPage />);
+      await user.click(await screen.findByTitle('List view'));
+      const row = (await screen.findByText('bracket.stl')).closest('[data-file-id]') as HTMLElement;
+      const trigger = within(row).getByRole('button', { name: 'Actions' });
+      await user.click(trigger);
+      await user.click(within(row).getByRole('menuitem', { name: 'Generate Thumbnail' }));
+      await waitFor(() => expect(requests).toBe(1));
+      await user.click(trigger);
+      expect(within(row).getByRole('menuitem', { name: 'Generate Thumbnail' })).toBeDisabled();
+    } finally {
+      finish();
+    }
+  });
 });

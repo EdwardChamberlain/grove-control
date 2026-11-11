@@ -758,6 +758,7 @@ interface FileCardProps {
   onRename?: (file: LibraryFileListItem) => void;
   onMove?: (file: LibraryFileListItem) => void;
   onGenerateThumbnail?: (file: LibraryFileListItem) => void;
+  isGeneratingThumbnail?: boolean;
   onTagClick?: (tagId: number) => void;
   thumbnailVersion?: number;
   showModified?: boolean;
@@ -770,12 +771,12 @@ interface FileCardProps {
 type FileActionsMenuProps = Pick<FileCardProps,
   'file' | 'onDelete' | 'onDownload' | 'onPrint' | 'onSlice' |
   'useSlicerApi' | 'onPreview3d' | 'onRename' | 'onMove' |
-  'onGenerateThumbnail' | 'hasPermission' | 'canModify' | 't'
+  'onGenerateThumbnail' | 'isGeneratingThumbnail' | 'hasPermission' | 'canModify' | 't'
 > & { className?: string };
 
 function FileActionsMenu({
   file, onDelete, onDownload, onPrint, onSlice, useSlicerApi,
-  onPreview3d, onRename, onMove, onGenerateThumbnail,
+  onPreview3d, onRename, onMove, onGenerateThumbnail, isGeneratingThumbnail,
   hasPermission, canModify, t, className,
 }: FileActionsMenuProps) {
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -827,7 +828,7 @@ function FileActionsMenu({
   if (onGenerateThumbnail && file.file_type === 'stl') {
     items.push({
       label: t('fileManager.generateThumbnail'), icon: <Image className="w-4 h-4" />,
-      onClick: () => onGenerateThumbnail(file), disabled: !canUpdate,
+      onClick: () => onGenerateThumbnail(file), disabled: !canUpdate || isGeneratingThumbnail,
       title: !canUpdate ? t('fileManager.noPermissionGenerateThumbnail') : undefined,
     });
   }
@@ -868,7 +869,7 @@ function FileActionsMenu({
   );
 }
 
-function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onMove, onGenerateThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
+function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onMove, onGenerateThumbnail, isGeneratingThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
   return (
     <div
       data-file-id={file.id}
@@ -970,7 +971,7 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
       </div>
 
       <FileActionsMenu
-        className={`absolute bottom-2 right-2 transition-opacity ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}
+        className="absolute bottom-2 right-2"
         file={file}
         onDelete={onDelete}
         onDownload={onDownload}
@@ -981,6 +982,7 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
         onRename={onRename}
         onMove={onMove}
         onGenerateThumbnail={onGenerateThumbnail}
+        isGeneratingThumbnail={isGeneratingThumbnail}
         hasPermission={hasPermission}
         canModify={canModify}
         t={t}
@@ -2522,6 +2524,7 @@ export function FileManagerPage() {
                     onRename={(f) => setRenameItem({ type: 'file', id: f.id, name: f.filename })}
                     onMove={(f) => openSingleMove(f.id)}
                     onGenerateThumbnail={(f) => singleThumbnailMutation.mutate(f.id)}
+                    isGeneratingThumbnail={singleThumbnailMutation.isPending}
                     onTagClick={toggleTagFilter}
                     thumbnailVersion={thumbnailVersions[file.id]}
                     showModified={showModified}
@@ -2683,6 +2686,7 @@ export function FileManagerPage() {
                       onRename={(item) => setRenameItem({ type: 'file', id: item.id, name: item.filename })}
                       onMove={(item) => openSingleMove(item.id)}
                       onGenerateThumbnail={(item) => singleThumbnailMutation.mutate(item.id)}
+                      isGeneratingThumbnail={singleThumbnailMutation.isPending}
                       hasPermission={hasPermission}
                       canModify={canModify}
                       t={t}

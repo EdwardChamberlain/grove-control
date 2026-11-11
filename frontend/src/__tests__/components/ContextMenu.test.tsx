@@ -53,6 +53,41 @@ describe('ContextMenu', () => {
   });
 
   describe('interactions', () => {
+    it('moves focus through a submenu and back to its trigger with the keyboard', async () => {
+      const user = userEvent.setup();
+      const assign = vi.fn();
+      render(
+        <ContextMenu
+          x={100}
+          y={100}
+          items={[{
+            label: 'Add to Project',
+            onClick: vi.fn(),
+            submenu: [
+              { label: 'Tools', onClick: vi.fn() },
+              { label: 'Disabled project', onClick: vi.fn(), disabled: true },
+              { label: 'Fixtures', onClick: assign },
+            ],
+          }]}
+          onClose={mockOnClose}
+        />
+      );
+
+      const trigger = screen.getByRole('menuitem', { name: 'Add to Project' });
+      expect(trigger).toHaveFocus();
+      await user.keyboard('{Enter}');
+      expect(screen.getByRole('menuitem', { name: 'Tools' })).toHaveFocus();
+      await user.keyboard('{ArrowDown}');
+      expect(screen.getByRole('menuitem', { name: 'Fixtures' })).toHaveFocus();
+      await user.keyboard('{Escape}');
+      expect(trigger).toHaveFocus();
+      expect(mockOnClose).not.toHaveBeenCalled();
+
+      await user.keyboard('{ArrowRight}{ArrowUp}{Enter}');
+      expect(assign).toHaveBeenCalledOnce();
+      expect(mockOnClose).toHaveBeenCalledOnce();
+    });
+
     it('calls onClick when item is clicked', async () => {
       const user = userEvent.setup();
       render(

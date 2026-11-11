@@ -94,17 +94,17 @@ function setLayout(layout: (typeof layouts)[number]) {
 
 async function openMenu(user: ReturnType<typeof userEvent.setup>) {
   await screen.findAllByText('Benchy');
-  await user.click(screen.getAllByTitle('Right-click for more options')[0]);
+  await user.click(screen.getAllByRole('button', { name: 'More options' })[0]);
 }
 
 /** The open actions menu (a fixed panel holding the favourites item). */
 function openMenuPanel(): HTMLElement {
-  const favourite = screen.getByRole('button', { name: /^(Add to|Remove from) Favorites/ });
+  const favourite = screen.getByRole('menuitem', { name: /^(Add to|Remove from) Favorites/ });
   return favourite.closest('div.fixed') as HTMLElement;
 }
 
 function menuItem(name: string) {
-  return within(openMenuPanel()).getByRole('button', { name: new RegExp(`^${name}`) });
+  return within(openMenuPanel()).getByRole('menuitem', { name: new RegExp(`^${name}`) });
 }
 
 beforeEach(() => {
@@ -133,7 +133,7 @@ describe.each(layouts)('archive actions menu (%s layout)', (layout) => {
 
     await openMenu(user);
     await user.hover(menuItem('Add to Project'));
-    await user.click(await screen.findByRole('button', { name: /Remove from Project/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Remove from Project/ }));
 
     await waitFor(() => expect(calls.patches).toEqual([{ project_id: null }]));
     expect(await screen.findByText('Project updated')).toBeInTheDocument();

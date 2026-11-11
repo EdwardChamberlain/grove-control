@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
 import { http, HttpResponse } from 'msw';
@@ -74,8 +74,8 @@ function useArchives(archives: Array<Record<string, unknown>>) {
 
 async function openContextMenu(name: string) {
   await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument());
-  const card = screen.getByText(name).closest('[class*="rounded"]') as HTMLElement;
-  fireEvent.contextMenu(card);
+  const card = screen.getByText(name).closest('[data-archive-id]') as HTMLElement;
+  fireEvent.click(within(card).getByRole('button', { name: 'More options' }));
 }
 
 describe('ArchivesPage — Save to Files', () => {
@@ -105,7 +105,7 @@ describe('ArchivesPage — Save to Files', () => {
 
     await openContextMenu('Benchy');
 
-    expect(await screen.findByText('Save to Files')).toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Save to Files' })).toBeInTheDocument();
   });
 
   it('hides the action for a fallback entry with no 3MF', async () => {
@@ -115,7 +115,7 @@ describe('ArchivesPage — Save to Files', () => {
     await openContextMenu('Benchy');
 
     await waitFor(() => expect(screen.getAllByText('Download').length).toBeGreaterThan(0));
-    expect(screen.queryByText('Save to Files')).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Save to Files' })).toBeNull();
   });
 
   it('saves to the chosen folder once confirmed', async () => {
@@ -123,7 +123,7 @@ describe('ArchivesPage — Save to Files', () => {
     render(<ArchivesPage />);
     await openContextMenu('Benchy');
 
-    fireEvent.click(await screen.findByText('Save to Files'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Save to Files' }));
     fireEvent.click(await screen.findByText('Keepers'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -137,7 +137,7 @@ describe('ArchivesPage — Save to Files', () => {
     render(<ArchivesPage />);
     await openContextMenu('Benchy');
 
-    fireEvent.click(await screen.findByText('Save to Files'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Save to Files' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(saveBodies).toEqual([{ folder_id: null }]));
@@ -149,7 +149,7 @@ describe('ArchivesPage — Save to Files', () => {
     render(<ArchivesPage />);
     await openContextMenu('Benchy');
 
-    fireEvent.click(await screen.findByText('Save to Files'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Save to Files' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Save to Files' })).toBeNull());
@@ -166,7 +166,7 @@ describe('ArchivesPage — Save to Files', () => {
     render(<ArchivesPage />);
     await openContextMenu('Benchy');
 
-    fireEvent.click(await screen.findByText('Save to Files'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Save to Files' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
     expect(await screen.findByText('Archive file missing on disk')).toBeInTheDocument();
@@ -192,7 +192,7 @@ describe('ArchivesPage — Save to Files', () => {
     render(<ArchivesPage />);
     await openContextMenu('Benchy');
 
-    fireEvent.click(await screen.findByText('Save to Files'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Save to Files' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
 
     expect(await screen.findByText(/a file with the same content already exists/)).toBeInTheDocument();

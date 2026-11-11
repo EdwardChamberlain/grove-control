@@ -645,3 +645,18 @@ test('archives "Show" page-size menu opens upwards when it would run off the scr
   await page.getByRole('option', { name: 'All' }).click();
   await expect(page.getByText('60 prints', { exact: true })).toBeVisible();
 });
+
+test('Archive actions scroll within a short viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await mockApi(page, []);
+  await page.goto('/archives');
+
+  await page.getByRole('button', { name: 'More options' }).click();
+  const menu = page.getByRole('menu');
+  const box = await menu.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(600);
+
+  await menu.getByRole('menuitem', { name: 'Delete', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Delete Archive' })).toBeVisible();
+});
