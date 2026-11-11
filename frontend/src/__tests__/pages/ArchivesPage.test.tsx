@@ -115,6 +115,34 @@ describe('ArchivesPage', () => {
       expect(screen.getByRole('menu')).toBeInTheDocument();
     });
 
+    it('keeps Reprint and Save to Files on the card and moves secondary actions to the menu', async () => {
+      server.use(
+        http.get('/api/v1/archives/', () => HttpResponse.json(
+          mockArchives.map((archive) => ({
+            ...archive,
+            file_path: '/archive/benchy.gcode.3mf',
+            source_3mf_path: archive.id === 1 ? '/archive/benchy-source.3mf' : null,
+            f3d_path: archive.id === 1 ? '/archive/benchy.f3d' : null,
+          }))
+        )),
+      );
+      render(<ArchivesPage />);
+      await screen.findByText('Benchy');
+      const card = document.querySelector('[data-archive-id="1"]') as HTMLElement;
+
+      expect(within(card).getByRole('button', { name: 'Reprint' })).toBeInTheDocument();
+      expect(within(card).getByRole('button', { name: 'Save to Files' })).toBeInTheDocument();
+      expect(within(card).queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+      expect(within(card).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+      expect(within(card).queryByRole('button', { name: 'Open source 3MF in Slicer' })).not.toBeInTheDocument();
+
+      fireEvent.click(within(card).getByRole('button', { name: /more options/i }));
+      expect(within(card).getByRole('menuitem', { name: 'Download' })).toBeInTheDocument();
+      expect(within(card).getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+      expect(within(card).getByRole('menuitem', { name: 'Open source 3MF in Slicer' })).toBeInTheDocument();
+      expect(within(card).getByRole('menuitem', { name: 'Download F3D' })).toBeInTheDocument();
+    });
+
     it('renders the page title', async () => {
       render(<ArchivesPage />);
 
