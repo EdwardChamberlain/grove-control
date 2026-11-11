@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { LibraryFileListItem } from '../src/api/client';
 import { stubWebSocket } from './mockWebSocket';
 
 type ApiCall = { method: string; path: string; body?: unknown };
@@ -332,6 +333,67 @@ test('a running printer accepts a dropped print file for queueing', async ({ pag
 
   await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/library/files')).toBe(true);
 });
+
+for (const authEnabled of [true, false]) {
+  test(`Files list keeps tile names visible with authentication ${authEnabled ? 'on' : 'off'}`, async ({ page }) => {
+    const namedFile = {
+      id: 1,
+      folder_id: null,
+      is_external: false,
+      filename: 'bracket-p1s.gcode.3mf',
+      file_type: 'gcode.3mf',
+      file_size: 1024,
+      thumbnail_path: 'bracket.png',
+      print_count: 0,
+      duplicate_count: 0,
+      created_by_id: 1,
+      created_by_username: 'admin',
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+      print_name: 'Left mounting bracket for the workshop shelf',
+      print_time_seconds: null,
+      filament_used_grams: null,
+      sliced_for_model: null,
+      tags: [{ id: 1, name: 'Workshop' }],
+    } satisfies LibraryFileListItem;
+    const unnamedFile = { ...namedFile, id: 2, filename: 'right-bracket.gcode.3mf', print_name: null };
+    const displayedNames = [namedFile.print_name, unnamedFile.filename];
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    if (authEnabled) await page.addInitScript(() => sessionStorage.setItem('auth_token', 'e2e-token'));
+    await mockApi(page, [], { authEnabled });
+    await page.route('**/api/v1/library/files?**', (route) =>
+      route.fulfill({ json: [namedFile, unnamedFile] }));
+    await page.route('**/api/v1/library/files/*/thumbnail*', (route) => route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="gray"/></svg>',
+    }));
+
+    await page.goto('/files');
+    for (const name of displayedNames) {
+      await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+    }
+    await page.getByRole('button', { name: 'List view', exact: true }).click();
+    await expect(page.getByText('Uploaded By', { exact: true })).toHaveCount(authEnabled ? 1 : 0);
+
+    for (const name of displayedNames) {
+      const label = page.getByText(name, { exact: true });
+      // A text node can exist in the DOM while the thumbnail consumes its entire column.
+      await expect.poll(() => label.evaluate((element) => element.clientWidth)).toBeGreaterThan(100);
+      await expect(label).toHaveAttribute('title', name);
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const label = page.getByText(namedFile.print_name, { exact: true });
+    await expect(label).toBeInViewport();
+    const row = page.locator('[data-file-id="1"]');
+    for (const name of ['Workshop', 'Delete']) {
+      const button = row.getByRole('button', { name, exact: true });
+      await button.scrollIntoViewIfNeeded();
+      await expect(button).toBeInViewport();
+    }
+  });
+}
 
 test('maintenance mode has a blue Maintenance Mode health indicator and detail row', async ({ page }) => {
   await mockApi(page, [], { connected: false, maintenanceMode: true });
