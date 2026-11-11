@@ -254,7 +254,7 @@ test('print modal exposes queue-first controls', async ({ page }) => {
 
   await page.goto('/archives');
   await expect(page.getByRole('heading', { name: /Archives/i })).toBeVisible();
-  await page.getByRole('button', { name: /^Print$/i }).first().click();
+  await page.getByRole('button', { name: 'Reprint', exact: true }).click();
 
   await expect(page.getByRole('heading', { name: /^Print$/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /Queue options/i })).toBeVisible();
@@ -285,7 +285,7 @@ test('postponed print submits its UTC start time and is shown as scheduled in th
   await mockApi(page, calls);
 
   await page.goto('/archives');
-  await page.getByRole('button', { name: /^Print$/i }).first().click();
+  await page.getByRole('button', { name: 'Reprint', exact: true }).click();
   await page.getByRole('button', { name: /Queue options/i }).click();
   await page.locator('label', { hasText: 'Postpone print' }).click();
   await expect(page.getByRole('checkbox', { name: /Postpone print/i })).toBeChecked();
@@ -306,7 +306,7 @@ test('invalid postponed dates cannot create a queue item', async ({ page }) => {
   await mockApi(page, calls);
 
   await page.goto('/archives');
-  await page.getByRole('button', { name: /^Print$/i }).first().click();
+  await page.getByRole('button', { name: 'Reprint', exact: true }).click();
   await page.getByRole('button', { name: /Queue options/i }).click();
   await page.locator('label', { hasText: 'Postpone print' }).click();
   await page.getByLabel(/Do not start before/i).fill('02/31/2099');
@@ -605,7 +605,7 @@ test('chamber heat-soak submits explicit queue settings and explains bed-only he
   const calls: ApiCall[] = [];
   await mockApi(page, calls);
   await page.goto('/archives');
-  await page.getByRole('button', { name: /^Print$/i }).first().click();
+  await page.getByRole('button', { name: 'Reprint', exact: true }).click();
   await page.getByRole('button', { name: /Queue options/i }).click();
   await expect(page.getByRole('checkbox', { name: 'Chamber heat-soak' })).not.toBeChecked();
   await page.locator('label', { hasText: 'Chamber heat-soak' }).click();
