@@ -179,7 +179,9 @@ function ArchiveCard({
 
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, canModify } = useAuth();
+  const { hasPermission, canModify, user } = useAuth();
+  const canDownload = hasPermission('archives:read_all')
+    || (hasPermission('archives:read_own') && user != null && archive.created_by_id === user.id);
   const navigate = useNavigate();
   const [showReprint, setShowReprint] = useState(false);
   const [showSliceModal, setShowSliceModal] = useState(false);
@@ -412,16 +414,6 @@ function ArchiveCard({
               ? t('archives.permission.noReprint')
               : undefined,
       },
-      {
-        label: t('archives.menu.openInBambuStudio'),
-        icon: <ExternalLink className="w-4 h-4" />,
-        onClick: () => {
-          const filename = archive.print_name || archive.filename || 'model';
-          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-        },
-        disabled: !archive.file_path,
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
-      },
     ] : [
       {
         label: t('archives.menu.slice'),
@@ -436,6 +428,18 @@ function ArchiveCard({
         },
       },
     ]),
+    ...(isGcodeFile || useSlicerApi ? [
+      {
+        label: t('archives.menu.openInBambuStudio'),
+        icon: <ExternalLink className="w-4 h-4" />,
+        onClick: () => {
+          const filename = archive.print_name || archive.filename || 'model';
+          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
+        },
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      },
+    ] : []),
     {
       label: archive.external_url ? t('archives.menu.externalLink') : t('archives.menu.viewOnMakerWorld'),
       icon: <Globe className="w-4 h-4" />,
@@ -559,8 +563,8 @@ function ArchiveCard({
           console.error('Archive download failed:', err);
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noDownload') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noDownload') : undefined,
     },
     {
       label: t('archives.menu.copyDownloadLink'),
@@ -573,8 +577,8 @@ function ArchiveCard({
           showToast(t('archives.toast.failedCopyLink'), 'error');
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noCopyLink') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noCopyLink') : undefined,
     },
     {
       label: t('archives.menu.qrCode'),
@@ -1154,7 +1158,10 @@ function ArchiveCard({
               variant="secondary"
               size="sm"
               className="min-w-0 p-1 sm:p-1.5"
-              onClick={() => setShowSaveToFiles(true)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setShowSaveToFiles(true);
+              }}
               disabled={!hasPermission('library:upload')}
               title={!hasPermission('library:upload') ? t('archives.permission.noSaveToFiles') : t('archives.menu.saveToFiles')}
               aria-label={t('archives.menu.saveToFiles')}
@@ -1504,7 +1511,9 @@ function ArchiveListRow({
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, canModify } = useAuth();
+  const { hasPermission, canModify, user } = useAuth();
+  const canDownload = hasPermission('archives:read_all')
+    || (hasPermission('archives:read_own') && user != null && archive.created_by_id === user.id);
   const [showEdit, setShowEdit] = useState(false);
   const [showPrintLog, setShowPrintLog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1711,16 +1720,6 @@ function ArchiveListRow({
               ? t('archives.permission.noReprint')
               : undefined,
       },
-      {
-        label: t('archives.menu.openInBambuStudio'),
-        icon: <ExternalLink className="w-4 h-4" />,
-        onClick: () => {
-          const filename = archive.print_name || archive.filename || 'model';
-          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-        },
-        disabled: !archive.file_path,
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
-      },
     ] : [
       {
         label: t('archives.menu.slice'),
@@ -1735,6 +1734,18 @@ function ArchiveListRow({
         },
       },
     ]),
+    ...(isGcodeFile || useSlicerApi ? [
+      {
+        label: t('archives.menu.openInBambuStudio'),
+        icon: <ExternalLink className="w-4 h-4" />,
+        onClick: () => {
+          const filename = archive.print_name || archive.filename || 'model';
+          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
+        },
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      },
+    ] : []),
     {
       label: archive.external_url ? t('archives.menu.externalLink') : t('archives.menu.viewOnMakerWorld'),
       icon: <Globe className="w-4 h-4" />,
@@ -1858,8 +1869,8 @@ function ArchiveListRow({
           console.error('Archive download failed:', err);
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noDownload') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noDownload') : undefined,
     },
     {
       label: t('archives.menu.copyDownloadLink'),
@@ -1872,8 +1883,8 @@ function ArchiveListRow({
           showToast(t('archives.toast.failedCopyLink'), 'error');
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noCopyLink') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noCopyLink') : undefined,
     },
     {
       label: t('archives.menu.qrCode'),
