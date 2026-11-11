@@ -208,6 +208,7 @@ function ArchiveCard({
   const [showDeleteF3dConfirm, setShowDeleteF3dConfirm] = useState(false);
   const [showDeleteTimelapseConfirm, setShowDeleteTimelapseConfirm] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const [currentPlateIndex, setCurrentPlateIndex] = useState<number | null>(null);
   const [showPlateNav, setShowPlateNav] = useState(false);
   const [platePickerPlates, setPlatePickerPlates] = useState<PlateMetadata[] | null>(null);
@@ -390,11 +391,6 @@ function ArchiveCard({
       showToast(t('archives.toast.failedUpdateProject'), 'error');
     },
   });
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
-  };
 
   const isGcodeFile = isSlicedFile(archive);
 
@@ -689,7 +685,6 @@ function ArchiveCard({
       data-archive-id={archive.id}
       className={`relative flex flex-col group ${isSelected ? 'ring-2 ring-bambu-green' : ''} ${selectionMode ? 'cursor-pointer' : ''}`}
       style={isHighlighted ? { outline: '4px solid #facc15', outlineOffset: '2px' } : undefined}
-      onContextMenu={handleContextMenu}
       onClick={selectionMode ? () => onSelect(archive.id) : undefined}
     >
       {/* Selection checkbox */}
@@ -780,12 +775,16 @@ function ArchiveCard({
         )}
         {/* Context menu button - always available without a hover-capable pointer */}
         <button
-          className={`absolute top-2 left-2 p-1.5 rounded bg-black/50 hover:bg-black/70 transition-all can-hover:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 ${selectionMode ? 'left-10' : ''}`}
+          className={`absolute top-2 left-2 p-1.5 rounded bg-black/50 hover:bg-black/70 transition-all ${selectionMode ? 'left-10' : ''}`}
           onClick={(e) => {
             e.stopPropagation();
             const rect = e.currentTarget.getBoundingClientRect();
             setContextMenu({ x: rect.left, y: rect.bottom + 4 });
           }}
+          ref={menuTriggerRef}
+          aria-label={t('archives.card.moreOptions')}
+          aria-haspopup="menu"
+          aria-expanded={contextMenu !== null}
           title={t('archives.card.moreOptions')}
         >
           <MoreVertical className="w-5 h-5 text-white" />
@@ -1384,7 +1383,7 @@ function ArchiveCard({
           x={contextMenu.x}
           y={contextMenu.y}
           items={contextMenuItems}
-          onClose={() => setContextMenu(null)}
+          onClose={() => { setContextMenu(null); menuTriggerRef.current?.focus(); }}
         />
       )}
 
@@ -1598,6 +1597,7 @@ function ArchiveListRow({
   const [showDeleteF3dConfirm, setShowDeleteF3dConfirm] = useState(false);
   const [showDeleteTimelapseConfirm, setShowDeleteTimelapseConfirm] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const source3mfInputRef = useRef<HTMLInputElement>(null);
   const f3dInputRef = useRef<HTMLInputElement>(null);
   const timelapseInputRef = useRef<HTMLInputElement>(null);
@@ -1757,11 +1757,6 @@ function ArchiveListRow({
       showToast(t('archives.toast.failedUpdateProject'), 'error');
     },
   });
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
-  };
 
   const isGcodeFile = isSlicedFile(archive);
 
@@ -2049,7 +2044,6 @@ function ArchiveListRow({
           isSelected ? 'bg-bambu-green/10' : ''
         }`}
         style={isHighlighted ? { outline: '4px solid #facc15', outlineOffset: '-4px' } : undefined}
-        onContextMenu={handleContextMenu}
       >
         <div className="col-span-1 flex items-center gap-2">
           {selectionMode && (
@@ -2237,9 +2231,13 @@ function ArchiveListRow({
             variant="ghost"
             size="sm"
             onClick={(e) => {
+              menuTriggerRef.current = e.currentTarget;
               const rect = e.currentTarget.getBoundingClientRect();
               setContextMenu({ x: rect.left, y: rect.bottom + 4 });
             }}
+            aria-label={t('archives.card.moreOptions')}
+            aria-haspopup="menu"
+            aria-expanded={contextMenu !== null}
             title={t('archives.card.moreOptions')}
           >
             <MoreVertical className="w-4 h-4" />
@@ -2401,7 +2399,7 @@ function ArchiveListRow({
           x={contextMenu.x}
           y={contextMenu.y}
           items={contextMenuItems}
-          onClose={() => setContextMenu(null)}
+          onClose={() => { setContextMenu(null); menuTriggerRef.current?.focus(); }}
         />
       )}
 
