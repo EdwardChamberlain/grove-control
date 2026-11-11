@@ -122,6 +122,16 @@ describe('ArchivesPage — Save to Files', () => {
     expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
 
+  it('opens the folder picker from a list row Save to Files shortcut', async () => {
+    useArchives([baseArchive]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findByText('Benchy');
+    await user.click(screen.getByRole('button', { name: /^list view$/i }));
+    await user.click(screen.getByRole('button', { name: 'Save to Files' }));
+    expect(await screen.findByRole('dialog', { name: 'Save to Files' })).toBeInTheDocument();
+  });
+
   it('hides the action for a fallback entry with no 3MF', async () => {
     useArchives([{ ...baseArchive, file_path: '' }]);
     render(<ArchivesPage />);
