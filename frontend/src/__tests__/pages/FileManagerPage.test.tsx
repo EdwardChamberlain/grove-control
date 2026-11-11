@@ -1064,7 +1064,7 @@ describe('FileManagerPage', () => {
 
       const card = (await screen.findByText('Benchy')).closest('div[class*="cursor-pointer"]') as HTMLElement;
       await user.click(within(card).getByRole('button', { name: 'Actions' }));
-      await user.click(within(card).getByRole('button', { name: /^move$/i }));
+      await user.click(within(card).getByRole('menuitem', { name: /^move$/i }));
 
       const dialog = (await screen.findByText('Move 1 File(s)')).closest('div.fixed') as HTMLElement;
       await user.click(within(dialog).getByRole('button', { name: /Functional Parts/ }));
@@ -1072,6 +1072,21 @@ describe('FileManagerPage', () => {
 
       await waitFor(() => expect(movedBody).toEqual({ file_ids: [1], folder_id: 1 }));
     });
+  });
+
+  it('uses a kebab menu for list rows and returns focus after Escape', async () => {
+    const user = userEvent.setup();
+    render(<FileManagerPage />);
+    await screen.findByText('Benchy');
+    await user.click(screen.getByTitle('List view'));
+
+    const row = document.querySelector('[data-file-id="1"]') as HTMLElement;
+    const trigger = within(row).getByRole('button', { name: 'Actions' });
+    await user.click(trigger);
+    expect(screen.getByRole('menuitem', { name: 'Move' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   describe('Temporary Files system folder (#237)', () => {
