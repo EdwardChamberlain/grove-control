@@ -358,12 +358,21 @@ for (const authEnabled of [true, false]) {
     } satisfies LibraryFileListItem;
     const unnamedFile = { ...namedFile, id: 2, filename: 'right-bracket.gcode.3mf', print_name: null };
     const displayedNames = [namedFile.print_name, unnamedFile.filename];
+    const files = [
+      namedFile,
+      unnamedFile,
+      ...Array.from({ length: 26 }, (_, index) => ({
+        ...unnamedFile,
+        id: index + 3,
+        filename: `sample-${index + 1}.gcode.3mf`,
+        thumbnail_path: null,
+      })),
+    ];
 
-    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.setViewportSize({ width: 1360, height: 780 });
     if (authEnabled) await page.addInitScript(() => sessionStorage.setItem('auth_token', 'e2e-token'));
     await mockApi(page, [], { authEnabled });
-    await page.route('**/api/v1/library/files?**', (route) =>
-      route.fulfill({ json: [namedFile, unnamedFile] }));
+    await page.route('**/api/v1/library/files?**', (route) => route.fulfill({ json: files }));
     await page.route('**/api/v1/library/files/*/thumbnail*', (route) => route.fulfill({
       contentType: 'image/svg+xml',
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="gray"/></svg>',
@@ -376,6 +385,16 @@ for (const authEnabled of [true, false]) {
     await page.getByRole('button', { name: 'List view', exact: true }).click();
     await expect(page.getByText('Uploaded By', { exact: true })).toHaveCount(authEnabled ? 1 : 0);
 
+    const row = page.locator('[data-file-id="1"]');
+    await expect(row.getByRole('button', { name: 'Delete', exact: true })).toBeInViewport({ ratio: 1 });
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const scroller = page.getByTestId('files-list-scroller');
+    await expect.poll(() => scroller.evaluate((element) => ({
+      horizontal: element.scrollWidth > element.clientWidth,
+      vertical: element.scrollHeight > element.clientHeight,
+    }))).toEqual({ horizontal: true, vertical: true });
+
     for (const name of displayedNames) {
       const label = page.getByText(name, { exact: true });
       // A text node can exist in the DOM while the thumbnail consumes its entire column.
@@ -386,7 +405,6 @@ for (const authEnabled of [true, false]) {
     await page.setViewportSize({ width: 390, height: 844 });
     const label = page.getByText(namedFile.print_name, { exact: true });
     await expect(label).toBeInViewport();
-    const row = page.locator('[data-file-id="1"]');
     for (const name of ['Workshop', 'Delete']) {
       const button = row.getByRole('button', { name, exact: true });
       await button.scrollIntoViewIfNeeded();

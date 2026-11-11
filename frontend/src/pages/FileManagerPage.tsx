@@ -1005,8 +1005,8 @@ export function FileManagerPage() {
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify, authEnabled } = useAuth();
   const listColumns = authEnabled
-    ? 'grid-cols-[1.5rem_minmax(12rem,1fr)_120px_100px_100px_100px_minmax(5rem,200px)_220px]'
-    : 'grid-cols-[1.5rem_minmax(12rem,1fr)_100px_100px_100px_minmax(5rem,200px)_220px]';
+    ? 'grid-cols-[1.5rem_minmax(12rem,1fr)_5.5rem_6rem_4.25rem_3rem_minmax(3.5rem,200px)_14rem]'
+    : 'grid-cols-[1.5rem_minmax(12rem,1fr)_6rem_4.25rem_3rem_minmax(3.5rem,200px)_14rem]';
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -2537,11 +2537,10 @@ export function FileManagerPage() {
               </div>
             </div>
           ) : (
-            <div className="flex-1 lg:overflow-y-auto">
-              {/* The Name column reserves room for the thumbnail and label.
-                  On narrow screens the wrapper scrolls to the trailing columns. */}
-              <div className="bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary overflow-x-auto">
-                <div className={`hidden sm:grid ${listColumns} min-w-fit gap-4 px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary text-xs text-bambu-gray font-medium`}>
+            <div className="min-h-0 overflow-auto" data-testid="files-list-scroller">
+              {/* One scroll container keeps both scrollbars in reach for long lists. */}
+              <div className="min-w-fit overflow-hidden bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary">
+                <div className={`hidden sm:grid ${listColumns} gap-x-2 px-3 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary text-xs text-bambu-gray font-medium`}>
                   <div />
                   <div>{t('common.name')}</div>
                   {authEnabled && <div>{t('fileManager.uploadedBy', { defaultValue: 'Uploaded By' })}</div>}
@@ -2557,7 +2556,7 @@ export function FileManagerPage() {
                     key={file.id}
                     data-file-id={file.id}
                     data-highlighted={highlightedFileId === file.id ? 'true' : undefined}
-                    className={`grid ${listColumns} min-w-fit gap-4 px-4 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
+                    className={`grid ${listColumns} gap-x-2 px-3 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
                       selectedFiles.includes(file.id)
                         ? 'bg-bambu-green/10'
                         : highlightedFileId === file.id
