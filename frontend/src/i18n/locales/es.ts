@@ -910,7 +910,7 @@ export default {
       previousPlate: 'Cama anterior',
       nextPlate: 'Cama siguiente',
       plateNumber: 'Cama {{index}}',
-      moreOptions: 'Haga clic con el botón derecho para más opciones',
+      moreOptions: 'Más opciones',
       addToFavorites: 'Añadir a favoritos',
       removeFromFavorites: 'Quitar de favoritos',
       cancelled: 'cancelada',

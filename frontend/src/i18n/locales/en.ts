@@ -924,7 +924,7 @@ export default {
       previousPlate: 'Previous plate',
       nextPlate: 'Next plate',
       plateNumber: 'Plate {{index}}',
-      moreOptions: 'Right-click for more options',
+      moreOptions: 'More options',
       addToFavorites: 'Add to favorites',
       removeFromFavorites: 'Remove from favorites',
       cancelled: 'cancelled',

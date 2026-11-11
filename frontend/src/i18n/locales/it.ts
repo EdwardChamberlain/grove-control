@@ -910,7 +910,7 @@ export default {
       previousPlate: 'Piatto precedente',
       nextPlate: 'Piatto successivo',
       plateNumber: 'Piatto {{index}}',
-      moreOptions: 'Clic destro per altre opzioni',
+      moreOptions: 'Altre opzioni',
       addToFavorites: 'Aggiungi ai preferiti',
       removeFromFavorites: 'Rimuovi dai preferiti',
       cancelled: 'annullato',
