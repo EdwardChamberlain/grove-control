@@ -848,7 +848,7 @@ export default {
     },
     menu: {
       saveToFiles: 'In Dateien speichern',
-      print: 'Drucken',
+      print: 'Erneut drucken',
       openInBambuStudio: 'Im Slicer öffnen',
       slice: 'Slicen',
       externalLink: 'Externer Link',
@@ -917,7 +917,7 @@ export default {
       failed: 'fehlgeschlagen',
       duplicate: 'Duplikat',
       duplicateTitle: 'Dieses Modell wurde bereits zuvor gedruckt',
-      openSource3mf: 'Quell-3MF in Bambu Studio öffnen (Rechtsklick für mehr Optionen)',
+      openSource3mf: 'Quell-3MF im Slicer öffnen',
       downloadF3d: 'Fusion 360 Designdatei herunterladen',
       viewTimelapse: 'Zeitraffer ansehen',
       viewPhoto: '1 Foto ansehen',
