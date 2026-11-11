@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
 import { http, HttpResponse } from 'msw';
@@ -106,6 +107,19 @@ describe('ArchivesPage — Save to Files', () => {
     await openContextMenu('Benchy');
 
     expect(await screen.findByRole('menuitem', { name: 'Save to Files' })).toBeInTheDocument();
+  });
+
+  it('opens the Save to Files shortcut without changing the bulk selection', async () => {
+    useArchives([baseArchive]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findByText('Benchy');
+    await user.click(screen.getByRole('button', { name: 'Select' }));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save to Files' }));
+    expect(await screen.findByRole('dialog', { name: 'Save to Files' })).toBeInTheDocument();
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
 
   it('hides the action for a fallback entry with no 3MF', async () => {
