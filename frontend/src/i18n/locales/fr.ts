@@ -910,7 +910,7 @@ export default {
       previousPlate: 'Plateau précédent',
       nextPlate: 'Plateau suivant',
       plateNumber: 'Plateau {{index}}',
-      moreOptions: 'Clic droit pour plus d\'options',
+      moreOptions: 'Plus d’options',
       addToFavorites: 'Ajouter aux favoris',
       removeFromFavorites: 'Retirer des favoris',
       cancelled: 'annulé',

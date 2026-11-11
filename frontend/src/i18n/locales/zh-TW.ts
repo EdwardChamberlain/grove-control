@@ -910,7 +910,7 @@ export default {
       previousPlate: '上一個板',
       nextPlate: '下一個板',
       plateNumber: '板 {{index}}',
-      moreOptions: '右鍵檢視更多選項',
+      moreOptions: '更多選項',
       addToFavorites: '新增到收藏',
       removeFromFavorites: '從收藏中移除',
       cancelled: '已取消',
