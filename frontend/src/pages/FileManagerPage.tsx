@@ -1004,6 +1004,9 @@ export function FileManagerPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify, authEnabled } = useAuth();
+  const listColumns = authEnabled
+    ? 'grid-cols-[1.5rem_minmax(12rem,1fr)_120px_100px_100px_100px_minmax(5rem,200px)_220px]'
+    : 'grid-cols-[1.5rem_minmax(12rem,1fr)_100px_100px_100px_minmax(5rem,200px)_220px]';
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -2535,20 +2538,11 @@ export function FileManagerPage() {
             </div>
           ) : (
             <div className="flex-1 lg:overflow-y-auto">
-              {/* The wrapper has overflow-x-auto so a narrow viewport scrolls
-                  horizontally instead of clipping the actions column off the
-                  right edge. The previous `overflow-hidden` was there for the
-                  rounded corners but also swallowed any content the actions
-                  column couldn't fit (#1325 follow-up reported in chat). */}
+              {/* The Name column reserves room for the thumbnail and label.
+                  On narrow screens the wrapper scrolls to the trailing columns. */}
               <div className="bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary overflow-x-auto">
-                {/* List header - hidden on mobile, show simplified on small screens.
-                    Trailing actions column is fixed at 220px (sliced 3MF = 7 icons
-                    ~220px). It used to be `min-content`, but header + body are sibling
-                    grids that compute `min-content` independently — the header's empty
-                    trailing div resolved to 0px, leaving body columns shifted left of
-                    their headers. Fixed width keeps header and body in lockstep. */}
-                <div className={`hidden sm:grid ${authEnabled ? 'grid-cols-[auto_1fr_120px_100px_100px_100px_minmax(0,200px)_220px]' : 'grid-cols-[auto_1fr_100px_100px_100px_minmax(0,200px)_220px]'} gap-4 px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary text-xs text-bambu-gray font-medium`}>
-                  <div className="w-6" />
+                <div className={`hidden sm:grid ${listColumns} min-w-fit gap-4 px-4 py-2 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary text-xs text-bambu-gray font-medium`}>
+                  <div />
                   <div>{t('common.name')}</div>
                   {authEnabled && <div>{t('fileManager.uploadedBy', { defaultValue: 'Uploaded By' })}</div>}
                   <div>{t('common.type')}</div>
@@ -2563,7 +2557,7 @@ export function FileManagerPage() {
                     key={file.id}
                     data-file-id={file.id}
                     data-highlighted={highlightedFileId === file.id ? 'true' : undefined}
-                    className={`grid ${authEnabled ? 'grid-cols-[auto_1fr_120px_100px_100px_100px_minmax(0,200px)_220px]' : 'grid-cols-[auto_1fr_100px_100px_100px_minmax(0,200px)_220px]'} gap-4 px-4 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
+                    className={`grid ${listColumns} min-w-fit gap-4 px-4 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
                       selectedFiles.includes(file.id)
                         ? 'bg-bambu-green/10'
                         : highlightedFileId === file.id
@@ -2582,8 +2576,8 @@ export function FileManagerPage() {
                     </div>
                     {/* Name with thumbnail */}
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="relative group/thumb">
-                        <div className="w-10 h-10 rounded bg-bambu-dark flex-shrink-0 overflow-hidden">
+                      <div className="relative group/thumb shrink-0">
+                        <div className="w-10 h-10 rounded bg-bambu-dark overflow-hidden">
                           {file.thumbnail_path ? (
                             <img
                               src={`${api.getLibraryFileThumbnailUrl(file.id)}${thumbnailVersions[file.id] ? ((api.getLibraryFileThumbnailUrl(file.id).includes('?') ? '&' : '?') + `v=${thumbnailVersions[file.id]}`) : ''}`}
@@ -2610,7 +2604,9 @@ export function FileManagerPage() {
                         )}
                       </div>
                       <div className="min-w-0">
-                        <div className="text-sm text-white truncate">{file.print_name || file.filename}</div>
+                        <div className="text-sm text-white truncate" title={file.print_name || file.filename}>
+                          {file.print_name || file.filename}
+                        </div>
                         {showModified && (
                           <div className="mt-0.5 flex items-center gap-1 text-[10px] text-bambu-gray" title={formatDate(file.updated_at)}>
                             <CalendarClock className="h-3 w-3" />
@@ -2647,10 +2643,7 @@ export function FileManagerPage() {
                     <div className="text-sm text-bambu-gray">{formatFileSize(file.file_size)}</div>
                     {/* Prints */}
                     <div className="text-sm text-bambu-gray">{file.print_count > 0 ? `${file.print_count}x` : '-'}</div>
-                    {/* Tags (#1268) — clickable chips push into the active
-                        filter; minmax(0,200px) on the column lets the cell
-                        shrink/wrap on narrow viewports without pushing the
-                        Actions cell off-screen. */}
+                    {/* Tags (#1268) — clicking a chip adds it to the active filter. */}
                     <div className="min-w-0" onClick={(e) => e.stopPropagation()}>
                       {!file.tags || file.tags.length === 0 ? (
                         <span className="text-xs text-bambu-gray/50">-</span>
