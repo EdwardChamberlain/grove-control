@@ -66,8 +66,8 @@ async function openFolderMenu(user: ReturnType<typeof userEvent.setup>, name: st
 }
 
 async function openFileMenu(user: ReturnType<typeof userEvent.setup>, name: string) {
-  const card = screen.getByText(name).closest('div.group') as HTMLElement;
-  await user.click(within(card).getByRole('button', { name: 'Actions' }));
+  const item = screen.getByText(name).closest('[data-file-id]') as HTMLElement;
+  await user.click(within(item).getByRole('button', { name: 'Actions' }));
 }
 
 const lastButton = (name: string | RegExp) => {
@@ -134,9 +134,10 @@ describe('folder actions', () => {
 });
 
 describe('file actions', () => {
-  it('renames a file, rejecting characters the printer cannot store', async () => {
+  it.each(['grid', 'list'])('renames a file in %s view, rejecting characters the printer cannot store', async (view) => {
     const user = userEvent.setup();
     await ready();
+    if (view === 'list') await user.click(screen.getByTitle('List view'));
 
     await openFileMenu(user, 'hook.stl');
     await user.click(screen.getByRole('menuitem', { name: /^Rename$/ }));
@@ -153,9 +154,10 @@ describe('file actions', () => {
     expect(await screen.findByText('File renamed')).toBeInTheDocument();
   });
 
-  it('deletes a single file after confirming', async () => {
+  it.each(['grid', 'list'])('deletes a single file after confirming in %s view', async (view) => {
     const user = userEvent.setup();
     await ready();
+    if (view === 'list') await user.click(screen.getByTitle('List view'));
 
     await openFileMenu(user, 'hook.stl');
     await user.click(screen.getByRole('menuitem', { name: /^Delete$/ }));
@@ -164,6 +166,16 @@ describe('file actions', () => {
 
     await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'DELETE', path: '/api/v1/library/files/3' })));
     expect(await screen.findByText('File deleted')).toBeInTheDocument();
+  });
+
+  it('opens Print for a sliced file from the list menu', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTitle('List view'));
+    await openFileMenu(user, 'benchy.gcode.3mf');
+    await user.click(screen.getByRole('menuitem', { name: 'Print' }));
+
+    expect(await screen.findByRole('heading', { name: 'Print' })).toBeInTheDocument();
   });
 
   it('groups selected sliced files as versions', async () => {

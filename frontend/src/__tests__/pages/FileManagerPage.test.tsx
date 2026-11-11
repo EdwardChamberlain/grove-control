@@ -1051,7 +1051,7 @@ describe('FileManagerPage', () => {
   });
 
   describe('single-file Move from the file menu', () => {
-    it('moves just that file to the chosen folder', async () => {
+    it.each(['grid', 'list'])('moves just that file to the chosen folder in %s view', async (view) => {
       let movedBody: unknown = null;
       server.use(
         http.post('/api/v1/library/files/move', async ({ request }) => {
@@ -1061,10 +1061,12 @@ describe('FileManagerPage', () => {
       );
       const user = userEvent.setup();
       render(<FileManagerPage />);
+      await screen.findByText('Benchy');
+      if (view === 'list') await user.click(screen.getByTitle('List view'));
 
-      const card = (await screen.findByText('Benchy')).closest('div[class*="cursor-pointer"]') as HTMLElement;
-      await user.click(within(card).getByRole('button', { name: 'Actions' }));
-      await user.click(within(card).getByRole('menuitem', { name: /^move$/i }));
+      const item = screen.getByText('Benchy').closest('[data-file-id]') as HTMLElement;
+      await user.click(within(item).getByRole('button', { name: 'Actions' }));
+      await user.click(within(item).getByRole('menuitem', { name: /^move$/i }));
 
       const dialog = (await screen.findByText('Move 1 File(s)')).closest('div.fixed') as HTMLElement;
       await user.click(within(dialog).getByRole('button', { name: /Functional Parts/ }));
