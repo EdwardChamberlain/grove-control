@@ -12,6 +12,7 @@ import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
 import { setAuthToken } from '../../api/client';
+import * as slicer from '../../utils/slicer';
 import { server } from '../mocks/server';
 
 const baseArchive = {
@@ -173,13 +174,37 @@ describe.each(layouts)('archive actions menu (%s layout)', (layout) => {
   });
 
   it('offers desktop and server slicing for source-only archives when the slicer API is enabled', async () => {
-    useArchives({ filename: 'benchy.3mf', file_path: 'archive/1/benchy.3mf', print_time_seconds: null });
-    server.use(http.get('/api/v1/settings/', () => HttpResponse.json({ use_slicer_api: true })));
+    useArchives({
+      filename: 'benchy.3mf',
+      file_path: 'archive/1/benchy.3mf',
+      print_time_seconds: null,
+      source_3mf_path: 'archive/1/source.3mf',
+    });
+    server.use(
+      http.get('/api/v1/settings/', () => HttpResponse.json({ use_slicer_api: true })),
+      http.post('/api/v1/archives/1/slicer-token', () => HttpResponse.json({ token: 'file-token' })),
+      http.post('/api/v1/archives/1/source-slicer-token', () => HttpResponse.json({ token: 'source-token' })),
+    );
+    const launch = vi.spyOn(slicer, 'openInSlicer').mockImplementation(() => {});
+    const user = userEvent.setup();
     render(<ArchivesPage />);
-    await openMenu(userEvent.setup());
 
-    expect(menuItem('Slice')).toBeEnabled();
-    expect(menuItem('Open in Slicer')).toBeEnabled();
+    try {
+      await openMenu(user);
+      expect(menuItem('Slice')).toBeEnabled();
+      await user.click(menuItem('Open in Slicer'));
+      await waitFor(() => expect(launch).toHaveBeenNthCalledWith(
+        1, window.location.origin + '/api/v1/archives/1/dl/file-token/Benchy.3mf', 'bambu_studio',
+      ));
+
+      await openMenu(user);
+      await user.click(menuItem('Open source 3MF in Slicer'));
+      await waitFor(() => expect(launch).toHaveBeenNthCalledWith(
+        2, window.location.origin + '/api/v1/archives/1/source-dl/source-token/Benchy_source.3mf', 'bambu_studio',
+      ));
+    } finally {
+      launch.mockRestore();
+    }
   });
 
   it('deletes after confirming, showing related queue items', async () => {
