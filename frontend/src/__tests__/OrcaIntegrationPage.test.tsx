@@ -160,6 +160,25 @@ function startConnect() {
   };
 }
 
+function startNativePrint(initialize = true) {
+  window.orca = {
+    postMessage: mocks.bridgePost,
+    onMessage: (handler) => { mocks.connectHandler = handler; },
+  };
+  const view = renderIntegration(`/integrations/orca?mode=print&transport=native&protocol_version=1&request_id=${printRequestId}`);
+  const send = (type: string, fields: Record<string, unknown> = {}) => {
+    act(() => mocks.connectHandler?.(bridgeEnvelope(type, printRequestId, fields)));
+  };
+  expect(mocks.bridgePost).toHaveBeenCalledWith(bridgeEnvelope('ready', printRequestId, { mode: 'connect' }));
+  send('initialize', { mode: 'connect' });
+  if (initialize) {
+    send('initialize', {
+      mode: 'print', expected_user_id: 7, library_file_id: 42, filename: 'part.3mf', plate_id: 2,
+    });
+  }
+  return { send, ...view };
+}
+
 describe('Orca integration page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -188,6 +207,89 @@ describe('Orca integration page', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.orca = undefined;
+  });
+
+  it('opens the native form using its own browser session and authenticates the receipt', async () => {
+    const parentPost = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
+    startNativePrint();
+    expect(mocks.bridgePost).toHaveBeenCalledWith(bridgeEnvelope('authenticated', printRequestId, {
+      access_token: 'header.payload.signature',
+    }));
+    expect(mocks.bridgePost).toHaveBeenCalledWith(bridgeEnvelope('ready', printRequestId, { mode: 'print' }));
+    await screen.findByRole('button', { name: 'Finish mocked print' });
+    expect(mocks.setAuthToken).toHaveBeenCalledWith('header.payload.signature', 'memory');
+    expect(mocks.getLibraryFilePlates).toHaveBeenCalledWith(42);
+    fireEvent.click(screen.getByRole('button', { name: 'Finish mocked print' }));
+    expect(mocks.bridgePost).toHaveBeenLastCalledWith(bridgeEnvelope('submitted', printRequestId, {
+      ...printReceipt, queue_item_ids: [101, 102], access_token: 'header.payload.signature',
+    }));
+    expect(parentPost).not.toHaveBeenCalled();
+  });
+
+  it('shows Grove sign-in in a native Print window without a remembered browser session', async () => {
+    mocks.auth.user = null;
+    const { send, refresh } = startNativePrint(false);
+    expect(await screen.findByText('Grove login')).toBeVisible();
+    expect(mocks.getLibraryFile).not.toHaveBeenCalled();
+    mocks.auth.user = mocks.operator;
+    refresh();
+    await waitFor(() => expect(mocks.bridgePost).toHaveBeenCalledWith(bridgeEnvelope('authenticated', printRequestId, {
+      access_token: 'header.payload.signature',
+    })));
+    send('initialize', { mode: 'print', ...printReceipt, expected_user_id: 7, filename: 'part.3mf' });
+    expect(await screen.findByRole('button', { name: 'Finish mocked print' })).toBeVisible();
+  });
+
+  it('ignores browser postMessage events in native Print mode', async () => {
+    startNativePrint(false);
+    sendPrintMessage('initialize', {
+      mode: 'print', access_token: 'wrong-token', ...printReceipt, expected_user_id: 7, filename: 'part.3mf',
+    });
+    expect(mocks.getLibraryFile).not.toHaveBeenCalled();
+    expect(mocks.setAuthToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects a token supplied by native initialization', async () => {
+    const { send } = startNativePrint(false);
+    send('initialize', {
+      mode: 'print', access_token: 'wrong-token', ...printReceipt, expected_user_id: 7, filename: 'part.3mf',
+    });
+    expect(await screen.findByText('Orca sent invalid print initialization data.')).toBeVisible();
+    expect(mocks.setAuthToken).not.toHaveBeenCalled();
+    expect(mocks.bridgePost).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'error', access_token: 'header.payload.signature',
+    }));
+  });
+
+  it('cancels a native form with an authenticated cancellation receipt', async () => {
+    const { send } = startNativePrint();
+    await screen.findByRole('button', { name: 'Finish mocked print' });
+    send('cancel_requested');
+    expect(await screen.findByText(/Print request cancelled/)).toBeVisible();
+    expect(mocks.bridgePost).toHaveBeenLastCalledWith(bridgeEnvelope('cancelled', printRequestId, {
+      ...printReceipt, queue_item_ids: [], access_token: 'header.payload.signature',
+    }));
+  });
+
+  it('rejects a different browser account before showing the native form', async () => {
+    mocks.getCurrentUser.mockResolvedValue({ ...mocks.operator, id: 8 });
+    startNativePrint();
+    expect(await screen.findByText(/Your Grove session expired/)).toBeVisible();
+    expect(mocks.getLibraryFile).not.toHaveBeenCalled();
+    expect(mocks.bridgePost).toHaveBeenLastCalledWith(bridgeEnvelope('session_expired', printRequestId, {
+      ...printReceipt, access_token: 'header.payload.signature',
+    }));
+  });
+
+  it('requires Orca for native Print mode', () => {
+    renderIntegration('/integrations/orca?mode=print&transport=native&protocol_version=1&request_id=browser');
+    expect(screen.getByText('Open this page from Orca to connect a Grove account.')).toBeVisible();
+    expect(mocks.getLibraryFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown transport', () => {
+    renderIntegration('/integrations/orca?mode=print&transport=unknown&protocol_version=1&request_id=browser');
+    expect(screen.getByText(/Invalid Orca integration request/)).toBeVisible();
   });
 
   it('sends ready, verifies the bridged owner, and returns every queue row', async () => {

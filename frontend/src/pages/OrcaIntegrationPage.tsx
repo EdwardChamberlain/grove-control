@@ -93,13 +93,14 @@ function StatusMessage({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ConnectMode({ requestId }: { requestId: string }) {
+function ConnectMode({ requestId, printAfterSignIn = false }: { requestId: string; printAfterSignIn?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { authEnabled, loading, user } = useAuth();
   const [initialized, setInitialized] = useState(false);
   const [terminalMessage, setTerminalMessage] = useState<string | null>(null);
   const terminalRef = useRef(false);
+  const [printToken, setPrintToken] = useState<string | null>(null);
 
   const sendTerminal = useCallback((type: string, fields: Record<string, unknown> = {}) => {
     if (terminalRef.current) return;
@@ -129,8 +130,8 @@ function ConnectMode({ requestId }: { requestId: string }) {
         sendTerminal('cancelled');
       }
     });
-    postToOrca(messageFor(requestId, 'ready'));
-  }, [requestId, sendTerminal]);
+    postToOrca(messageFor(requestId, 'ready', printAfterSignIn ? { mode: 'connect' } : {}));
+  }, [printAfterSignIn, requestId, sendTerminal]);
 
   const state = location.state as { from?: { pathname?: string; search?: string } } | null;
   const hasReturnTarget = state?.from?.pathname === location.pathname
@@ -157,9 +158,19 @@ function ConnectMode({ requestId }: { requestId: string }) {
       sendTerminal('error', { message: 'Sign in to Grove with an active user account to connect Orca.' });
       return;
     }
-    sendTerminal('authenticated', { access_token: token });
-  }, [authEnabled, initialized, loading, sendTerminal, user]);
+    if (printAfterSignIn) {
+      terminalRef.current = true;
+      // The token travels only from Grove to native, never into a document
+      // that might have redirected to another origin. Native verifies this
+      // browser account before sending any file initialization.
+      postToOrca(messageFor(requestId, 'authenticated', { access_token: token }));
+      setPrintToken(token);
+    } else {
+      sendTerminal('authenticated', { access_token: token });
+    }
+  }, [authEnabled, initialized, loading, printAfterSignIn, requestId, sendTerminal, user]);
 
+  if (printToken) return <PrintMode requestId={requestId} nativeToken={printToken} />;
   if (terminalMessage) return <StatusMessage>{terminalMessage}</StatusMessage>;
   if (!initialized || loading || (!authEnabled && !terminalRef.current)) {
     return <StatusMessage>Connecting to Grove Control…</StatusMessage>;
@@ -168,17 +179,17 @@ function ConnectMode({ requestId }: { requestId: string }) {
   return <StatusMessage>Finishing Grove connection…</StatusMessage>;
 }
 
-function ConnectApplication({ requestId }: { requestId: string }) {
+function ConnectApplication({ requestId, printAfterSignIn = false }: { requestId: string; printAfterSignIn?: boolean }) {
   return (
     <AuthProvider>
       <ThemeProvider>
-        <ConnectMode requestId={requestId} />
+        <ConnectMode requestId={requestId} printAfterSignIn={printAfterSignIn} />
       </ThemeProvider>
     </AuthProvider>
   );
 }
 
-function PrintMode({ requestId }: { requestId: string }) {
+function PrintMode({ requestId, nativeToken }: { requestId: string; nativeToken?: string }) {
   const [initialization, setInitialization] = useState<PrintInitialization | null>(null);
   const [verified, setVerified] = useState<{ user: UserResponse; file: LibraryFile } | null>(null);
   const [phase, setPhase] = useState<'waiting' | 'verifying' | 'ready' | 'terminal'>('waiting');
@@ -189,6 +200,16 @@ function PrintMode({ requestId }: { requestId: string }) {
   const cancelRequestedRef = useRef(false);
   const initRef = useRef<PrintInitialization | null>(null);
 
+  const postPrintMessage = useCallback((message: BridgeMessage) => {
+    if (nativeToken) {
+      // Authenticate every native receipt with the verified browser session.
+      // A redirected document never receives this token from the plugin.
+      postToOrca({ ...message, access_token: nativeToken });
+    } else {
+      postToPrintParent(message);
+    }
+  }, [nativeToken]);
+
   const releaseSession = useCallback(() => {
     clearMemoryAuthTokenOverride();
   }, []);
@@ -196,7 +217,7 @@ function PrintMode({ requestId }: { requestId: string }) {
   const sendTerminal = useCallback((type: string, fields: Record<string, unknown> = {}) => {
     if (terminalRef.current) return;
     terminalRef.current = true;
-    postToPrintParent(messageFor(requestId, type, fields));
+    postPrintMessage(messageFor(requestId, type, fields));
     setPhase('terminal');
     if (type === 'submitted') {
       setStatusMessage('Print jobs added to the Grove queue.');
@@ -209,7 +230,7 @@ function PrintMode({ requestId }: { requestId: string }) {
     } else {
       setStatusMessage(typeof fields.message === 'string' ? fields.message : 'The print request could not be confirmed. Check Grove before trying again.');
     }
-  }, [requestId]);
+  }, [postPrintMessage, requestId]);
 
   useEffect(() => {
     if (phase !== 'terminal') return;
@@ -297,9 +318,8 @@ function PrintMode({ requestId }: { requestId: string }) {
   }, [sendPrintError, sendTerminal]);
 
   useEffect(() => {
-    const handleMessage = (event: MessageEvent<unknown>) => {
-      if (event.source !== window.parent || !isBridgeEnvelope(event.data, requestId)) return;
-      const payload = event.data;
+    const handlePayload = (payload: unknown) => {
+      if (!isBridgeEnvelope(payload, requestId)) return;
       if (terminalRef.current) return;
 
       if (payload.type === 'cancel_requested') {
@@ -322,8 +342,7 @@ function PrintMode({ requestId }: { requestId: string }) {
       const plateId = payload.plate_id;
       const validPlateId = plateId === undefined || plateId === null || isPositiveInteger(plateId);
       if (
-        typeof payload.access_token !== 'string'
-        || !payload.access_token
+        (nativeToken ? payload.access_token !== undefined : typeof payload.access_token !== 'string' || !payload.access_token)
         || !isPositiveInteger(payload.expected_user_id)
         || !isPositiveInteger(payload.library_file_id)
         || typeof payload.filename !== 'string'
@@ -333,7 +352,7 @@ function PrintMode({ requestId }: { requestId: string }) {
         return;
       }
 
-      const incoming = payload as PrintInitialization;
+      const incoming = (nativeToken ? { ...payload, access_token: nativeToken } : payload) as PrintInitialization;
       initRef.current = incoming;
       setInitialization(incoming);
       void verifyInitialization(incoming);
@@ -341,13 +360,23 @@ function PrintMode({ requestId }: { requestId: string }) {
 
     // Register the receiver before ready: the native host sends initialize
     // immediately after observing this event.
-    window.addEventListener('message', handleMessage);
-    postToPrintParent(messageFor(requestId, 'ready'));
+    const handleMessage = (event: MessageEvent<unknown>) => {
+      if (event.source === window.parent) handlePayload(event.data);
+    };
+    let active = true;
+    if (nativeToken) {
+      window.orca?.onMessage((payload) => { if (active) handlePayload(payload); });
+      postToOrca(messageFor(requestId, 'ready', { mode: 'print' }));
+    } else {
+      window.addEventListener('message', handleMessage);
+      postToPrintParent(messageFor(requestId, 'ready'));
+    }
     return () => {
+      active = false;
       window.removeEventListener('message', handleMessage);
       releaseSession();
     };
-  }, [releaseSession, requestId, sendPrintError, sendTerminal, verifyInitialization]);
+  }, [nativeToken, releaseSession, requestId, sendPrintError, sendTerminal, verifyInitialization]);
 
   const handleModalResult = useCallback((result: {
     outcome: 'success' | 'partial' | 'uncertain' | 'failed' | 'cancelled' | 'session_expired';
@@ -500,6 +529,7 @@ export function OrcaIntegrationPage() {
   const mode = searchParams.get('mode');
   const protocolVersion = searchParams.get('protocol_version');
   const requestId = searchParams.get('request_id');
+  const transport = searchParams.get('transport');
 
   if (
     (mode !== 'connect' && mode !== 'print')
@@ -507,15 +537,22 @@ export function OrcaIntegrationPage() {
     || !requestId
     || !requestId.trim()
     || requestId.length > 256
+    || (transport !== null && transport !== 'native')
   ) {
     return <StatusMessage>Invalid Orca integration request. Reopen the Grove action from Orca.</StatusMessage>;
+  }
+
+  if (transport === 'native' && (window.parent !== window || !window.orca)) {
+    return <StatusMessage>Open this page from Orca to connect a Grove account.</StatusMessage>;
   }
 
   return (
     <QueryClientProvider client={queryClient}>
       {mode === 'connect'
         ? <ConnectApplication requestId={requestId} />
-        : <PrintMode requestId={requestId} />}
+        : transport === 'native'
+          ? <ConnectApplication requestId={requestId} printAfterSignIn />
+          : <PrintMode requestId={requestId} />}
     </QueryClientProvider>
   );
 }
