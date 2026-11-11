@@ -139,7 +139,7 @@ describe('file actions', () => {
     await ready();
 
     await openFileMenu(user, 'hook.stl');
-    await user.click(screen.getByRole('button', { name: /^Rename$/ }));
+    await user.click(screen.getByRole('menuitem', { name: /^Rename$/ }));
     expect(screen.getByText('Rename File')).toBeInTheDocument();
     const input = screen.getAllByRole('textbox').find((i) => (i as HTMLInputElement).value.startsWith('hook')) as HTMLInputElement;
     await user.clear(input);
@@ -158,7 +158,7 @@ describe('file actions', () => {
     await ready();
 
     await openFileMenu(user, 'hook.stl');
-    await user.click(screen.getByRole('button', { name: /^Delete$/ }));
+    await user.click(screen.getByRole('menuitem', { name: /^Delete$/ }));
     expect(screen.getByText('Are you sure you want to delete this file?')).toBeInTheDocument();
     await user.click(lastButton(/Delete/));
 
@@ -186,7 +186,7 @@ describe('file actions', () => {
     await ready();
 
     await openFileMenu(user, 'hook.stl');
-    await user.click(screen.getByRole('button', { name: /^Delete$/ }));
+    await user.click(screen.getByRole('menuitem', { name: /^Delete$/ }));
     await user.click(lastButton(/Delete/));
 
     expect(await screen.findByText('File is in use')).toBeInTheDocument();
