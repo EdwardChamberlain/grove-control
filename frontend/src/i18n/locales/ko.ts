@@ -806,7 +806,7 @@ export default {
     },
     menu: {
       saveToFiles: '파일에 저장',
-      print: '인쇄',
+      print: '재인쇄',
       openInBambuStudio: '슬라이서에서 열기',
       slice: '슬라이스',
       externalLink: '외부 링크',
@@ -875,7 +875,7 @@ export default {
       failed: '실패',
       duplicate: '중복',
       duplicateTitle: '이 모델은 이전에 인쇄된 적이 있습니다',
-      openSource3mf: 'Bambu Studio에서 소스 3MF 열기 (더 많은 옵션은 우클릭)',
+      openSource3mf: '슬라이서에서 소스 3MF 열기',
       downloadF3d: 'Fusion 360 디자인 파일 다운로드',
       viewTimelapse: '타임랩스 보기',
       viewPhoto: '사진 1장 보기',
