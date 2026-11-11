@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
+import { setAuthToken } from '../../api/client';
 import { server } from '../mocks/server';
 
 const baseArchive = {
@@ -149,6 +150,36 @@ describe.each(layouts)('archive actions menu (%s layout)', (layout) => {
 
     expect(await screen.findByText('Link copied to clipboard')).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toContain('/archives/1/download');
+  });
+
+  it('allows a reader to download their own archive', async () => {
+    useArchives({ created_by_id: 7 });
+    setAuthToken('test-token', 'session');
+    server.use(
+      http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+      http.get('/api/v1/auth/me', () =>
+        HttpResponse.json({ id: 7, username: 'reader', groups: [], permissions: ['archives:read_own'] }),
+      ),
+    );
+    try {
+      render(<ArchivesPage />);
+      await openMenu(userEvent.setup());
+      await waitFor(() => expect(menuItem('Delete')).toBeDisabled());
+      expect(screen.getByRole('menuitem', { name: 'Download' })).toBeEnabled();
+      expect(menuItem('Copy Download Link')).toBeEnabled();
+    } finally {
+      setAuthToken(null);
+    }
+  });
+
+  it('offers desktop and server slicing for source-only archives when the slicer API is enabled', async () => {
+    useArchives({ filename: 'benchy.3mf', file_path: 'archive/1/benchy.3mf', print_time_seconds: null });
+    server.use(http.get('/api/v1/settings/', () => HttpResponse.json({ use_slicer_api: true })));
+    render(<ArchivesPage />);
+    await openMenu(userEvent.setup());
+
+    expect(menuItem('Slice')).toBeEnabled();
+    expect(menuItem('Open in Slicer')).toBeEnabled();
   });
 
   it('deletes after confirming, showing related queue items', async () => {
