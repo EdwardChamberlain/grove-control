@@ -910,7 +910,7 @@ export default {
       previousPlate: 'Önceki plaka',
       nextPlate: 'Sonraki plaka',
       plateNumber: 'Plaka {{index}}',
-      moreOptions: 'Daha fazla seçenek için sağ tıklayın',
+      moreOptions: 'Diğer seçenekler',
       addToFavorites: 'Favorilere ekle',
       removeFromFavorites: 'Favorilerden kaldır',
       cancelled: 'iptal edildi',

@@ -910,7 +910,7 @@ export default {
       previousPlate: 'Placa anterior',
       nextPlate: 'Próxima placa',
       plateNumber: 'Placa {{index}}',
-      moreOptions: 'Clique com o botão direito para mais opções',
+      moreOptions: 'Mais opções',
       addToFavorites: 'Adicionar aos favoritos',
       removeFromFavorites: 'Remover dos favoritos',
       cancelled: 'cancelado',

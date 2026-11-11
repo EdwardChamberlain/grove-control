@@ -58,6 +58,7 @@ function SubmenuPanel({
   return (
     <div
       className={className}
+      role="menu"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -88,6 +89,7 @@ function SubmenuPanel({
       {filteredItems.map((subItem, subIndex) => (
         <button
           key={subIndex}
+          role="menuitem"
           onClick={() => {
             if (!subItem.disabled) {
               subItem.onClick();
@@ -121,6 +123,10 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const [position, setPosition] = useState({ x, y, visible: false });
   const [openSubmenuLeft, setOpenSubmenuLeft] = useState(false);
   const [submenuPositions, setSubmenuPositions] = useState<Record<number, 'top' | 'bottom'>>({});
+
+  useEffect(() => {
+    menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -231,6 +237,16 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
+      role="menu"
+      onKeyDown={(event) => {
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        const buttons = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>(':scope > div > button:not(:disabled)') ?? []);
+        if (buttons.length === 0) return;
+        event.preventDefault();
+        const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        buttons[(current + step + buttons.length) % buttons.length].focus();
+      }}
       className="fixed z-50 min-w-[180px] max-w-[280px] bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl py-1"
       style={{
         left: position.x,
@@ -253,6 +269,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
             onMouseLeave={() => hasSubmenu && handleMouseLeaveSubmenu()}
           >
             <button
+              role="menuitem"
               onMouseEnter={(e) => hasSubmenu && handleMouseEnterSubmenu(index, e.currentTarget.parentElement!)}
               onClick={() => {
                 if (hasSubmenu) {

@@ -868,7 +868,7 @@ export default {
       previousPlate: '이전 플레이트',
       nextPlate: '다음 플레이트',
       plateNumber: '플레이트 {{index}}',
-      moreOptions: '더 많은 옵션은 우클릭',
+      moreOptions: '더 많은 옵션',
       addToFavorites: '즐겨찾기에 추가',
       removeFromFavorites: '즐겨찾기에서 제거',
       cancelled: '취소됨',
