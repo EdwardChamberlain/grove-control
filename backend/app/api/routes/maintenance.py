@@ -545,10 +545,15 @@ async def get_all_maintenance_overview(
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.MAINTENANCE_READ),
 ):
-    """Get maintenance overview for all active printers."""
+    """Get maintenance overview for all printers.
+
+    Printers in Maintenance Mode (``is_active`` false) are included on purpose:
+    that is exactly when their maintenance gets done, so it must be possible to
+    see and complete it.
+    """
     await ensure_default_types(db)
 
-    result = await db.execute(select(Printer).where(Printer.is_active.is_(True)))
+    result = await db.execute(select(Printer))
     printers = result.scalars().all()
 
     overviews = []

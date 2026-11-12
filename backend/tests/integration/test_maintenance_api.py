@@ -176,6 +176,54 @@ class TestPrinterMaintenanceAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_overview_includes_printers_in_maintenance_mode(
+        self, async_client: AsyncClient, printer_factory, db_session
+    ):
+        """A printer in Maintenance Mode (is_active false) must still be listed.
+
+        Otherwise its maintenance can't be marked as completed.
+        """
+        active = await printer_factory(name="Active Printer")
+        in_maintenance = await printer_factory(name="Maintenance Mode Printer", is_active=False)
+
+        response = await async_client.get("/api/v1/maintenance/overview")
+
+        assert response.status_code == 200
+        by_id = {entry["printer_id"]: entry for entry in response.json()}
+        assert active.id in by_id
+        assert in_maintenance.id in by_id
+        assert by_id[in_maintenance.id]["printer_name"] == "Maintenance Mode Printer"
+        assert by_id[in_maintenance.id]["maintenance_items"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_can_complete_maintenance_for_printer_in_maintenance_mode(
+        self, async_client: AsyncClient, printer_factory, db_session
+    ):
+        """An item surfaced by the overview for an inactive printer can be performed."""
+        printer = await printer_factory(name="Maintenance Mode Printer", is_active=False)
+
+        overview = await async_client.get("/api/v1/maintenance/overview")
+        entry = next(e for e in overview.json() if e["printer_id"] == printer.id)
+        item_id = entry["maintenance_items"][0]["id"]
+        assert entry["maintenance_items"][0]["last_performed_at"] is None
+
+        response = await async_client.post(f"/api/v1/maintenance/items/{item_id}/perform", json={})
+
+        assert response.status_code == 200
+        performed = response.json()
+        assert performed["id"] == item_id
+        assert performed["printer_id"] == printer.id
+        assert performed["last_performed_at"] is not None
+
+        # The completion is persisted, not just echoed back.
+        refreshed = await async_client.get("/api/v1/maintenance/overview")
+        refreshed_entry = next(e for e in refreshed.json() if e["printer_id"] == printer.id)
+        refreshed_item = next(i for i in refreshed_entry["maintenance_items"] if i["id"] == item_id)
+        assert refreshed_item["last_performed_at"] is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_maintenance_summary(self, async_client: AsyncClient):
         """Verify summary endpoint returns counts."""
         response = await async_client.get("/api/v1/maintenance/summary")
