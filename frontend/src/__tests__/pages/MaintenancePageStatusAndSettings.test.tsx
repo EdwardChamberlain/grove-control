@@ -130,6 +130,58 @@ describe('status', () => {
     await waitFor(() => expect(calls.at(-1)).toEqual({ method: 'PATCH', path: '/api/v1/maintenance/items/11', body: { enabled: false } }));
   });
 
+  it('only labels printers that are in Maintenance Mode', async () => {
+    server.use(
+      http.get('/api/v1/maintenance/overview', () =>
+        HttpResponse.json(overview.map((p) => ({ ...p, is_active: p.printer_id !== 2 })))
+      )
+    );
+    render(<MaintenancePage />);
+
+    await screen.findByText('P1S');
+    // Only the one inactive printer (P1S) carries the badge.
+    expect(screen.getAllByText('Maintenance Mode')).toHaveLength(1);
+  });
+
+  it('lets maintenance be completed for a printer that is in Maintenance Mode', async () => {
+    // The overview now includes inactive (Maintenance Mode) printers, so one with
+    // an overdue task must be listed, labelled and its task resettable (#332).
+    server.use(
+      http.get('/api/v1/maintenance/overview', () =>
+        HttpResponse.json([
+          {
+            printer_id: 7,
+            printer_name: 'Workshop P1S',
+            printer_model: 'P1S',
+            is_active: false,
+            total_print_hours: 300,
+            due_count: 1,
+            warning_count: 0,
+            maintenance_items: [
+              item({
+                id: 71, printer_id: 7, printer_name: 'Workshop P1S', printer_model: 'P1S',
+                maintenance_type_id: 1, maintenance_type_name: 'Lubricate Rods', hours_until_due: -20, is_due: true,
+              }),
+            ],
+          },
+        ])
+      )
+    );
+    const user = userEvent.setup();
+    render(<MaintenancePage />);
+
+    expect(await screen.findByText('Workshop P1S')).toBeInTheDocument();
+    expect(screen.getByText('1 overdue')).toBeInTheDocument();
+    expect(screen.getByText('Maintenance Mode')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Expand/ }));
+    const card = screen.getByText('Lubricate Rods', { selector: 'h3' }).closest('.rounded-xl') as HTMLElement;
+    await user.click(within(card).getByRole('button', { name: /Reset/ }));
+
+    await waitFor(() => expect(paths()).toContain('POST /api/v1/maintenance/items/71/perform'));
+    expect(await screen.findByText('Maintenance marked as complete')).toBeInTheDocument();
+  });
+
   it('edits the printer total print hours', async () => {
     const user = userEvent.setup();
     render(<MaintenancePage />);
