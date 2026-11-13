@@ -356,6 +356,12 @@ function PrinterSection({
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-semibold text-white">{overview.printer_name}</h2>
             <div className="flex items-center gap-2">
+              {overview.is_active === false && (
+                <span className="px-2.5 py-1 bg-blue-500/20 text-blue-400 text-xs font-medium rounded-full flex items-center gap-1.5">
+                  <Wrench className="w-3 h-3" />
+                  {t('printers.maintenance.modeLabel')}
+                </span>
+              )}
               {overview.due_count > 0 && (
                 <span className="px-2.5 py-1 bg-red-500/20 text-red-400 text-xs font-medium rounded-full flex items-center gap-1.5">
                   <AlertTriangle className="w-3 h-3" />

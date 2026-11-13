@@ -3250,6 +3250,8 @@ export interface PrinterMaintenanceOverview {
   printer_id: number;
   printer_name: string;
   printer_model: string | null;
+  /** False while the printer is in Maintenance Mode. */
+  is_active: boolean;
   total_print_hours: number;
   maintenance_items: MaintenanceStatus[];
   due_count: number;
