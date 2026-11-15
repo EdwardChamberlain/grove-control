@@ -43,6 +43,7 @@ function moveMenuFocus(event: ReactKeyboardEvent<HTMLDivElement>) {
 }
 
 interface SubmenuPanelProps {
+  label: string;
   items: ContextMenuItem[];
   anchor: HTMLButtonElement;
   searchPlaceholder?: string;
@@ -54,6 +55,7 @@ interface SubmenuPanelProps {
 }
 
 function SubmenuPanel({
+  label,
   items,
   anchor,
   searchPlaceholder,
@@ -94,7 +96,7 @@ function SubmenuPanel({
       ref={panelRef}
       className="fixed z-[60] w-[200px] max-w-[calc(100dvw-16px)] max-h-[min(300px,calc(100dvh-16px))] overflow-y-auto overscroll-contain bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl py-1"
       role="menu"
-      aria-label={anchor.textContent ?? undefined}
+      aria-label={label}
       onKeyDown={(event) => {
         if (event.key === 'Escape' || (event.key === 'ArrowLeft' && event.target !== inputRef.current)) {
           event.preventDefault();
@@ -311,6 +313,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       {activeSubmenu && submenuItem?.submenu && (
         <SubmenuPanel
           key={activeSubmenu.index}
+          label={submenuItem.label}
           items={submenuItem.submenu}
           anchor={activeSubmenu.anchor}
           searchPlaceholder={submenuItem.submenuSearchPlaceholder}

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { ContextMenu } from '../../components/ContextMenu';
@@ -118,6 +118,65 @@ describe('ContextMenu', () => {
       await user.click(screen.getByText('Edit'));
 
       expect(mockOnClose).toHaveBeenCalled();
+    });
+  });
+
+
+  describe('keyboard and pointer edge cases', () => {
+    const projectMenu = [{
+      label: 'Add to Project',
+      onClick: vi.fn(),
+      submenu: [{ label: 'Tools', onClick: vi.fn() }],
+    }];
+
+    it('wraps focus from the first item to the last with ArrowUp', async () => {
+      const user = userEvent.setup();
+      render(<ContextMenu x={100} y={100} items={menuItems} onClose={mockOnClose} />);
+
+      expect(screen.getByRole('menuitem', { name: 'Edit' })).toHaveFocus();
+      await user.keyboard('{ArrowUp}');
+      expect(screen.getByRole('menuitem', { name: 'Download' })).toHaveFocus();
+      await user.keyboard('{ArrowUp}');
+      expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus();
+    });
+
+    it('closes a submenu with ArrowLeft and returns focus to its trigger', async () => {
+      const user = userEvent.setup();
+      render(<ContextMenu x={100} y={100} items={projectMenu} onClose={mockOnClose} />);
+
+      await user.keyboard('{ArrowRight}');
+      expect(screen.getByRole('menuitem', { name: 'Tools' })).toHaveFocus();
+      expect(screen.getByRole('menu', { name: 'Add to Project' })).toBeInTheDocument();
+      await user.keyboard('{ArrowLeft}');
+
+      expect(screen.queryByRole('menuitem', { name: 'Tools' })).not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Add to Project' })).toHaveFocus();
+      expect(mockOnClose).not.toHaveBeenCalled();
+    });
+
+    it('closes a hover-opened submenu shortly after the pointer leaves', async () => {
+      const user = userEvent.setup();
+      render(<ContextMenu x={100} y={100} items={projectMenu} onClose={mockOnClose} />);
+
+      const trigger = screen.getByRole('menuitem', { name: 'Add to Project' });
+      await user.hover(trigger);
+      expect(screen.getByRole('menuitem', { name: 'Tools' })).toBeInTheDocument();
+
+      await user.unhover(trigger);
+      await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Tools' })).not.toBeInTheDocument());
+      expect(mockOnClose).not.toHaveBeenCalled();
+    });
+
+    it('closes an open submenu, but not the menu, when the main list scrolls', async () => {
+      const user = userEvent.setup();
+      render(<ContextMenu x={100} y={100} items={projectMenu} onClose={mockOnClose} />);
+
+      await user.click(screen.getByRole('menuitem', { name: 'Add to Project' }));
+      expect(screen.getByRole('menuitem', { name: 'Tools' })).toBeInTheDocument();
+
+      fireEvent.scroll(screen.getAllByRole('menu')[0]);
+      expect(screen.queryByRole('menuitem', { name: 'Tools' })).not.toBeInTheDocument();
+      expect(mockOnClose).not.toHaveBeenCalled();
     });
   });
 
