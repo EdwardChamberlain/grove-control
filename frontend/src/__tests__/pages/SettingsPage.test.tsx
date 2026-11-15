@@ -13,6 +13,11 @@ import { SIDEBAR_HIDDEN_SYSTEM_ITEMS_KEY, SIDEBAR_ORDER_KEY } from '../../utils/
 import { setAuthToken } from '../../api/client';
 import type { ArchivePurgeSettings } from '../../api/client';
 
+// Each test mounts the full Settings page, which takes 2-4s on an idle machine
+// and several times that when CI shards compete for CPU. The default 10s limit
+// then times out tests that pass in isolation, so give these files headroom.
+vi.setConfig({ testTimeout: 30_000 });
+
 const mockSettings = {
   auto_archive: true,
   save_thumbnails: true,

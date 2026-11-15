@@ -4,7 +4,7 @@
  * disabling authentication and the session policy presets.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
@@ -12,6 +12,11 @@ import { setAuthToken } from '../../api/client';
 import { server } from '../mocks/server';
 import { SettingsPage } from '../../pages/SettingsPage';
 import { render } from '../utils';
+
+// Each test mounts the full Settings page, which takes 2-4s on an idle machine
+// and several times that when CI shards compete for CPU. The default 10s limit
+// then times out tests that pass in isolation, so give these files headroom.
+vi.setConfig({ testTimeout: 30_000 });
 
 const admin = {
   id: 1,

@@ -110,7 +110,7 @@ function renderIntegration(url: string) {
     </MemoryRouter>
   );
   const view = render(route());
-  return { refresh: () => view.rerender(route()) };
+  return { refresh: () => view.rerender(route()), unmount: view.unmount };
 }
 
 function bridgeEnvelope(type: string, requestId: string, fields: Record<string, unknown> = {}) {
@@ -224,6 +224,38 @@ describe('Orca integration page', () => {
       ...printReceipt, queue_item_ids: [101, 102], access_token: 'header.payload.signature',
     }));
     expect(parentPost).not.toHaveBeenCalled();
+  });
+
+  it('registers one native bridge handler and stops delivering after unmount', async () => {
+    const onMessage = vi.fn((handler: (payload: unknown) => void) => { mocks.connectHandler = handler; });
+    window.orca = { postMessage: mocks.bridgePost, onMessage };
+    const view = renderIntegration(`/integrations/orca?mode=print&transport=native&protocol_version=1&request_id=${printRequestId}`);
+    const send = (type: string, fields: Record<string, unknown> = {}) => {
+      act(() => mocks.connectHandler?.(bridgeEnvelope(type, printRequestId, fields)));
+    };
+    send('initialize', { mode: 'connect' });
+    send('initialize', {
+      mode: 'print', expected_user_id: 7, library_file_id: 42, filename: 'part.3mf', plate_id: 2,
+    });
+    await screen.findByRole('button', { name: 'Finish mocked print' });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    mocks.bridgePost.mockClear();
+    send('cancel_requested');
+    expect(mocks.bridgePost).not.toHaveBeenCalled();
+  });
+
+  it('keeps the token off ready messages and sends it only with the terminal receipt', async () => {
+    const { send } = startNativePrint();
+    await screen.findByRole('button', { name: 'Finish mocked print' });
+    send('cancel_requested');
+    await screen.findByText(/Print request cancelled/);
+    const withToken = mocks.bridgePost.mock.calls
+      .map(([message]) => message as { type: string; access_token?: string })
+      .filter((message) => message.access_token !== undefined)
+      .map((message) => message.type);
+    expect(withToken).toEqual(['authenticated', 'cancelled']);
   });
 
   it('shows Grove sign-in in a native Print window without a remembered browser session', async () => {

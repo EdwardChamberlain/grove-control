@@ -69,6 +69,26 @@ function postToOrca(message: BridgeMessage) {
   window.orca?.postMessage(message);
 }
 
+// Orca's bridge has no way to remove a handler, so register one dispatcher per
+// bridge object and let each screen add and remove its own listener. This stops
+// a screen that has been replaced (Connect handing over to Print) from still
+// reacting to later native messages.
+const bridgeListeners = new WeakMap<object, Set<(payload: unknown) => void>>();
+
+function subscribeToOrca(listener: (payload: unknown) => void): () => void {
+  const bridge = window.orca;
+  if (!bridge) return () => {};
+  let listeners = bridgeListeners.get(bridge);
+  if (!listeners) {
+    const registered = new Set<(payload: unknown) => void>();
+    listeners = registered;
+    bridgeListeners.set(bridge, registered);
+    bridge.onMessage((payload) => { [...registered].forEach((fn) => fn(payload)); });
+  }
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
 function postToPrintParent(message: BridgeMessage) {
   // Orca's local wrapper has an opaque file: origin. The parent validates the
   // Grove origin and iframe source before forwarding this receipt to native.
@@ -93,14 +113,18 @@ function StatusMessage({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ConnectMode({ requestId, printAfterSignIn = false }: { requestId: string; printAfterSignIn?: boolean }) {
+function ConnectMode({ requestId, onAuthenticated }: {
+  requestId: string;
+  // Native Print signs in first, then continues in the same window instead of
+  // finishing the Connect request.
+  onAuthenticated?: (token: string) => void;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { authEnabled, loading, user } = useAuth();
   const [initialized, setInitialized] = useState(false);
   const [terminalMessage, setTerminalMessage] = useState<string | null>(null);
   const terminalRef = useRef(false);
-  const [printToken, setPrintToken] = useState<string | null>(null);
 
   const sendTerminal = useCallback((type: string, fields: Record<string, unknown> = {}) => {
     if (terminalRef.current) return;
@@ -116,13 +140,12 @@ function ConnectMode({ requestId, printAfterSignIn = false }: { requestId: strin
   }, [requestId]);
 
   useEffect(() => {
-    const bridge = window.orca;
-    if (!bridge) {
+    if (!window.orca) {
       setTerminalMessage('Open this page from Orca to connect a Grove account.');
       return;
     }
 
-    bridge.onMessage((payload) => {
+    const unsubscribe = subscribeToOrca((payload) => {
       if (!isBridgeEnvelope(payload, requestId) || terminalRef.current) return;
       if (payload.type === 'initialize' && payload.mode === 'connect') {
         setInitialized(true);
@@ -130,8 +153,9 @@ function ConnectMode({ requestId, printAfterSignIn = false }: { requestId: strin
         sendTerminal('cancelled');
       }
     });
-    postToOrca(messageFor(requestId, 'ready', printAfterSignIn ? { mode: 'connect' } : {}));
-  }, [printAfterSignIn, requestId, sendTerminal]);
+    postToOrca(messageFor(requestId, 'ready', onAuthenticated ? { mode: 'connect' } : {}));
+    return unsubscribe;
+  }, [onAuthenticated, requestId, sendTerminal]);
 
   const state = location.state as { from?: { pathname?: string; search?: string } } | null;
   const hasReturnTarget = state?.from?.pathname === location.pathname
@@ -158,19 +182,18 @@ function ConnectMode({ requestId, printAfterSignIn = false }: { requestId: strin
       sendTerminal('error', { message: 'Sign in to Grove with an active user account to connect Orca.' });
       return;
     }
-    if (printAfterSignIn) {
-      terminalRef.current = true;
+    if (onAuthenticated) {
       // The token travels only from Grove to native, never into a document
       // that might have redirected to another origin. Native verifies this
       // browser account before sending any file initialization.
+      terminalRef.current = true;
       postToOrca(messageFor(requestId, 'authenticated', { access_token: token }));
-      setPrintToken(token);
+      onAuthenticated(token);
     } else {
       sendTerminal('authenticated', { access_token: token });
     }
-  }, [authEnabled, initialized, loading, printAfterSignIn, requestId, sendTerminal, user]);
+  }, [authEnabled, initialized, loading, onAuthenticated, requestId, sendTerminal, user]);
 
-  if (printToken) return <PrintMode requestId={requestId} nativeToken={printToken} />;
   if (terminalMessage) return <StatusMessage>{terminalMessage}</StatusMessage>;
   if (!initialized || loading || (!authEnabled && !terminalRef.current)) {
     return <StatusMessage>Connecting to Grove Control…</StatusMessage>;
@@ -179,11 +202,28 @@ function ConnectMode({ requestId, printAfterSignIn = false }: { requestId: strin
   return <StatusMessage>Finishing Grove connection…</StatusMessage>;
 }
 
-function ConnectApplication({ requestId, printAfterSignIn = false }: { requestId: string; printAfterSignIn?: boolean }) {
+function ConnectApplication({ requestId }: { requestId: string }) {
   return (
     <AuthProvider>
       <ThemeProvider>
-        <ConnectMode requestId={requestId} printAfterSignIn={printAfterSignIn} />
+        <ConnectMode requestId={requestId} />
+      </ThemeProvider>
+    </AuthProvider>
+  );
+}
+
+function NativePrintFlow({ requestId }: { requestId: string }) {
+  const [token, setToken] = useState<string | null>(null);
+  return token
+    ? <PrintMode requestId={requestId} nativeToken={token} />
+    : <ConnectMode requestId={requestId} onAuthenticated={setToken} />;
+}
+
+function NativePrintApplication({ requestId }: { requestId: string }) {
+  return (
+    <AuthProvider>
+      <ThemeProvider>
+        <NativePrintFlow requestId={requestId} />
       </ThemeProvider>
     </AuthProvider>
   );
@@ -200,16 +240,6 @@ function PrintMode({ requestId, nativeToken }: { requestId: string; nativeToken?
   const cancelRequestedRef = useRef(false);
   const initRef = useRef<PrintInitialization | null>(null);
 
-  const postPrintMessage = useCallback((message: BridgeMessage) => {
-    if (nativeToken) {
-      // Authenticate every native receipt with the verified browser session.
-      // A redirected document never receives this token from the plugin.
-      postToOrca({ ...message, access_token: nativeToken });
-    } else {
-      postToPrintParent(message);
-    }
-  }, [nativeToken]);
-
   const releaseSession = useCallback(() => {
     clearMemoryAuthTokenOverride();
   }, []);
@@ -217,7 +247,13 @@ function PrintMode({ requestId, nativeToken }: { requestId: string; nativeToken?
   const sendTerminal = useCallback((type: string, fields: Record<string, unknown> = {}) => {
     if (terminalRef.current) return;
     terminalRef.current = true;
-    postPrintMessage(messageFor(requestId, type, fields));
+    // Only the single terminal receipt carries the token, so native can tie it
+    // to the verified browser session. Ready and other messages never do.
+    if (nativeToken) {
+      postToOrca(messageFor(requestId, type, { ...fields, access_token: nativeToken }));
+    } else {
+      postToPrintParent(messageFor(requestId, type, fields));
+    }
     setPhase('terminal');
     if (type === 'submitted') {
       setStatusMessage('Print jobs added to the Grove queue.');
@@ -230,7 +266,7 @@ function PrintMode({ requestId, nativeToken }: { requestId: string; nativeToken?
     } else {
       setStatusMessage(typeof fields.message === 'string' ? fields.message : 'The print request could not be confirmed. Check Grove before trying again.');
     }
-  }, [postPrintMessage, requestId]);
+  }, [nativeToken, requestId]);
 
   useEffect(() => {
     if (phase !== 'terminal') return;
@@ -363,17 +399,17 @@ function PrintMode({ requestId, nativeToken }: { requestId: string; nativeToken?
     const handleMessage = (event: MessageEvent<unknown>) => {
       if (event.source === window.parent) handlePayload(event.data);
     };
-    let active = true;
+    let unsubscribe: () => void;
     if (nativeToken) {
-      window.orca?.onMessage((payload) => { if (active) handlePayload(payload); });
+      unsubscribe = subscribeToOrca(handlePayload);
       postToOrca(messageFor(requestId, 'ready', { mode: 'print' }));
     } else {
       window.addEventListener('message', handleMessage);
+      unsubscribe = () => window.removeEventListener('message', handleMessage);
       postToPrintParent(messageFor(requestId, 'ready'));
     }
     return () => {
-      active = false;
-      window.removeEventListener('message', handleMessage);
+      unsubscribe();
       releaseSession();
     };
   }, [nativeToken, releaseSession, requestId, sendPrintError, sendTerminal, verifyInitialization]);
@@ -551,7 +587,7 @@ export function OrcaIntegrationPage() {
       {mode === 'connect'
         ? <ConnectApplication requestId={requestId} />
         : transport === 'native'
-          ? <ConnectApplication requestId={requestId} printAfterSignIn />
+          ? <NativePrintApplication requestId={requestId} />
           : <PrintMode requestId={requestId} />}
     </QueryClientProvider>
   );
