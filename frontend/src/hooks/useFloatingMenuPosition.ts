@@ -19,6 +19,19 @@ function viewportWidth() {
   return document.documentElement.clientWidth || window.innerWidth;
 }
 
+// A fixed box with `left` set only grows as wide as the space to its right, and a
+// max-width from an earlier pass would cap it, so measure it at left 0 with no cap
+// and put the styles straight back (inside the layout effect, so nothing paints).
+function naturalWidth(menu: HTMLElement) {
+  const { left, maxWidth } = menu.style;
+  menu.style.left = '0px';
+  menu.style.maxWidth = 'none';
+  const measured = Math.ceil(menu.getBoundingClientRect().width);
+  menu.style.left = left;
+  menu.style.maxWidth = maxWidth;
+  return measured;
+}
+
 function clampHeight(space: number) {
   return Math.max(MENU_MIN_HEIGHT, Math.min(MENU_MAX_HEIGHT, space));
 }
@@ -103,16 +116,17 @@ export function useFloatingMenuPosition(
       const menuHeight = Math.min(MENU_MAX_HEIGHT, (menu?.scrollHeight ?? 0) + borders);
       const openAbove = menuHeight > spaceBelow && spaceAbove > spaceBelow;
 
-      // Fall back to the trigger's width until the menu has been laid out.
-      const menuWidth = menu?.offsetWidth || rect.width;
+      // The rendered width is at least the trigger's (minWidth), and that is also
+      // the fallback until the menu has been laid out.
+      const menuWidth = Math.max(menu ? naturalWidth(menu) : 0, rect.width);
       const maxMenuWidth = width - 2 * VIEWPORT_MARGIN;
-      let left = rect.left;
+      let left = Math.max(VIEWPORT_MARGIN, rect.left);
       let maxWidth: number | undefined;
       if (menuWidth > maxMenuWidth) {
         // Too wide for the screen even when aligned to the margin: pin it there and cap it.
         left = VIEWPORT_MARGIN;
         maxWidth = maxMenuWidth;
-      } else if (rect.left + menuWidth > width - VIEWPORT_MARGIN) {
+      } else if (left + menuWidth > width - VIEWPORT_MARGIN) {
         // Would overflow the right edge: align its right edge to the margin instead.
         left = Math.max(VIEWPORT_MARGIN, width - VIEWPORT_MARGIN - menuWidth);
       }
