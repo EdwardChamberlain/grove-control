@@ -386,7 +386,7 @@ for (const authEnabled of [true, false]) {
     await expect(page.getByText('Uploaded By', { exact: true })).toHaveCount(authEnabled ? 1 : 0);
 
     const row = page.locator('[data-file-id="1"]');
-    await expect(row.getByRole('button', { name: 'Delete', exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(row.getByRole('button', { name: 'Actions', exact: true })).toBeInViewport({ ratio: 1 });
 
     await page.setViewportSize({ width: 1024, height: 768 });
     const scroller = page.getByTestId('files-list-scroller');
@@ -405,7 +405,7 @@ for (const authEnabled of [true, false]) {
     await page.setViewportSize({ width: 390, height: 844 });
     const label = page.getByText(namedFile.print_name, { exact: true });
     await expect(label).toBeInViewport();
-    for (const name of ['Workshop', 'Delete']) {
+    for (const name of ['Workshop', 'Actions']) {
       const button = row.getByRole('button', { name, exact: true });
       await button.scrollIntoViewIfNeeded();
       await expect(button).toBeInViewport();
