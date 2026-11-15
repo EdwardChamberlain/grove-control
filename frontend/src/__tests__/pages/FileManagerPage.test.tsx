@@ -1051,7 +1051,7 @@ describe('FileManagerPage', () => {
   });
 
   describe('single-file Move from the file menu', () => {
-    it('moves just that file to the chosen folder', async () => {
+    it.each(['grid', 'list'])('moves just that file to the chosen folder in %s view', async (view) => {
       let movedBody: unknown = null;
       server.use(
         http.post('/api/v1/library/files/move', async ({ request }) => {
@@ -1061,10 +1061,12 @@ describe('FileManagerPage', () => {
       );
       const user = userEvent.setup();
       render(<FileManagerPage />);
+      await screen.findByText('Benchy');
+      if (view === 'list') await user.click(screen.getByTitle('List view'));
 
-      const card = (await screen.findByText('Benchy')).closest('div[class*="cursor-pointer"]') as HTMLElement;
-      await user.click(within(card).getByRole('button', { name: 'Actions' }));
-      await user.click(within(card).getByRole('button', { name: /^move$/i }));
+      const item = screen.getByText('Benchy').closest('[data-file-id]') as HTMLElement;
+      await user.click(within(item).getByRole('button', { name: 'Actions' }));
+      await user.click(within(item).getByRole('menuitem', { name: /^move$/i }));
 
       const dialog = (await screen.findByText('Move 1 File(s)')).closest('div.fixed') as HTMLElement;
       await user.click(within(dialog).getByRole('button', { name: /Functional Parts/ }));
@@ -1072,6 +1074,21 @@ describe('FileManagerPage', () => {
 
       await waitFor(() => expect(movedBody).toEqual({ file_ids: [1], folder_id: 1 }));
     });
+  });
+
+  it('uses a kebab menu for list rows and returns focus after Escape', async () => {
+    const user = userEvent.setup();
+    render(<FileManagerPage />);
+    await screen.findByText('Benchy');
+    await user.click(screen.getByTitle('List view'));
+
+    const row = document.querySelector('[data-file-id="1"]') as HTMLElement;
+    const trigger = within(row).getByRole('button', { name: 'Actions' });
+    await user.click(trigger);
+    expect(screen.getByRole('menuitem', { name: 'Move' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   describe('Temporary Files system folder (#237)', () => {
@@ -1252,5 +1269,31 @@ describe('FileManagerPage', () => {
       // Sanity-check: the buggy call would have sent include_root=true here.
       expect(includeRootValues).toContain('false');
     });
+  });
+
+  it('disables Generate Thumbnail while the previous request is pending', async () => {
+    const user = userEvent.setup();
+    let requests = 0;
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    server.use(http.post('/api/v1/library/generate-stl-thumbnails', async () => {
+      requests++;
+      await pending;
+      return HttpResponse.json({ succeeded: 1, processed: 1, failed: 0, results: [{ file_id: 2 }] });
+    }));
+
+    try {
+      render(<FileManagerPage />);
+      await user.click(await screen.findByTitle('List view'));
+      const row = (await screen.findByText('bracket.stl')).closest('[data-file-id]') as HTMLElement;
+      const trigger = within(row).getByRole('button', { name: 'Actions' });
+      await user.click(trigger);
+      await user.click(within(row).getByRole('menuitem', { name: 'Generate Thumbnail' }));
+      await waitFor(() => expect(requests).toBe(1));
+      await user.click(trigger);
+      expect(within(row).getByRole('menuitem', { name: 'Generate Thumbnail' })).toBeDisabled();
+    } finally {
+      finish();
+    }
   });
 });

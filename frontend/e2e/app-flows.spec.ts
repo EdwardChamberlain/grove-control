@@ -386,14 +386,14 @@ for (const authEnabled of [true, false]) {
     await expect(page.getByText('Uploaded By', { exact: true })).toHaveCount(authEnabled ? 1 : 0);
 
     const row = page.locator('[data-file-id="1"]');
-    await expect(row.getByRole('button', { name: 'Delete', exact: true })).toBeInViewport({ ratio: 1 });
+    await expect(row.getByRole('button', { name: 'Actions', exact: true })).toBeInViewport({ ratio: 1 });
 
     await page.setViewportSize({ width: 1024, height: 768 });
     const scroller = page.getByTestId('files-list-scroller');
     await expect.poll(() => scroller.evaluate((element) => ({
       horizontal: element.scrollWidth > element.clientWidth,
       vertical: element.scrollHeight > element.clientHeight,
-    }))).toEqual({ horizontal: true, vertical: true });
+    }))).toEqual({ horizontal: false, vertical: true });
 
     for (const name of displayedNames) {
       const label = page.getByText(name, { exact: true });
@@ -402,10 +402,12 @@ for (const authEnabled of [true, false]) {
       await expect(label).toHaveAttribute('title', name);
     }
 
+    // A phone is too narrow for the row, so the same container scrolls both ways.
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => scroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     const label = page.getByText(namedFile.print_name, { exact: true });
     await expect(label).toBeInViewport();
-    for (const name of ['Workshop', 'Delete']) {
+    for (const name of ['Workshop', 'Actions']) {
       const button = row.getByRole('button', { name, exact: true });
       await button.scrollIntoViewIfNeeded();
       await expect(button).toBeInViewport();
@@ -724,4 +726,19 @@ test('archives "Show" page-size menu opens upwards when it would run off the scr
 
   await page.getByRole('option', { name: 'All' }).click();
   await expect(page.getByText('60 prints', { exact: true })).toBeVisible();
+});
+
+test('Archive actions scroll within a short viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await mockApi(page, []);
+  await page.goto('/archives');
+
+  await page.getByRole('button', { name: 'More options' }).click();
+  const menu = page.getByRole('menu');
+  const box = await menu.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(600);
+
+  await menu.getByRole('menuitem', { name: 'Delete', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Delete Archive' })).toBeVisible();
 });

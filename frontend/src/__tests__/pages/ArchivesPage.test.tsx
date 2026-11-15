@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
 import { http, HttpResponse } from 'msw';
@@ -103,6 +103,18 @@ describe('ArchivesPage', () => {
   });
 
   describe('rendering', () => {
+    it('opens item actions from the kebab button', async () => {
+      render(<ArchivesPage />);
+      await screen.findByText('Benchy');
+      const card = document.querySelector('[data-archive-id="1"]') as HTMLElement;
+
+      fireEvent.contextMenu(card);
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+      fireEvent.click(within(card).getByRole('button', { name: /more options/i }));
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
     it('renders the page title', async () => {
       render(<ArchivesPage />);
 

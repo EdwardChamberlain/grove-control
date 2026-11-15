@@ -78,10 +78,10 @@ describe.each(layouts)('archive file uploads (%s layout)', (layout) => {
   async function openUploadMenuItem(label: string) {
     const user = userEvent.setup();
     await screen.findAllByText('Benchy');
-    await user.click(screen.getAllByTitle('Right-click for more options')[0]);
-    const favourite = screen.getByRole('button', { name: /^(Add to|Remove from) Favorites/ });
+    await user.click(screen.getAllByRole('button', { name: 'More options' })[0]);
+    const favourite = screen.getByRole('menuitem', { name: /^(Add to|Remove from) Favorites/ });
     const panel = favourite.closest('div.fixed') as HTMLElement;
-    await user.click(within(panel).getByRole('button', { name: new RegExp(`^${label}`) }));
+    await user.click(within(panel).getByRole('menuitem', { name: new RegExp(`^${label}`) }));
     return user;
   }
 
