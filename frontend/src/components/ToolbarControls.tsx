@@ -137,7 +137,7 @@ export function ToolbarDropdown<T extends string>({
                   onChange(option.value);
                   setIsOpen(false);
                 }}
-                className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-bambu-dark-tertiary ${
+                className={`block w-full px-3 py-2 text-left text-sm transition-colors hover:bg-bambu-dark-tertiary ${
                   option.value === value ? 'text-bambu-green' : 'text-white'
                 }`}
               >
@@ -529,7 +529,7 @@ export function ReactSelect({
                       const hoveredIndex = options.findIndex(candidate => candidate.value === option.value && candidate.group === option.group);
                       if (hoveredIndex >= 0 && !option.disabled) setActiveIndex(hoveredIndex);
                     }}
-                    className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed disabled:opacity-50 ${
+                    className={`block w-full px-3 py-2 text-left text-sm transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed disabled:opacity-50 ${
                       option.value === currentValue ? 'text-bambu-green' : activeIndex >= 0 && options[activeIndex] === option ? 'bg-bambu-dark-tertiary text-white' : 'text-white'
                     }`}
                   >
