@@ -274,11 +274,12 @@ describe('Orca integration page', () => {
 
   it('ignores browser postMessage events in native Print mode', async () => {
     startNativePrint(false);
+    mocks.bridgePost.mockClear();
     sendPrintMessage('initialize', {
-      mode: 'print', access_token: 'wrong-token', ...printReceipt, expected_user_id: 7, filename: 'part.3mf',
+      mode: 'print', ...printReceipt, expected_user_id: 7, filename: 'part.3mf',
     });
     expect(mocks.getLibraryFile).not.toHaveBeenCalled();
-    expect(mocks.setAuthToken).not.toHaveBeenCalled();
+    expect(mocks.bridgePost).not.toHaveBeenCalled();
   });
 
   it('rejects a token supplied by native initialization', async () => {
@@ -317,6 +318,15 @@ describe('Orca integration page', () => {
     renderIntegration('/integrations/orca?mode=print&transport=native&protocol_version=1&request_id=browser');
     expect(screen.getByText('Open this page from Orca to connect a Grove account.')).toBeVisible();
     expect(mocks.getLibraryFile).not.toHaveBeenCalled();
+  });
+
+  it('refuses a native Print window that is framed by another document', () => {
+    window.orca = { postMessage: mocks.bridgePost, onMessage: vi.fn() };
+    const parent = vi.spyOn(window, 'parent', 'get').mockReturnValue({} as Window);
+    renderIntegration(`/integrations/orca?mode=print&transport=native&protocol_version=1&request_id=${printRequestId}`);
+    expect(screen.getByText('Open this page from Orca to connect a Grove account.')).toBeVisible();
+    expect(mocks.bridgePost).not.toHaveBeenCalled();
+    parent.mockRestore();
   });
 
   it('rejects an unknown transport', () => {

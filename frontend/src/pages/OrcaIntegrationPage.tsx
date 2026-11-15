@@ -183,11 +183,9 @@ function ConnectMode({ requestId, onAuthenticated }: {
       return;
     }
     if (onAuthenticated) {
-      // The token travels only from Grove to native, never into a document
-      // that might have redirected to another origin. Native verifies this
-      // browser account before sending any file initialization.
+      // Hand the token to the Print screen, which reports it to native once its
+      // listener is registered so an immediate reply cannot be missed.
       terminalRef.current = true;
-      postToOrca(messageFor(requestId, 'authenticated', { access_token: token }));
       onAuthenticated(token);
     } else {
       sendTerminal('authenticated', { access_token: token });
@@ -402,6 +400,10 @@ function PrintMode({ requestId, nativeToken }: { requestId: string; nativeToken?
     let unsubscribe: () => void;
     if (nativeToken) {
       unsubscribe = subscribeToOrca(handlePayload);
+      // The token travels only from Grove to native, never into a document
+      // that might have redirected to another origin. Native verifies this
+      // browser account before sending any file initialization.
+      postToOrca(messageFor(requestId, 'authenticated', { access_token: nativeToken }));
       postToOrca(messageFor(requestId, 'ready', { mode: 'print' }));
     } else {
       window.addEventListener('message', handleMessage);
