@@ -393,7 +393,7 @@ for (const authEnabled of [true, false]) {
     await expect.poll(() => scroller.evaluate((element) => ({
       horizontal: element.scrollWidth > element.clientWidth,
       vertical: element.scrollHeight > element.clientHeight,
-    }))).toEqual({ horizontal: true, vertical: true });
+    }))).toEqual({ horizontal: false, vertical: true });
 
     for (const name of displayedNames) {
       const label = page.getByText(name, { exact: true });
@@ -402,7 +402,9 @@ for (const authEnabled of [true, false]) {
       await expect(label).toHaveAttribute('title', name);
     }
 
+    // A phone is too narrow for the row, so the same container scrolls both ways.
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => scroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     const label = page.getByText(namedFile.print_name, { exact: true });
     await expect(label).toBeInViewport();
     for (const name of ['Workshop', 'Actions']) {
