@@ -3,13 +3,18 @@
  * autosaves, so every test asserts on the settings body the page sends.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { SettingsPage } from '../../pages/SettingsPage';
 import { server } from '../mocks/server';
+
+// Each test mounts the full Settings page, which takes 2-4s on an idle machine
+// and several times that when CI shards compete for CPU. The default 10s limit
+// then times out tests that pass in isolation, so give these files headroom.
+vi.setConfig({ testTimeout: 30_000 });
 
 const baseSettings = {
   auto_archive: true,
