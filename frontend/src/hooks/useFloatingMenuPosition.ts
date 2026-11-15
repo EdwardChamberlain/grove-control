@@ -14,6 +14,11 @@ function viewportHeight() {
   return document.documentElement.clientHeight || window.innerHeight;
 }
 
+// The width counterpart of viewportHeight(), used to keep menus on screen.
+function viewportWidth() {
+  return document.documentElement.clientWidth || window.innerWidth;
+}
+
 function clampHeight(space: number) {
   return Math.max(MENU_MIN_HEIGHT, Math.min(MENU_MAX_HEIGHT, space));
 }
@@ -21,6 +26,7 @@ function clampHeight(space: number) {
 export type FloatingMenuPosition = {
   left: number;
   minWidth: number;
+  maxWidth?: number;
   maxHeight: number;
   top?: number;
   bottom?: number;
@@ -40,6 +46,7 @@ function samePosition(a: FloatingMenuPosition, b: FloatingMenuPosition) {
     a.top === b.top &&
     a.bottom === b.bottom &&
     a.minWidth === b.minWidth &&
+    a.maxWidth === b.maxWidth &&
     a.maxHeight === b.maxHeight &&
     a.placement === b.placement
   );
@@ -49,7 +56,9 @@ function samePosition(a: FloatingMenuPosition, b: FloatingMenuPosition) {
  * Positions a portalled menu against its trigger. The menu opens below the
  * trigger unless it would not fit there and there is more room above, in which
  * case it opens upwards. Its height is capped to the vertical space available.
- * Horizontal overflow is not handled yet.
+ * Horizontally it lines up with the trigger's left edge, shifting left when it
+ * would run past the right edge of the viewport. A menu wider than the viewport
+ * is capped to the viewport width and pinned to the left margin.
  */
 export function useFloatingMenuPosition(
   isOpen: boolean,
@@ -76,6 +85,7 @@ export function useFloatingMenuPosition(
       if (!rect) return;
 
       const height = viewportHeight();
+      const width = viewportWidth();
       // Only a scroll closes the menu: opening one whose trigger is off screen
       // (e.g. from the keyboard) still works. A zero-size rect means the
       // trigger isn't laid out, not that it scrolled away.
@@ -93,18 +103,34 @@ export function useFloatingMenuPosition(
       const menuHeight = Math.min(MENU_MAX_HEIGHT, (menu?.scrollHeight ?? 0) + borders);
       const openAbove = menuHeight > spaceBelow && spaceAbove > spaceBelow;
 
+      // Fall back to the trigger's width until the menu has been laid out.
+      const menuWidth = menu?.offsetWidth || rect.width;
+      const maxMenuWidth = width - 2 * VIEWPORT_MARGIN;
+      let left = rect.left;
+      let maxWidth: number | undefined;
+      if (menuWidth > maxMenuWidth) {
+        // Too wide for the screen even when aligned to the margin: pin it there and cap it.
+        left = VIEWPORT_MARGIN;
+        maxWidth = maxMenuWidth;
+      } else if (rect.left + menuWidth > width - VIEWPORT_MARGIN) {
+        // Would overflow the right edge: align its right edge to the margin instead.
+        left = Math.max(VIEWPORT_MARGIN, width - VIEWPORT_MARGIN - menuWidth);
+      }
+
       const next: FloatingMenuPosition = openAbove
         ? {
-            left: rect.left,
+            left,
             bottom: height - rect.top + MENU_GAP,
             minWidth: rect.width,
+            maxWidth,
             maxHeight: clampHeight(spaceAbove),
             placement: 'above',
           }
         : {
-            left: rect.left,
+            left,
             top: rect.bottom + MENU_GAP,
             minWidth: rect.width,
+            maxWidth,
             maxHeight: clampHeight(spaceBelow),
             placement: 'below',
           };
@@ -139,6 +165,7 @@ export function floatingMenuStyle(position: FloatingMenuPosition) {
     top: position.top,
     bottom: position.bottom,
     minWidth: position.minWidth,
+    maxWidth: position.maxWidth,
     maxHeight: position.maxHeight,
   };
 }
