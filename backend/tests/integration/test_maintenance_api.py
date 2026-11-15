@@ -193,6 +193,9 @@ class TestPrinterMaintenanceAPI:
         assert active.id in by_id
         assert in_maintenance.id in by_id
         assert by_id[in_maintenance.id]["printer_name"] == "Maintenance Mode Printer"
+        # The response says which printers are in Maintenance Mode so the UI can label them.
+        assert by_id[active.id]["is_active"] is True
+        assert by_id[in_maintenance.id]["is_active"] is False
         assert by_id[in_maintenance.id]["maintenance_items"]
 
     @pytest.mark.asyncio

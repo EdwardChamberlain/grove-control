@@ -38,6 +38,7 @@ const overview = [
     printer_id: 1,
     printer_name: 'X1 Carbon',
     printer_model: 'X1C',
+    is_active: true,
     total_print_hours: 512.4,
     due_count: 1,
     warning_count: 1,
@@ -53,7 +54,7 @@ const overview = [
       item({ id: 16, maintenance_type_id: 9, maintenance_type_name: 'Polish Bed', hours_until_due: 200 }),
     ],
   },
-  { printer_id: 2, printer_name: 'P1S', printer_model: 'P1S', total_print_hours: 10, due_count: 0, warning_count: 0, maintenance_items: [] },
+  { printer_id: 2, printer_name: 'P1S', printer_model: 'P1S', is_active: true, total_print_hours: 10, due_count: 0, warning_count: 0, maintenance_items: [] },
 ];
 
 const types = [
@@ -128,6 +129,25 @@ describe('status', () => {
 
     await user.click(within(card).getByRole('switch'));
     await waitFor(() => expect(calls.at(-1)).toEqual({ method: 'PATCH', path: '/api/v1/maintenance/items/11', body: { enabled: false } }));
+  });
+
+  it('labels a printer in Maintenance Mode and still lets its maintenance be completed', async () => {
+    // Printers in Maintenance Mode are listed so their maintenance can be recorded (#332).
+    server.use(
+      http.get('/api/v1/maintenance/overview', () =>
+        HttpResponse.json(overview.map((p) => (p.printer_id === 1 ? { ...p, is_active: false } : p)))
+      )
+    );
+    const user = userEvent.setup();
+    const card = await openPrinter(user);
+
+    const header = (name: string) => screen.getByRole('heading', { name }).parentElement as HTMLElement;
+    expect(within(header('X1 Carbon')).getByText('Maintenance Mode')).toBeInTheDocument();
+    expect(within(header('P1S')).queryByText('Maintenance Mode')).not.toBeInTheDocument();
+
+    await user.click(within(card).getByRole('button', { name: /Reset/ }));
+    await waitFor(() => expect(paths()).toContain('POST /api/v1/maintenance/items/11/perform'));
+    expect(await screen.findByText('Maintenance marked as complete')).toBeInTheDocument();
   });
 
   it('edits the printer total print hours', async () => {

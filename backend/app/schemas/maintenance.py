@@ -168,6 +168,7 @@ class PrinterMaintenanceOverview(BaseModel):
     printer_id: int
     printer_name: str
     printer_model: str | None  # For model-specific documentation links
+    is_active: bool  # False while the printer is in Maintenance Mode
     total_print_hours: float
     maintenance_items: list[MaintenanceStatus]
     due_count: int
