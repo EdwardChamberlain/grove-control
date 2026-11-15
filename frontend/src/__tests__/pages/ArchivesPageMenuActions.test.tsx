@@ -11,6 +11,8 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
+import { setAuthToken } from '../../api/client';
+import * as slicer from '../../utils/slicer';
 import { server } from '../mocks/server';
 
 const baseArchive = {
@@ -107,6 +109,17 @@ function menuItem(name: string) {
   return within(openMenuPanel()).getByRole('menuitem', { name: new RegExp(`^${name}`) });
 }
 
+/** Turn auth on and sign in as user 7 holding exactly these permissions. */
+function signInWith(permissions: string[]) {
+  setAuthToken('test-token', 'session');
+  server.use(
+    http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+    http.get('/api/v1/auth/me', () =>
+      HttpResponse.json({ id: 7, username: 'reader', groups: [], permissions }),
+    ),
+  );
+}
+
 beforeEach(() => {
   setLayout('grid');
 });
@@ -149,6 +162,90 @@ describe.each(layouts)('archive actions menu (%s layout)', (layout) => {
 
     expect(await screen.findByText('Link copied to clipboard')).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toContain('/archives/1/download');
+  });
+
+  it('allows a reader to download their own archive', async () => {
+    useArchives({ created_by_id: 7 });
+    setAuthToken('test-token', 'session');
+    server.use(
+      http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+      http.get('/api/v1/auth/me', () =>
+        HttpResponse.json({ id: 7, username: 'reader', groups: [], permissions: ['archives:read_own'] }),
+      ),
+    );
+    try {
+      render(<ArchivesPage />);
+      await openMenu(userEvent.setup());
+      await waitFor(() => expect(menuItem('Delete')).toBeDisabled());
+      expect(screen.getByRole('menuitem', { name: 'Download' })).toBeEnabled();
+      expect(menuItem('Copy Download Link')).toBeEnabled();
+    } finally {
+      setAuthToken(null);
+    }
+  });
+
+  it("disables Download and Copy Download Link on another user's archive", async () => {
+    useArchives({ created_by_id: 8 });
+    signInWith(['archives:read_own']);
+    try {
+      render(<ArchivesPage />);
+      await openMenu(userEvent.setup());
+      await waitFor(() => expect(menuItem('Download')).toBeDisabled());
+      expect(menuItem('Copy Download Link')).toBeDisabled();
+    } finally {
+      setAuthToken(null);
+    }
+  });
+
+  it('offers no Open in Slicer for a source-only archive when the slicer API is off', async () => {
+    useArchives({ filename: 'benchy.3mf', file_path: 'archive/1/benchy.3mf', print_time_seconds: null });
+    render(<ArchivesPage />);
+    await openMenu(userEvent.setup());
+
+    expect(menuItem('Slice')).toBeInTheDocument();
+    expect(within(openMenuPanel()).queryByRole('menuitem', { name: /^Open in Slicer/ })).not.toBeInTheDocument();
+  });
+
+  it('disables Open in Slicer when the archive has no 3MF file', async () => {
+    useArchives({ file_path: '' });
+    render(<ArchivesPage />);
+    await openMenu(userEvent.setup());
+
+    expect(menuItem('Open in Slicer')).toBeDisabled();
+  });
+
+  it('offers desktop and server slicing for source-only archives when the slicer API is enabled', async () => {
+    useArchives({
+      filename: 'benchy.3mf',
+      file_path: 'archive/1/benchy.3mf',
+      print_time_seconds: null,
+      source_3mf_path: 'archive/1/source.3mf',
+    });
+    server.use(
+      http.get('/api/v1/settings/', () => HttpResponse.json({ use_slicer_api: true })),
+      http.post('/api/v1/archives/1/slicer-token', () => HttpResponse.json({ token: 'file-token' })),
+      http.post('/api/v1/archives/1/source-slicer-token', () => HttpResponse.json({ token: 'source-token' })),
+    );
+    const launch = vi.spyOn(slicer, 'openInSlicer').mockImplementation(() => {});
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    try {
+      await openMenu(user);
+      expect(menuItem('Slice')).toBeEnabled();
+      await user.click(menuItem('Open in Slicer'));
+      await waitFor(() => expect(launch).toHaveBeenNthCalledWith(
+        1, window.location.origin + '/api/v1/archives/1/dl/file-token/Benchy.3mf', 'bambu_studio',
+      ));
+
+      await openMenu(user);
+      await user.click(menuItem('Open source 3MF in Slicer'));
+      await waitFor(() => expect(launch).toHaveBeenNthCalledWith(
+        2, window.location.origin + '/api/v1/archives/1/source-dl/source-token/Benchy_source.3mf', 'bambu_studio',
+      ));
+    } finally {
+      launch.mockRestore();
+    }
   });
 
   it('deletes after confirming, showing related queue items', async () => {
@@ -254,5 +351,58 @@ describe.each(layouts)('archive actions menu (%s layout)', (layout) => {
     expect(menuItem('View Timelapse')).toBeDisabled();
     expect(menuItem('Scan for Timelapse')).toBeDisabled();
     expect(within(openMenuPanel()).queryByText(/Go to Project/)).not.toBeInTheDocument();
+  });
+});
+
+describe('archive list row Reprint button', () => {
+  beforeEach(() => setLayout('list'));
+
+  async function reprintButton() {
+    await screen.findAllByText('Benchy');
+    return screen.findByRole('button', { name: 'Reprint' });
+  }
+
+  it('is enabled and labelled Reprint when the archive can be reprinted', async () => {
+    useArchives();
+    render(<ArchivesPage />);
+
+    const button = await reprintButton();
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute('title', 'Reprint');
+  });
+
+  it('explains when the archive has no 3MF file', async () => {
+    useArchives({ file_path: '' });
+    render(<ArchivesPage />);
+
+    const button = await reprintButton();
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', expect.stringContaining('No 3MF file available'));
+  });
+
+  it('explains when the user cannot add to the queue', async () => {
+    useArchives({ created_by_id: 7 });
+    signInWith(['archives:read_own']);
+    try {
+      render(<ArchivesPage />);
+      const button = await reprintButton();
+      await waitFor(() => expect(button).toBeDisabled());
+      expect(button).toHaveAttribute('title', 'You do not have permission to add to queue');
+    } finally {
+      setAuthToken(null);
+    }
+  });
+
+  it("explains when the user cannot reprint someone else's archive", async () => {
+    useArchives({ created_by_id: 8 });
+    signInWith(['archives:read_all', 'queue:create', 'archives:reprint_own']);
+    try {
+      render(<ArchivesPage />);
+      const button = await reprintButton();
+      await waitFor(() => expect(button).toBeDisabled());
+      expect(button).toHaveAttribute('title', 'You do not have permission to reprint');
+    } finally {
+      setAuthToken(null);
+    }
   });
 });

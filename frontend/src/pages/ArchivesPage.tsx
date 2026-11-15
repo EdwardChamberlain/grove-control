@@ -29,6 +29,7 @@ import {
   Tag,
   StickyNote,
   FolderInput,
+  Save,
   FolderOpen,
   Calendar,
   AlertCircle,
@@ -178,7 +179,9 @@ function ArchiveCard({
 
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, canModify } = useAuth();
+  const { hasPermission, canModify, user } = useAuth();
+  const canDownload = hasPermission('archives:read_all')
+    || (hasPermission('archives:read_own') && user != null && archive.created_by_id === user.id);
   const navigate = useNavigate();
   const [showReprint, setShowReprint] = useState(false);
   const [showSliceModal, setShowSliceModal] = useState(false);
@@ -399,7 +402,7 @@ function ArchiveCard({
     // For source files: show Slice as the primary action
     ...(isGcodeFile ? [
       {
-        label: t('common.print'),
+        label: t('archives.menu.print'),
         icon: <Printer className="w-4 h-4" />,
         onClick: () => setShowReprint(true),
         disabled: !archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id),
@@ -410,16 +413,6 @@ function ArchiveCard({
             : !canModify('archives', 'reprint', archive.created_by_id)
               ? t('archives.permission.noReprint')
               : undefined,
-      },
-      {
-        label: t('archives.menu.openInBambuStudio'),
-        icon: <ExternalLink className="w-4 h-4" />,
-        onClick: () => {
-          const filename = archive.print_name || archive.filename || 'model';
-          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-        },
-        disabled: !archive.file_path,
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
       },
     ] : [
       {
@@ -435,6 +428,18 @@ function ArchiveCard({
         },
       },
     ]),
+    ...(isGcodeFile || useSlicerApi ? [
+      {
+        label: t('archives.menu.openInBambuStudio'),
+        icon: <ExternalLink className="w-4 h-4" />,
+        onClick: () => {
+          const filename = archive.print_name || archive.filename || 'model';
+          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
+        },
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      },
+    ] : []),
     {
       label: archive.external_url ? t('archives.menu.externalLink') : t('archives.menu.viewOnMakerWorld'),
       icon: <Globe className="w-4 h-4" />,
@@ -479,6 +484,14 @@ function ArchiveCard({
       title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
     { label: '', divider: true, onClick: () => {} },
+    ...(archive.source_3mf_path ? [{
+      label: t('archives.card.openSource3mf'),
+      icon: <FileCode className="w-4 h-4" />,
+      onClick: () => {
+        const sourceName = (archive.print_name || archive.filename || 'source').replace(/\.gcode\.3mf$/i, '') + '_source';
+        openInSlicerWithToken(archive.id, sourceName, 'source', preferredSlicer);
+      },
+    }] : []),
     {
       label: archive.source_3mf_path ? t('archives.menu.downloadSource3mf') : t('archives.menu.uploadSource3mf'),
       icon: <FileCode className="w-4 h-4" />,
@@ -550,8 +563,8 @@ function ArchiveCard({
           console.error('Archive download failed:', err);
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noDownload') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noDownload') : undefined,
     },
     {
       label: t('archives.menu.copyDownloadLink'),
@@ -564,8 +577,8 @@ function ArchiveCard({
           showToast(t('archives.toast.failedCopyLink'), 'error');
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noCopyLink') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noCopyLink') : undefined,
     },
     {
       label: t('archives.menu.qrCode'),
@@ -837,37 +850,6 @@ function ArchiveCard({
             +{archive.duplicate_count}
           </span>
         )}
-        {/* Source 3MF badge */}
-        {archive.source_3mf_path && (
-          <button
-            className="absolute bottom-2 left-2 p-1.5 rounded bg-black/60 hover:bg-black/80 transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              // Open source 3MF in Bambu Studio - use filename in URL for slicer compatibility
-              const sourceName = (archive.print_name || archive.filename || 'source').replace(/\.gcode\.3mf$/i, '') + '_source';
-              openInSlicerWithToken(archive.id, sourceName, 'source', preferredSlicer);
-            }}
-            title={t('archives.card.openSource3mf')}
-          >
-            <FileCode className="w-4 h-4 text-orange-400" />
-          </button>
-        )}
-        {/* F3D badge */}
-        {archive.f3d_path && (
-          <button
-            className={`absolute bottom-2 ${archive.source_3mf_path ? 'left-12' : 'left-2'} p-1.5 rounded bg-black/60 hover:bg-black/80 transition-colors`}
-            onClick={(e) => {
-              e.stopPropagation();
-              // Download F3D file
-              api.downloadF3d(archive.id).catch((err) => {
-                console.error('F3D download failed:', err);
-              });
-            }}
-            title={t('archives.card.downloadF3d')}
-          >
-            <Box className="w-4 h-4 text-cyan-400" />
-          </button>
-        )}
         {/* 3D preview badge */}
         <button
           className="absolute bottom-2 right-2 p-1.5 rounded bg-black/60 hover:bg-black/80 transition-colors"
@@ -1135,31 +1117,18 @@ function ArchiveCard({
         <div className="flex gap-1 mt-3">
           {isSlicedFile(archive) ? (
             // Sliced file - can print directly
-            <>
               <Button
                 variant="primary"
                 size="sm"
                 className="flex-1 min-w-0 overflow-hidden"
                 onClick={() => setShowReprint(true)}
+                aria-label={t('archives.menu.print')}
                 disabled={!archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id)}
                 title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : undefined}
               >
                 <Printer className="w-3 h-3 flex-shrink-0" />
-                <span className="hidden xl:inline truncate">{t('common.print')}</span>
+                <span className="hidden xl:inline truncate">{t('archives.menu.print')}</span>
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="min-w-0 p-1 sm:p-1.5"
-                onClick={() => {
-                  const filename = archive.print_name || archive.filename || 'model';
-                  openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-                }}
-                title={t('archives.card.openInBambuStudio')}
-              >
-                <ExternalLink className="w-3 h-3 sm:w-4 sm:h-4" />
-              </Button>
-            </>
           ) : (
             // Source file only - "Slice" action
             <Button
@@ -1184,48 +1153,22 @@ function ArchiveCard({
               <span className="hidden xl:inline truncate">{t('archives.card.slice')}</span>
             </Button>
           )}
-          <Button
-            variant="secondary"
-            size="sm"
-            className="min-w-0 p-1 sm:p-1.5"
-            onClick={() => {
-              const url = archive.external_url || archive.makerworld_url;
-              if (url) window.open(url, '_blank');
-            }}
-            disabled={!archive.external_url && !archive.makerworld_url}
-            title={
-              archive.external_url
-                ? t('archives.card.externalLink')
-                : archive.makerworld_url
-                  ? t('archives.card.makerWorld', { designer: archive.designer || t('archives.card.viewProject') })
-                  : t('archives.card.noExternalLink')
-            }
-          >
-            <Globe className={`w-3 h-3 sm:w-4 sm:h-4 ${!archive.external_url && !archive.makerworld_url ? 'opacity-20' : ''}`} />
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="min-w-0 p-1 sm:p-1.5"
-            onClick={() => {
-              api.downloadArchive(archive.id, `${archive.print_name || archive.filename}.3mf`).catch((err) => {
-                console.error('Archive download failed:', err);
-              });
-            }}
-            title={t('archives.card.download')}
-          >
-            <Download className="w-3 h-3 sm:w-4 sm:h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="min-w-0 p-1 sm:p-1.5"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={!canModify('archives', 'delete', archive.created_by_id)}
-            title={!canModify('archives', 'delete', archive.created_by_id) ? t('archives.card.noPermissionDelete') : t('archives.card.delete')}
-          >
-            <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-400" />
-          </Button>
+          {archive.file_path && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="min-w-0 p-1 sm:p-1.5"
+              onClick={(event) => {
+                event.stopPropagation();
+                setShowSaveToFiles(true);
+              }}
+              disabled={!hasPermission('library:upload')}
+              title={!hasPermission('library:upload') ? t('archives.permission.noSaveToFiles') : t('archives.menu.saveToFiles')}
+              aria-label={t('archives.menu.saveToFiles')}
+            >
+              <Save className="w-3 h-3 sm:w-4 sm:h-4" />
+            </Button>
+          )}
         </div>
       </CardContent>
 
@@ -1568,7 +1511,9 @@ function ArchiveListRow({
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, canModify } = useAuth();
+  const { hasPermission, canModify, user } = useAuth();
+  const canDownload = hasPermission('archives:read_all')
+    || (hasPermission('archives:read_own') && user != null && archive.created_by_id === user.id);
   const [showEdit, setShowEdit] = useState(false);
   const [showPrintLog, setShowPrintLog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1763,7 +1708,7 @@ function ArchiveListRow({
   const contextMenuItems: ContextMenuItem[] = [
     ...(isGcodeFile ? [
       {
-        label: t('common.print'),
+        label: t('archives.menu.print'),
         icon: <Printer className="w-4 h-4" />,
         onClick: () => setShowReprint(true),
         disabled: !archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id),
@@ -1774,16 +1719,6 @@ function ArchiveListRow({
             : !canModify('archives', 'reprint', archive.created_by_id)
               ? t('archives.permission.noReprint')
               : undefined,
-      },
-      {
-        label: t('archives.menu.openInBambuStudio'),
-        icon: <ExternalLink className="w-4 h-4" />,
-        onClick: () => {
-          const filename = archive.print_name || archive.filename || 'model';
-          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-        },
-        disabled: !archive.file_path,
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
       },
     ] : [
       {
@@ -1799,6 +1734,18 @@ function ArchiveListRow({
         },
       },
     ]),
+    ...(isGcodeFile || useSlicerApi ? [
+      {
+        label: t('archives.menu.openInBambuStudio'),
+        icon: <ExternalLink className="w-4 h-4" />,
+        onClick: () => {
+          const filename = archive.print_name || archive.filename || 'model';
+          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
+        },
+        disabled: !archive.file_path,
+        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
+      },
+    ] : []),
     {
       label: archive.external_url ? t('archives.menu.externalLink') : t('archives.menu.viewOnMakerWorld'),
       icon: <Globe className="w-4 h-4" />,
@@ -1843,6 +1790,14 @@ function ArchiveListRow({
       title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
     }] : []),
     { label: '', divider: true, onClick: () => {} },
+    ...(archive.source_3mf_path ? [{
+      label: t('archives.card.openSource3mf'),
+      icon: <FileCode className="w-4 h-4" />,
+      onClick: () => {
+        const sourceName = (archive.print_name || archive.filename || 'source').replace(/\.gcode\.3mf$/i, '') + '_source';
+        openInSlicerWithToken(archive.id, sourceName, 'source', preferredSlicer);
+      },
+    }] : []),
     {
       label: archive.source_3mf_path ? t('archives.menu.downloadSource3mf') : t('archives.menu.uploadSource3mf'),
       icon: <FileCode className="w-4 h-4" />,
@@ -1914,8 +1869,8 @@ function ArchiveListRow({
           console.error('Archive download failed:', err);
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noDownload') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noDownload') : undefined,
     },
     {
       label: t('archives.menu.copyDownloadLink'),
@@ -1928,8 +1883,8 @@ function ArchiveListRow({
           showToast(t('archives.toast.failedCopyLink'), 'error');
         });
       },
-      disabled: !hasPermission('archives:read'),
-      title: !hasPermission('archives:read') ? t('archives.permission.noCopyLink') : undefined,
+      disabled: !canDownload,
+      title: !canDownload ? t('archives.permission.noCopyLink') : undefined,
     },
     {
       label: t('archives.menu.qrCode'),
@@ -2169,46 +2124,26 @@ function ArchiveListRow({
               variant="ghost"
               size="sm"
               onClick={() => setShowReprint(true)}
+              aria-label={t('archives.menu.print')}
               disabled={!archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id)}
-              title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : t('common.print')}
+              title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : t('archives.menu.print')}
               className="text-bambu-green hover:text-bambu-green-light hover:bg-bambu-green/10"
             >
               <Play className="w-4 h-4" />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              const filename = archive.print_name || archive.filename || 'model';
-              openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-            }}
-            title={t('archives.card.openInBambuStudio')}
-          >
-            <ExternalLink className="w-4 h-4" />
-          </Button>
-          {(archive.external_url || archive.makerworld_url) && (
+          {archive.file_path && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => window.open((archive.external_url || archive.makerworld_url)!, '_blank')}
-              title={archive.external_url ? t('archives.card.externalLink') : 'MakerWorld'}
+              onClick={() => setShowSaveToFiles(true)}
+              disabled={!hasPermission('library:upload')}
+              title={!hasPermission('library:upload') ? t('archives.permission.noSaveToFiles') : t('archives.menu.saveToFiles')}
+              aria-label={t('archives.menu.saveToFiles')}
             >
-              <Globe className="w-4 h-4" />
+              <Save className="w-4 h-4" />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              api.downloadArchive(archive.id, `${archive.print_name || archive.filename}.3mf`).catch((err) => {
-                console.error('Archive download failed:', err);
-              });
-            }}
-            title={t('archives.card.download')}
-          >
-            <Download className="w-4 h-4" />
-          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -2217,15 +2152,6 @@ function ArchiveListRow({
             title={!canModify('archives', 'update', archive.created_by_id) ? t('archives.card.noPermissionEdit') : t('archives.card.edit')}
           >
             <Pencil className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowDeleteConfirm(true)}
-            disabled={!canModify('archives', 'delete', archive.created_by_id)}
-            title={!canModify('archives', 'delete', archive.created_by_id) ? t('archives.card.noPermissionDelete') : t('archives.card.delete')}
-          >
-            <Trash2 className="w-4 h-4 text-red-400" />
           </Button>
           <Button
             variant="ghost"
