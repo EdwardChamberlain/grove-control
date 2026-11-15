@@ -917,7 +917,7 @@ export default {
       failed: 'échoué',
       duplicate: 'doublon',
       duplicateTitle: 'Ce modèle a déjà été imprimé',
-      openSource3mf: 'Ouvrir 3MF dans Bambu Studio (clic droit pour plus)',
+      openSource3mf: 'Ouvrir 3MF dans Bambu Studio',
       downloadF3d: 'Télécharger fichier Fusion 360',
       viewTimelapse: 'Voir timelapse',
       viewPhoto: 'Voir 1 photo',

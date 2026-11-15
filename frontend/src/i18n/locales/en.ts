@@ -931,7 +931,7 @@ export default {
       failed: 'failed',
       duplicate: 'duplicate',
       duplicateTitle: 'This model has been printed before',
-      openSource3mf: 'Open source 3MF in Bambu Studio (right-click for more options)',
+      openSource3mf: 'Open source 3MF in Bambu Studio',
       downloadF3d: 'Download Fusion 360 design file',
       viewTimelapse: 'View timelapse',
       viewPhoto: 'View 1 photo',

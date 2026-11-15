@@ -917,7 +917,7 @@ export default {
       failed: '失败',
       duplicate: '重复',
       duplicateTitle: '此模型之前已打印过',
-      openSource3mf: '在 Bambu Studio 中打开源 3MF（右键查看更多选项）',
+      openSource3mf: '在 Bambu Studio 中打开源 3MF',
       downloadF3d: '下载 Fusion 360 设计文件',
       viewTimelapse: '查看延时摄影',
       viewPhoto: '查看 1 张照片',

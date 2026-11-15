@@ -916,7 +916,7 @@ export default {
       failed: '失敗',
       duplicate: '重複',
       duplicateTitle: 'このモデルは以前印刷されています',
-      openSource3mf: 'ソース3MFをBambu Studioで開く（右クリックでオプション表示）',
+      openSource3mf: 'ソース3MFをBambu Studioで開く',
       downloadF3d: 'Fusion 360デザインファイルをダウンロード',
       viewTimelapse: 'タイムラプスを表示',
       viewPhoto: '写真を表示',

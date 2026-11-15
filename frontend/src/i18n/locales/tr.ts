@@ -917,7 +917,7 @@ export default {
       failed: 'başarısız',
       duplicate: 'tekrar',
       duplicateTitle: 'Bu model daha önce yazdırıldı',
-      openSource3mf: "Kaynak 3MF'yi Bambu Studio'da aç (daha fazla seçenek için sağ tıklayın)",
+      openSource3mf: "Kaynak 3MF'yi Bambu Studio'da aç",
       downloadF3d: 'Fusion 360 tasarım dosyasını indir',
       viewTimelapse: 'Zaman atlamalı videoyu görüntüle',
       viewPhoto: '1 fotoğrafı görüntüle',
