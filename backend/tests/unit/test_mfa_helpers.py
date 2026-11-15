@@ -56,7 +56,8 @@ class TestTOTPReplayCounter:
 
     def test_previous_window_code_uses_previous_counter(self):
         now = datetime(2026, 1, 1, 12, 0, 15, tzinfo=timezone.utc)
-        totp = pyotp.TOTP("JBSWY3DPEHPK3PXP")
+        # pyotp 2.12 rejects secrets under 112 bits, so use a 160-bit one.
+        totp = pyotp.TOTP("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
 
         current_counter = totp.timecode(now)
         previous_code = totp.at(now, counter_offset=-1)
