@@ -3,6 +3,7 @@ import { act, renderHook } from '../utils';
 import { floatingMenuStyle, useFloatingMenuPosition } from '../../hooks/useFloatingMenuPosition';
 
 const VIEWPORT_HEIGHT = 800;
+const VIEWPORT_WIDTH = 1000;
 
 function rect(top: number, height = 32, left = 100, width = 120): DOMRect {
   return {
@@ -18,17 +19,25 @@ function rect(top: number, height = 32, left = 100, width = 120): DOMRect {
   } as DOMRect;
 }
 
-function fakeTrigger(top: number) {
+function fakeTrigger(top: number, left = 100) {
   const el = document.createElement('button');
-  el.getBoundingClientRect = () => rect(top);
+  el.getBoundingClientRect = () => rect(top, 32, left);
   return el;
 }
 
-function fakeMenu(contentHeight: number) {
+function fakeMenu(contentHeight: number, width = 0) {
   const el = document.createElement('div');
   Object.defineProperty(el, 'scrollHeight', { configurable: true, value: contentHeight });
   Object.defineProperty(el, 'offsetHeight', { configurable: true, value: contentHeight + 2 });
   Object.defineProperty(el, 'clientHeight', { configurable: true, value: contentHeight });
+  // Mimics a fixed box: it is as wide as its content, but no wider than its
+  // max-width or the space to the right of its `left`.
+  el.getBoundingClientRect = () => {
+    if (!width) return rect(0, 0, 0, 0);
+    const cap = el.style.maxWidth && el.style.maxWidth !== 'none' ? parseFloat(el.style.maxWidth) : Infinity;
+    const room = VIEWPORT_WIDTH - (parseFloat(el.style.left) || 0);
+    return rect(0, contentHeight, 0, Math.min(width, cap, room));
+  };
   return el;
 }
 
@@ -43,6 +52,7 @@ function position(triggerTop: number, menuHeight: number) {
 describe('useFloatingMenuPosition', () => {
   beforeEach(() => {
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(VIEWPORT_HEIGHT);
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(VIEWPORT_WIDTH);
   });
 
   afterEach(() => {
@@ -245,9 +255,132 @@ describe('useFloatingMenuPosition', () => {
     expect(result.current.maxHeight).toBe(40);
   });
 
+  it('shifts left so a menu overflowing the right edge stays inside the viewport', () => {
+    // Trigger starts at 900; a 200px menu would reach 1100 on a 1000px screen.
+    const triggerRef = { current: fakeTrigger(100, 900) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100, 200) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current).toMatchObject({ left: VIEWPORT_WIDTH - 8 - 200, placement: 'below' });
+    expect(result.current.maxWidth).toBeUndefined();
+  });
+
+  it('clamps a menu wider than the viewport to the left margin with a max width', () => {
+    const triggerRef = { current: fakeTrigger(100, 900) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100, 1200) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current).toMatchObject({ left: 8, maxWidth: VIEWPORT_WIDTH - 2 * 8 });
+  });
+
+  it('keeps the trigger left edge for a menu that fits', () => {
+    const triggerRef = { current: fakeTrigger(100, 100) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100, 200) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current).toMatchObject({ left: 100, minWidth: 120 });
+    expect(result.current.maxWidth).toBeUndefined();
+  });
+
+  it('keeps the trigger left edge when the menu ends exactly on the margin', () => {
+    // 780 + 212 = 992 = 1000 - 8: fits with no shift.
+    const triggerRef = { current: fakeTrigger(100, 780) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100, 212) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current.left).toBe(780);
+  });
+
+  it('measures the trigger width when the menu has not been laid out', () => {
+    // offsetWidth is 0 before layout, so the 120px trigger width stands in for it:
+    // 880 + 120 overflows the 992px limit, so it shifts to 1000 - 8 - 120.
+    const triggerRef = { current: fakeTrigger(100, 880) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current.left).toBe(VIEWPORT_WIDTH - 8 - 120);
+  });
+
+  it('shifts a menu again when the viewport narrows on resize', () => {
+    const triggerRef = { current: fakeTrigger(100, 100) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100, 200) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+    expect(result.current.left).toBe(100);
+
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(300);
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(result.current.left).toBe(300 - 8 - 200);
+  });
+
+  it('measures the natural width and restores the menu styles afterwards', () => {
+    const triggerRef = { current: fakeTrigger(100, 900) as HTMLElement | null };
+    const menu = fakeMenu(100, 200);
+    menu.style.left = '500px';
+    menu.style.maxWidth = '50px';
+    renderHook(() => useFloatingMenuPosition(true, triggerRef, { current: menu }));
+
+    expect(menu.style.left).toBe('500px');
+    expect(menu.style.maxWidth).toBe('50px');
+  });
+
+  it('stays pinned across repeated scrolls when wider than the viewport', () => {
+    const triggerRef = { current: fakeTrigger(100, 900) as HTMLElement | null };
+    const menu = fakeMenu(100, 1200);
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, { current: menu }));
+    for (let i = 0; i < 3; i++) {
+      // Apply the styles the way the component would between events.
+      Object.assign(menu.style, { left: `${result.current.left}px`, maxWidth: `${result.current.maxWidth}px` });
+      act(() => {
+        window.dispatchEvent(new Event('scroll'));
+      });
+      expect(result.current).toMatchObject({ left: 8, maxWidth: VIEWPORT_WIDTH - 16 });
+    }
+  });
+
+  it('uses the natural width when re-measured at a large left', () => {
+    const triggerRef = { current: fakeTrigger(100, 900) as HTMLElement | null };
+    const menu = fakeMenu(100, 300);
+    menu.style.left = '900px'; // only 100px of room here, so it would measure narrow
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, { current: menu }));
+
+    expect(result.current.left).toBe(VIEWPORT_WIDTH - 8 - 300);
+  });
+
+  it('counts the trigger width when the content is narrower', () => {
+    const triggerRef = { current: fakeTrigger(100, 880) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100, 34) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current.left).toBe(VIEWPORT_WIDTH - 8 - 120);
+  });
+
+  it('clamps a trigger that starts left of the viewport to the margin', () => {
+    const triggerRef = { current: fakeTrigger(100, -50) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(100, 200) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current.left).toBe(8);
+  });
+
+  it('shifts left when opening above', () => {
+    const triggerRef = { current: fakeTrigger(700, 900) as HTMLElement | null };
+    const menuRef = { current: fakeMenu(200, 200) as HTMLElement | null };
+    const { result } = renderHook(() => useFloatingMenuPosition(true, triggerRef, menuRef));
+
+    expect(result.current).toMatchObject({ placement: 'above', left: VIEWPORT_WIDTH - 8 - 200 });
+  });
+
   it('builds an inline style from the position', () => {
     expect(
       floatingMenuStyle({ left: 1, bottom: 2, minWidth: 3, maxHeight: 4, placement: 'above' }),
     ).toEqual({ left: 1, top: undefined, bottom: 2, minWidth: 3, maxHeight: 4 });
+  });
+
+  it('passes the max width through to the inline style', () => {
+    expect(
+      floatingMenuStyle({ left: 8, top: 5, minWidth: 3, maxWidth: 984, maxHeight: 4, placement: 'below' }),
+    ).toMatchObject({ left: 8, maxWidth: 984 });
   });
 });
