@@ -95,6 +95,9 @@ async def get_print_log(
                 filament_type=e.filament_type,
                 filament_color=e.filament_color,
                 filament_used_grams=e.filament_used_grams,
+                cost=e.cost,
+                energy_kwh=e.energy_kwh,
+                energy_cost=e.energy_cost,
                 # failure_reason was silently dropped by the GET serialiser
                 # before #1687 part 4 — without it the Print Log table couldn't
                 # surface what the Failure Analysis widget already groups by.
