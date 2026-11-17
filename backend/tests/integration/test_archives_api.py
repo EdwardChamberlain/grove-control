@@ -783,6 +783,25 @@ class TestPrintLogDateFilter:
         assert [i["print_name"] for i in body["items"]] == ["new"]
 
 
+class TestPrintLogCostFields:
+    """``GET /print-log/`` returns the per-run cost and energy figures."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_get_surfaces_cost_and_energy(self, async_client: AsyncClient, db_session):
+        from backend.app.models.print_log import PrintLogEntry
+
+        db_session.add(
+            PrintLogEntry(print_name="costed", status="completed", cost=1.25, energy_kwh=0.4, energy_cost=0.1)
+        )
+        await db_session.commit()
+
+        item = next(
+            i for i in (await async_client.get("/api/v1/print-log/")).json()["items"] if i["print_name"] == "costed"
+        )
+        assert (item["cost"], item["energy_kwh"], item["energy_cost"]) == (1.25, 0.4, 0.1)
+
+
 class TestPrintLogEntryUpdate:
     """Tests for ``PATCH /print-log/{entry_id}`` (#1687 part 4).
 
