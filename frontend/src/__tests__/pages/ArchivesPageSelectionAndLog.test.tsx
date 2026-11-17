@@ -195,9 +195,10 @@ describe('ArchivesPage print log view', () => {
     render(<ArchivesPage />);
     await screen.findByText('Log Benchy');
 
-    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-01-31' } });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(await screen.findByLabelText('To'), { target: { value: '2026-01-31' } });
     await waitFor(() => expect(requests.some((r) => r.get('date_to') === '2026-01-31T23:59:59')).toBe(true));
-    // Same controls as the grid view, not a log-only set.
+    // Same panel as the grid view, not a log-only set.
     expect(screen.getByRole('button', { name: 'All Materials' })).toBeInTheDocument();
   });
 
@@ -217,7 +218,8 @@ describe('ArchivesPage print log view', () => {
     await user.click(screen.getAllByTitle('Remove from Favorites')[0]);
     await waitFor(() => expect(calls.favorites).toEqual([1]));
 
-    await user.click(screen.getByRole('button', { name: /^Favorites$/ }));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    await user.click(await screen.findByRole('button', { name: /^Favorites$/ }));
     await waitFor(() => expect(screen.queryByText('Log Clip')).not.toBeInTheDocument());
     expect(screen.getByText('Log Benchy')).toBeInTheDocument();
   });

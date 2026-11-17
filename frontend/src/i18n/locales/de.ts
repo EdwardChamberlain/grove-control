@@ -767,6 +767,11 @@ export default {
     resetFilters: 'Filter zurücksetzen',
     createdAutomatically: 'Drucke werden automatisch erfasst, sobald sie fertig sind',
     filters: {
+      filters: 'Filter',
+      whoWhen: 'Wer & wann',
+      what: 'Was',
+      showCount: '{{count}} anzeigen',
+      removeFilter: 'Filter entfernen: {{label}}',
       export: 'Exportieren',
       exportCsv: 'Als CSV exportieren',
       exportExcel: 'Als Excel exportieren',

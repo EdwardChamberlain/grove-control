@@ -781,6 +781,11 @@ export default {
     resetFilters: 'Reset filters',
     createdAutomatically: 'Prints are recorded automatically when they finish',
     filters: {
+      filters: 'Filters',
+      whoWhen: 'Who & when',
+      what: 'What',
+      showCount: 'Show {{count}}',
+      removeFilter: 'Remove filter: {{label}}',
       export: 'Export',
       exportCsv: 'Export as CSV',
       exportExcel: 'Export as Excel',

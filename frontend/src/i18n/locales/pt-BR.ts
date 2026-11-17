@@ -767,6 +767,11 @@ export default {
     resetFilters: 'Redefinir filtros',
     createdAutomatically: 'As impressões são registradas automaticamente ao terminar',
     filters: {
+      filters: 'Filtros',
+      whoWhen: 'Quem e quando',
+      what: 'O quê',
+      showCount: 'Mostrar {{count}}',
+      removeFilter: 'Remover filtro: {{label}}',
       export: 'Exportar',
       exportCsv: 'Exportar como CSV',
       exportExcel: 'Exportar como Excel',

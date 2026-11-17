@@ -767,6 +767,11 @@ export default {
     resetFilters: '重設篩選',
     createdAutomatically: '列印完成後會自動記錄',
     filters: {
+      filters: '篩選',
+      whoWhen: '使用者與時間',
+      what: '內容',
+      showCount: '顯示 {{count}} 項',
+      removeFilter: '移除篩選：{{label}}',
       export: '匯出',
       exportCsv: '匯出為 CSV',
       exportExcel: '匯出為 Excel',

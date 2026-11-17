@@ -227,7 +227,8 @@ describe('ArchivesPage dialogs', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByTitle('Manage Tags'));
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    await user.click(await screen.findByTitle('Manage Tags'));
     expect(await screen.findByRole('heading', { name: 'Manage Tags' })).toBeInTheDocument();
   });
 
@@ -304,7 +305,8 @@ describe('ArchivesPage print log filters and paging', () => {
     await user.click(await screen.findByRole('button', { name: 'Failed' }));
     await waitFor(() => expect(requests.at(-1)?.get('status')).toBe('failed'));
 
-    const dateFrom = document.querySelectorAll<HTMLInputElement>('input[type="date"]')[0];
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    const dateFrom = await screen.findByLabelText('From');
     fireEvent.change(dateFrom, { target: { value: '2026-01-01' } });
     await waitFor(() => expect(requests.at(-1)?.get('date_from')).toBe('2026-01-01'));
     expect(localStorage.setItem).toHaveBeenCalledWith('logFilterDateFrom', '2026-01-01');
