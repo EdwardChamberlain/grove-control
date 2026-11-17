@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Archive } from '../api/client';
 import { api } from '../api/client';
-import { parseUTCDate } from '../utils/date';
+import { parseUTCDate, getLastPrintedAt } from '../utils/date';
 
 interface CalendarViewProps {
   archives: Archive[];
@@ -36,7 +36,7 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
   const archivesByDate = useMemo(() => {
     const map = new Map<string, Archive[]>();
     archives.forEach(archive => {
-      const date = parseUTCDate(archive.completed_at || archive.created_at) || new Date();
+      const date = parseUTCDate(getLastPrintedAt(archive)) || new Date();
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
       const existing = map.get(key) || [];
       existing.push(archive);
@@ -185,7 +185,7 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
             <div>
               <div className="text-2xl font-bold text-white">
                 {archives.filter(a => {
-                  const d = parseUTCDate(a.completed_at || a.created_at) || new Date();
+                  const d = parseUTCDate(getLastPrintedAt(a)) || new Date();
                   return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
                 }).length}
               </div>
@@ -194,7 +194,7 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
             <div>
               <div className="text-2xl font-bold text-green-400">
                 {archives.filter(a => {
-                  const d = parseUTCDate(a.completed_at || a.created_at) || new Date();
+                  const d = parseUTCDate(getLastPrintedAt(a)) || new Date();
                   return d.getMonth() === currentMonth && d.getFullYear() === currentYear && a.status === 'completed';
                 }).length}
               </div>
@@ -203,7 +203,7 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
             <div>
               <div className="text-2xl font-bold text-red-400">
                 {archives.filter(a => {
-                  const d = parseUTCDate(a.completed_at || a.created_at) || new Date();
+                  const d = parseUTCDate(getLastPrintedAt(a)) || new Date();
                   return d.getMonth() === currentMonth && d.getFullYear() === currentYear && a.status === 'failed';
                 }).length}
               </div>

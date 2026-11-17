@@ -474,3 +474,15 @@ export function localDateKey(input: string | Date): string {
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+/**
+ * When a model was last printed: the latest print-log run, then the archive's
+ * own start time, falling back to upload time for never-printed files.
+ */
+export function getLastPrintedAt(a: {
+  last_run_at?: string | null;
+  started_at?: string | null;
+  created_at: string;
+}): string {
+  return a.last_run_at || a.started_at || a.created_at;
+}

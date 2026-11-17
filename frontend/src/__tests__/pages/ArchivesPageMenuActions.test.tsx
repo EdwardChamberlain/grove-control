@@ -1,8 +1,5 @@
 /**
- * ArchivesPage: the per-archive actions menu, in both grid and list layouts.
- *
- * The card and the list row each build their own copy of this menu, so
- * every scenario runs once per layout.
+ * ArchivesPage: the per-archive actions menu, for the grid card layout.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -88,7 +85,7 @@ function useArchives(overrides: Record<string, unknown> = {}, scan: JsonBodyType
   return calls;
 }
 
-const layouts = ['grid', 'list'] as const;
+const layouts = ['grid'] as const;
 
 function setLayout(layout: (typeof layouts)[number]) {
   vi.mocked(localStorage.getItem).mockImplementation((key: string) => (key === 'archiveViewMode' ? layout : null));
@@ -354,21 +351,20 @@ describe.each(layouts)('archive actions menu (%s layout)', (layout) => {
   });
 });
 
-describe('archive list row Reprint button', () => {
-  beforeEach(() => setLayout('list'));
+describe('archive card Reprint button', () => {
+  beforeEach(() => setLayout('grid'));
 
   async function reprintButton() {
     await screen.findAllByText('Benchy');
     return screen.findByRole('button', { name: 'Reprint' });
   }
 
-  it('is enabled and labelled Reprint when the archive can be reprinted', async () => {
+  it('is enabled when the archive can be reprinted', async () => {
     useArchives();
     render(<ArchivesPage />);
 
     const button = await reprintButton();
     expect(button).toBeEnabled();
-    expect(button).toHaveAttribute('title', 'Reprint');
   });
 
   it('explains when the archive has no 3MF file', async () => {

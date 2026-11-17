@@ -755,6 +755,34 @@ class TestPrintLogEntryDelete:
         assert set(survivors) == {a.id, c.id}
 
 
+class TestPrintLogDateFilter:
+    """``GET /print-log/`` filters and orders by print start, not row creation."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_date_filter_and_order_use_started_at(self, async_client: AsyncClient, db_session):
+        from datetime import datetime
+
+        from backend.app.models.print_log import PrintLogEntry
+
+        old = PrintLogEntry(print_name="old", status="completed", started_at=datetime(2026, 1, 1, 10, 0))
+        new = PrintLogEntry(print_name="new", status="completed", started_at=datetime(2026, 3, 5, 18, 30))
+        db_session.add_all([old, new])
+        await db_session.commit()
+
+        body = (await async_client.get("/api/v1/print-log/")).json()
+        names = [i["print_name"] for i in body["items"]]
+        assert names.index("new") < names.index("old")
+
+        body = (
+            await async_client.get(
+                "/api/v1/print-log/",
+                params={"date_from": "2026-03-01T00:00:00", "date_to": "2026-03-05T23:59:59"},
+            )
+        ).json()
+        assert [i["print_name"] for i in body["items"]] == ["new"]
+
+
 class TestPrintLogEntryUpdate:
     """Tests for ``PATCH /print-log/{entry_id}`` (#1687 part 4).
 
