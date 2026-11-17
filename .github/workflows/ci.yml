@@ -276,7 +276,9 @@ jobs:
 
       - name: Audit all dependencies
         working-directory: frontend
-        run: npm audit --audit-level=high
+        run: |
+          node --test scripts/audit-dependencies.test.mjs
+          node scripts/audit-dependencies.mjs
 
   frontend-typecheck:
     name: Frontend Type Check
