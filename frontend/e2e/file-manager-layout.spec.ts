@@ -33,7 +33,7 @@ for (const updateBanner of [false, true]) {
       await stubWebSocket(page);
       await mockApi(page, { updateBanner });
       await page.goto('/files');
-      await expect(page.getByRole('heading', { name: 'File Manager' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeVisible();
       if (updateBanner) await expect(page.getByText(/9\.9\.9 is available/)).toBeVisible();
 
       const { bottom, scrollHeight } = await page.evaluate(() => {

@@ -56,7 +56,6 @@ import {
   ClipboardList,
   Zap,
   Cog,
-  Archive as ArchiveIcon,
   History,
 } from 'lucide-react';
 import { api } from '../api/client';

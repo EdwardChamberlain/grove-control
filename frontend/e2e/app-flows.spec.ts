@@ -254,7 +254,7 @@ test('print modal exposes queue-first controls', async ({ page }) => {
   await mockApi(page, calls);
 
   await page.goto('/archives');
-  await expect(page.getByRole('heading', { name: /Archives/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Reprint', exact: true }).click();
 
   await expect(page.getByRole('heading', { name: /^Print$/i })).toBeVisible();
@@ -455,7 +455,7 @@ test('core app API smoke reaches create, edit, upload, slice, queue, and setting
   await expect(page.getByRole('heading', { name: /Inventory/i })).toBeVisible();
 
   await page.goto('/archives');
-  await expect(page.getByRole('heading', { name: /Archives/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'History', exact: true })).toBeVisible();
 
   await page.goto('/queue');
   await expect(page.getByRole('heading', { name: /Print Queue/i })).toBeVisible();
