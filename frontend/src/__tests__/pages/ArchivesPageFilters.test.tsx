@@ -229,6 +229,18 @@ describe('ArchivesPage sorting', () => {
     archive(2, 'Charlie'),
   ];
 
+  it('puts a reprinted model first by last print date, not upload date', async () => {
+    useArchives([
+      archive(3, 'Alpha'),
+      archive(1, 'Bravo', { last_run_at: new Date(Date.UTC(2026, 5, 1, 12)).toISOString() }),
+      archive(2, 'Charlie'),
+    ]);
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Alpha');
+    expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Bravo', 'Alpha', 'Charlie']);
+  });
+
   it('sorts by name and remembers the choice', async () => {
     useArchives(items);
     const user = userEvent.setup();
@@ -237,7 +249,7 @@ describe('ArchivesPage sorting', () => {
     await screen.findAllByText('Alpha');
     expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Alpha', 'Charlie', 'Bravo']);
 
-    await pickOption(user, 'Newest first', 'Name A-Z');
+    await pickOption(user, 'Recently printed', 'Name A-Z');
     await waitFor(() => expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Alpha', 'Bravo', 'Charlie']));
     expect(localStorage.setItem).toHaveBeenCalledWith('archiveSortBy', 'name-asc');
   });
@@ -248,7 +260,7 @@ describe('ArchivesPage sorting', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Alpha');
-    await pickOption(user, 'Newest first', 'Smallest first');
+    await pickOption(user, 'Recently printed', 'Smallest first');
     await waitFor(() => expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Bravo', 'Charlie', 'Alpha']));
 
     await pickOption(user, 'Smallest first', 'Largest first');

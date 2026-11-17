@@ -61,19 +61,22 @@ async def get_print_log(
     if search:
         query = query.where(PrintLogEntry.print_name.ilike(f"%{search}%"))
         count_query = count_query.where(PrintLogEntry.print_name.ilike(f"%{search}%"))
+    # Filter and order by when the print happened (the date shown in the UI),
+    # falling back to when the entry was written for rows without a start time.
+    print_date = func.coalesce(PrintLogEntry.started_at, PrintLogEntry.created_at)
     if date_from:
-        query = query.where(PrintLogEntry.created_at >= date_from)
-        count_query = count_query.where(PrintLogEntry.created_at >= date_from)
+        query = query.where(print_date >= date_from)
+        count_query = count_query.where(print_date >= date_from)
     if date_to:
-        query = query.where(PrintLogEntry.created_at <= date_to)
-        count_query = count_query.where(PrintLogEntry.created_at <= date_to)
+        query = query.where(print_date <= date_to)
+        count_query = count_query.where(print_date <= date_to)
 
     # Get total count
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
     # Get paginated results
-    query = query.order_by(PrintLogEntry.created_at.desc()).offset(offset).limit(limit)
+    query = query.order_by(print_date.desc(), PrintLogEntry.id.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     entries = result.scalars().all()
 

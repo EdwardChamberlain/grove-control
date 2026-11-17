@@ -260,12 +260,13 @@ describe('ArchivesPage', () => {
       });
     });
 
-    it('has list view option', async () => {
+    it('offers grid, calendar and log views but no list view', async () => {
       render(<ArchivesPage />);
 
       await waitFor(() => {
-        expect(screen.getByTitle(/list/i)).toBeInTheDocument();
+        expect(screen.getByTitle(/grid/i)).toBeInTheDocument();
       });
+      expect(screen.queryByTitle(/^list/i)).not.toBeInTheDocument();
     });
   });
 
