@@ -5,6 +5,7 @@ WORKDIR /app/frontend
 
 # Copy package files first for better caching
 COPY frontend/package*.json ./
+COPY vendor/picomatch/ /app/vendor/picomatch/
 
 # Use cache mount for npm
 RUN --mount=type=cache,target=/root/.npm \

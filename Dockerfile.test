@@ -60,6 +60,7 @@ WORKDIR /app/frontend
 
 # Copy package files and install
 COPY frontend/package*.json ./
+COPY vendor/picomatch/ /app/vendor/picomatch/
 RUN npm ci
 
 # Copy frontend source
