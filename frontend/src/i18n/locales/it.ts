@@ -15,7 +15,7 @@ export default {
   // Navigation
   nav: {
     printers: 'Stampanti',
-    archives: 'Archivi',
+    archives: 'Cronologia',
     queue: 'Coda di stampa',
     stats: 'Statistiche',
     profiles: 'Profili',
@@ -3386,7 +3386,7 @@ export default {
       grouped: '{{count}} file raggruppati come versioni',
       printAlternatives: 'Stampa ({{count}} alternative)',
     },
-    title: 'Gestore file',
+    title: 'File',
     subtitle: 'Organizza e gestisci i tuoi file di stampa',
     uploadFiles: 'Carica file',
     newFolder: 'Nuova cartella',

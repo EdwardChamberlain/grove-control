@@ -147,7 +147,7 @@ describe('ArchivesPage', () => {
       render(<ArchivesPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Archives')).toBeInTheDocument();
+        expect(screen.getByText('History')).toBeInTheDocument();
       });
     });
 

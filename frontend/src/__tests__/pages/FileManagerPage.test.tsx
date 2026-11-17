@@ -159,7 +159,7 @@ describe('FileManagerPage', () => {
       render(<FileManagerPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('File Manager')).toBeInTheDocument();
+        expect(screen.getByText('Files')).toBeInTheDocument();
       });
     });
 
