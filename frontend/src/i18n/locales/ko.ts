@@ -723,6 +723,7 @@ export default {
     uploaded: '업로드됨',
     notYetPrinted: '아직 출력 안 됨',
     resetFilters: '필터 초기화',
+    createdAutomatically: '출력은 완료되면 자동으로 기록됩니다',
     filters: {
       export: '내보내기',
       exportCsv: 'CSV로 내보내기',

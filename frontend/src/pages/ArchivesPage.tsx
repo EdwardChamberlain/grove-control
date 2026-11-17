@@ -2642,11 +2642,18 @@ export function ArchivesPage() {
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-bambu-gray">
-              {search ? t('archives.noArchivesSearch') : t('archives.noArchivesYet')}
+              {hasTopFilters ? t('archives.noArchivesSearch') : t('archives.noArchivesYet')}
             </p>
-            <p className="text-sm text-bambu-gray mt-2">
-              Archives are created automatically when prints complete
-            </p>
+            {hasTopFilters ? (
+              <Button variant="ghost" size="sm" className="mt-3" onClick={clearTopFilters}>
+                <X className="w-4 h-4" />
+                {t('archives.resetFilters')}
+              </Button>
+            ) : (
+              <p className="text-sm text-bambu-gray mt-2">
+                {t('archives.createdAutomatically')}
+              </p>
+            )}
           </CardContent>
         </Card>
       ) : viewMode === 'calendar' ? (

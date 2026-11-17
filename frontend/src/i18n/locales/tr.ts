@@ -765,6 +765,7 @@ export default {
     uploaded: 'Yüklendi',
     notYetPrinted: 'Henüz yazdırılmadı',
     resetFilters: 'Filtreleri sıfırla',
+    createdAutomatically: 'Baskılar tamamlandığında otomatik olarak kaydedilir',
     filters: {
       export: 'Dışa aktar',
       exportCsv: 'CSV olarak dışa aktar',

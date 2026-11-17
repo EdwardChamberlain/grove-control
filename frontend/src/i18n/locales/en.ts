@@ -779,6 +779,7 @@ export default {
     uploaded: 'Uploaded',
     notYetPrinted: 'Not yet printed',
     resetFilters: 'Reset filters',
+    createdAutomatically: 'Prints are recorded automatically when they finish',
     filters: {
       export: 'Export',
       exportCsv: 'Export as CSV',
@@ -812,7 +813,7 @@ export default {
     sortSmallest: 'Smallest first',
     sortSize: 'Size',
     noArchives: 'No archives found',
-    noArchivesSearch: 'No archives match your search',
+    noArchivesSearch: 'No prints match your filters',
     originalPrintNotVisible: 'Original print not visible - try clearing filters',
     noArchivesYet: 'No archives yet',
     prints: 'prints',
