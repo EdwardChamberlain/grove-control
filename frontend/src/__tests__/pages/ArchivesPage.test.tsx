@@ -245,7 +245,7 @@ describe('ArchivesPage', () => {
 
       await waitFor(() => {
         // Filter dropdowns render as custom toolbar buttons.
-        expect(screen.getByRole('button', { name: 'All Archives' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'All Prints' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'All Printers' })).toBeInTheDocument();
       });
     });
@@ -425,7 +425,7 @@ describe('ArchivesPage', () => {
     ];
 
     beforeEach(() => {
-      // Reset persisted collection so each test starts on "All Archives".
+      // Reset persisted collection so each test starts on "All Prints".
       window.localStorage.removeItem('archiveCollection');
       server.use(
         http.get('/api/v1/archives/', () => HttpResponse.json(mixedStatusArchives))
@@ -439,7 +439,7 @@ describe('ArchivesPage', () => {
         expect(screen.getByText('NeverPrinted')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'All Archives' }));
+      fireEvent.click(screen.getByRole('button', { name: 'All Prints' }));
       fireEvent.click(screen.getByRole('button', { name: 'Not Printed' }));
 
       await waitFor(() => {
@@ -457,7 +457,7 @@ describe('ArchivesPage', () => {
         expect(screen.getByText('NeverPrinted')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'All Archives' }));
+      fireEvent.click(screen.getByRole('button', { name: 'All Prints' }));
       fireEvent.click(screen.getByRole('button', { name: 'Printed' }));
 
       await waitFor(() => {

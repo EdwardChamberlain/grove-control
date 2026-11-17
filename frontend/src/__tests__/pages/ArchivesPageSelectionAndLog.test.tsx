@@ -172,6 +172,82 @@ describe('ArchivesPage print log view', () => {
 
     expect(await screen.findByText('No print log entries found')).toBeInTheDocument();
   });
+
+  it('still shows the log when there are no archives at all', async () => {
+    setView('log');
+    useArchives([]);
+    useLog(entries);
+    render(<ArchivesPage />);
+
+    expect(await screen.findByText('Log Benchy')).toBeInTheDocument();
+  });
+
+  it('shares the filter bar with the other views and sends its filters to the log', async () => {
+    setView('log');
+    useArchives();
+    const requests: URLSearchParams[] = [];
+    server.use(
+      http.get('/api/v1/print-log/', ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return HttpResponse.json({ items: entries, total: entries.length });
+      }),
+    );
+    render(<ArchivesPage />);
+    await screen.findByText('Log Benchy');
+
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-01-31' } });
+    await waitFor(() => expect(requests.some((r) => r.get('date_to') === '2026-01-31T23:59:59')).toBe(true));
+    // Same controls as the grid view, not a log-only set.
+    expect(screen.getByRole('button', { name: 'All Materials' })).toBeInTheDocument();
+  });
+
+  it('filters log rows through their archive and offers row actions', async () => {
+    setView('log');
+    const items = [archive(1, 'Benchy', { is_favorite: true }), archive(2, 'Bracket')];
+    const calls = useArchives(items);
+    const linked = [
+      { ...entries[0], archive_id: 1 },
+      { ...entries[1], archive_id: 2 },
+    ];
+    useLog(linked);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findByText('Log Benchy');
+    await user.click(screen.getAllByTitle('Remove from Favorites')[0]);
+    await waitFor(() => expect(calls.favorites).toEqual([1]));
+
+    await user.click(screen.getByRole('button', { name: /^Favorites$/ }));
+    await waitFor(() => expect(screen.queryByText('Log Clip')).not.toBeInTheDocument());
+    expect(screen.getByText('Log Benchy')).toBeInTheDocument();
+  });
+
+  it('opens the linked archive in the grid', async () => {
+    setView('log');
+    useArchives([archive(1, 'Benchy')]);
+    useLog([{ ...entries[0], archive_id: 1 }]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findByText('Log Benchy');
+    await user.click(screen.getByTitle('Show in grid'));
+    expect(await screen.findAllByText('Benchy')).not.toHaveLength(0);
+    expect(screen.queryByText('Log Benchy')).not.toBeInTheDocument();
+  });
+});
+
+describe('ArchivesPage deep links', () => {
+  it('applies ?search= from another page and clears it from the URL', async () => {
+    setView('grid');
+    useArchives();
+    window.history.pushState({}, '', '/archives?search=Bracket');
+    render(<ArchivesPage />);
+
+    expect(await screen.findAllByText('Bracket')).not.toHaveLength(0);
+    expect(screen.queryByText('Benchy')).not.toBeInTheDocument();
+    expect(window.location.search).toBe('');
+    window.history.pushState({}, '', '/');
+  });
 });
 
 describe('ArchivesPage calendar view', () => {
