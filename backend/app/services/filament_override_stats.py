@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -44,15 +45,18 @@ def effective_filament_metadata(
         try:
             filament_overrides = json.loads(filament_overrides)
         except ValueError:
-            return None, None
+            filament_overrides = None
     if not isinstance(filament_overrides, (list, tuple)):
-        return None, None
+        filament_overrides = []
 
     overrides = {_slot_id(item): item for item in filament_overrides if isinstance(item, dict)}
     actuals: dict[int, list[dict]] = {}
     for item in usage_results:
         if isinstance(item, dict) and _slot_id(item) > 0:
             actuals.setdefault(_slot_id(item), []).append(item)
+
+    if not overrides and not actuals:
+        return None, None
 
     types: list[str] = []
     colors: list[str] = []
@@ -74,14 +78,14 @@ def effective_filament_metadata(
             if color and color not in colors:
                 colors.append(color)
 
-    # PrintLogEntry stores both fields in VARCHAR(50). Avoid partial tokens
-    # and leave unknown/oversized metadata to the caller's existing fallback.
+    # PrintLogEntry stores both fields in VARCHAR(50). Avoid partial tokens, and
+    # report unknown/oversized metadata for both fields together so the caller
+    # never pairs actual materials with sliced colours (or vice versa).
     material_list = ", ".join(types)
     color_list = ",".join(colors)
-    return (
-        material_list if material_list and len(material_list) <= 50 else None,
-        color_list if color_list and len(color_list) <= 50 else None,
-    )
+    if not material_list or not color_list or len(material_list) > 50 or len(color_list) > 50:
+        return None, None
+    return material_list, color_list
 
 
 async def resolve_run_filament_metadata(
@@ -112,8 +116,8 @@ async def resolve_run_filament_metadata(
         query = query.where(PrintQueueItem.id == queue_item_id)
     else:
         query = query.where(PrintQueueItem.dispatch_subtask_id == dispatch_subtask_id)
-    item = (await db.execute(query)).scalar_one_or_none()
-    if item is None or not item.filament_overrides or not archive.file_path:
+    item = (await db.execute(query.order_by(PrintQueueItem.id.desc()).limit(1))).scalars().first()
+    if item is None or not archive.file_path or not (item.filament_overrides or usage_results):
         return fallback
 
     try:
@@ -122,6 +126,8 @@ async def resolve_run_filament_metadata(
         return fallback
     # The dispatcher sends plate_id or 1. Archive.extra_data contains every
     # plate's slots, so it cannot supply this run's material attribution.
-    slots = extract_filament_usage_from_3mf(path, item.plate_id or 1)
+    slots = await asyncio.to_thread(extract_filament_usage_from_3mf, path, item.plate_id or 1)
     material, color = effective_filament_metadata(slots, usage_results, item.filament_overrides)
-    return material or fallback[0], color or fallback[1]
+    if not (material and color):
+        return fallback
+    return material, color

@@ -5153,14 +5153,19 @@ async def on_print_complete(printer_id: int, data: dict):
                 # Both Stats endpoints read PrintLogEntry. Resolve this run's
                 # selected plate and filament without changing its source.
                 run_queue_item_id = queue_item_id if queue_item_id is not None else stopped_queue_item_id
-                run_filament_type, run_filament_color = await resolve_run_filament_metadata(
-                    db,
-                    archive,
-                    printer_id,
-                    usage_results,
-                    queue_item_id=run_queue_item_id,
-                    dispatch_subtask_id=event_subtask_id,
-                )
+                try:
+                    run_filament_type, run_filament_color = await resolve_run_filament_metadata(
+                        db,
+                        archive,
+                        printer_id,
+                        usage_results,
+                        queue_item_id=run_queue_item_id,
+                        dispatch_subtask_id=event_subtask_id,
+                    )
+                except Exception as e:
+                    # Attribution is best-effort: never lose the run's log entry.
+                    logger.warning("Filament attribution failed for archive %s: %s", archive_id, e)
+                    run_filament_type, run_filament_color = archive.filament_type, archive.filament_color
 
                 # Back-fill created_by_id on reprint (#730): reprint reuses the
                 # source archive row rather than creating a new one, so an
@@ -5203,7 +5208,7 @@ async def on_print_complete(printer_id: int, data: dict):
                     # Captured by _update_queue_status above; None for
                     # printer-initiated prints with no queue row. Batch
                     # cost/energy roll-up joins on it (#342).
-                    queue_item_id=run_queue_item_id,
+                    queue_item_id=queue_item_id,
                     status=_run_status,
                     print_name=archive.print_name,
                     printer_name=p_info.name if p_info else None,
