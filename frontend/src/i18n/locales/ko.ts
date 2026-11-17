@@ -725,6 +725,11 @@ export default {
     resetFilters: '필터 초기화',
     createdAutomatically: '출력은 완료되면 자동으로 기록됩니다',
     filters: {
+      filters: '필터',
+      whoWhen: '사용자 및 기간',
+      what: '내용',
+      showCount: '{{count}}개 보기',
+      removeFilter: '필터 제거: {{label}}',
       export: '내보내기',
       exportCsv: 'CSV로 내보내기',
       exportExcel: 'Excel로 내보내기',

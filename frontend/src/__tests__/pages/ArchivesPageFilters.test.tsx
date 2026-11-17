@@ -82,6 +82,11 @@ async function pickOption(user: ReturnType<typeof userEvent.setup>, trigger: str
   await user.click(await screen.findByRole('button', { name: option }));
 }
 
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Filters' }));
+  return within(await screen.findByRole('dialog', { name: 'Filters' }));
+}
+
 describe('ArchivesPage printer and material filters', () => {
   it('filters by printer on the server and shows the matching count', async () => {
     const items = [
@@ -114,6 +119,7 @@ describe('ArchivesPage printer and material filters', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
+    await openFilters(user);
     await pickOption(user, 'All Materials', 'PETG');
 
     expect(await screen.findByText('Gear')).toBeInTheDocument();
@@ -121,9 +127,9 @@ describe('ArchivesPage printer and material filters', () => {
     expect(screen.queryByText('Vase')).not.toBeInTheDocument();
     expect(screen.getByText('1 of 3 prints')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await user.click(screen.getAllByRole('button', { name: 'Reset' })[0]);
     expect(await screen.findByText('3 of 3 prints')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
   });
 });
 
@@ -138,7 +144,7 @@ describe('ArchivesPage colour filter', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Red Cube');
-    const colours = within(screen.getByText('Colors:').parentElement as HTMLElement);
+    const colours = await openFilters(user);
 
     await user.click(colours.getByTitle('#FF0000'));
     expect(await screen.findByText('2 of 3 prints')).toBeInTheDocument();
@@ -152,7 +158,7 @@ describe('ArchivesPage colour filter', () => {
     expect(screen.getByText('Red Cube')).toBeInTheDocument();
     expect(screen.queryByText('Red Cap')).not.toBeInTheDocument();
 
-    await user.click(colours.getByRole('button', { name: 'Clear' }));
+    await user.click(colours.getByRole('button', { name: 'Reset' }));
     expect(await screen.findByText('3 of 3 prints')).toBeInTheDocument();
   });
 });
@@ -170,6 +176,7 @@ describe('ArchivesPage toggle filters', () => {
 
     await screen.findAllByText('Plain Print');
     expect(screen.getByText('4 of 4 prints')).toBeInTheDocument();
+    await openFilters(user);
 
     await user.click(screen.getByRole('button', { name: 'Hide Failed' }));
     expect(await screen.findByText('3 of 4 prints')).toBeInTheDocument();
@@ -197,6 +204,7 @@ describe('ArchivesPage toggle filters', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Sliced Part');
+    await openFilters(user);
     await pickOption(user, 'All Files', 'Source Only');
     expect(await screen.findByText('Source Part')).toBeInTheDocument();
     expect(screen.queryByText('Sliced Part')).not.toBeInTheDocument();
@@ -215,6 +223,7 @@ describe('ArchivesPage toggle filters', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Untagged');
+    await openFilters(user);
     await pickOption(user, 'All Tags', 'calibration');
 
     expect(await screen.findByText('Tagged')).toBeInTheDocument();
@@ -347,5 +356,69 @@ describe('ArchivesPage collections, search and pagination', () => {
     expect(await screen.findByText('26 prints')).toBeInTheDocument();
     expect(screen.queryByText('Page 1 of 2')).not.toBeInTheDocument();
     expect(screen.getByText('Print 01')).toBeInTheDocument();
+  });
+});
+
+describe('ArchivesPage filters panel', () => {
+  it('keeps secondary filters behind one button and shows what is active as removable chips', async () => {
+    useArchives([
+      archive(1, 'Benchy', { filament_type: 'PLA' }),
+      archive(2, 'Gear', { filament_type: 'PETG' }),
+    ]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    // Nothing secondary is on the page until the panel is opened, and no chips yet.
+    expect(screen.queryByRole('button', { name: 'All Materials' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
+
+    await openFilters(user);
+    await pickOption(user, 'All Materials', 'PETG');
+    expect(await screen.findByRole('button', { name: 'Remove filter: PETG' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: 'Show 1' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Remove filter: PETG' }));
+    expect(await screen.findByText('2 of 2 prints')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
+  });
+
+  it('closes the panel with Escape', async () => {
+    useArchives([archive(1, 'Benchy')]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    await openFilters(user);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument();
+  });
+
+  it('moves printer, status and sort into the panel on a phone', async () => {
+    const spy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      useArchives([archive(1, 'Benchy')]);
+      const user = userEvent.setup();
+      render(<ArchivesPage />);
+      await screen.findAllByText('Benchy');
+
+      expect(screen.queryByRole('button', { name: 'All Printers' })).not.toBeInTheDocument();
+      const panel = await openFilters(user);
+      expect(panel.getByRole('button', { name: 'All Printers' })).toBeInTheDocument();
+      expect(panel.getByRole('button', { name: 'All Statuses' })).toBeInTheDocument();
+      expect(panel.getByRole('button', { name: 'Recently printed' })).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

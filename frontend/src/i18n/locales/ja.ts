@@ -766,6 +766,11 @@ export default {
     resetFilters: 'フィルターをリセット',
     createdAutomatically: '印刷は完了時に自動的に記録されます',
     filters: {
+      filters: 'フィルター',
+      whoWhen: 'ユーザーと期間',
+      what: '内容',
+      showCount: '{{count}}件を表示',
+      removeFilter: 'フィルターを削除: {{label}}',
       export: 'エクスポート',
       exportCsv: 'CSVでエクスポート',
       exportExcel: 'Excelでエクスポート',

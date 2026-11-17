@@ -767,6 +767,11 @@ export default {
     resetFilters: 'Filtreleri sıfırla',
     createdAutomatically: 'Baskılar tamamlandığında otomatik olarak kaydedilir',
     filters: {
+      filters: 'Filtreler',
+      whoWhen: 'Kim ve ne zaman',
+      what: 'Ne',
+      showCount: '{{count}} göster',
+      removeFilter: 'Filtreyi kaldır: {{label}}',
       export: 'Dışa aktar',
       exportCsv: 'CSV olarak dışa aktar',
       exportExcel: 'Excel olarak dışa aktar',

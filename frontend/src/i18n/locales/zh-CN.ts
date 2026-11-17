@@ -767,6 +767,11 @@ export default {
     resetFilters: '重置筛选',
     createdAutomatically: '打印完成后会自动记录',
     filters: {
+      filters: '筛选',
+      whoWhen: '用户和时间',
+      what: '内容',
+      showCount: '显示 {{count}} 项',
+      removeFilter: '移除筛选：{{label}}',
       export: '导出',
       exportCsv: '导出为 CSV',
       exportExcel: '导出为 Excel',
