@@ -5145,10 +5145,29 @@ async def on_print_complete(printer_id: int, data: dict):
     try:
         async with async_session() as db:
             from backend.app.models.archive import PrintArchive
+            from backend.app.models.print_queue import PrintQueueItem
+            from backend.app.services.filament_override_stats import effective_filament_metadata
             from backend.app.services.print_log import write_log_entry
 
             archive = await db.get(PrintArchive, archive_id)
             if archive:
+                # Stats uses archive filament metadata for the trend charts and
+                # PrintLogEntry for per-run material counts. A queued override
+                # must be reflected in both before the run is logged.
+                if queue_item_id is not None:
+                    queue_item = await db.get(PrintQueueItem, queue_item_id)
+                    if queue_item and queue_item.filament_overrides:
+                        metadata = archive.extra_data if isinstance(archive.extra_data, dict) else {}
+                        effective_type, effective_color = effective_filament_metadata(
+                            metadata.get("filament_slots"),
+                            usage_results,
+                            queue_item.filament_overrides,
+                        )
+                        if effective_type:
+                            archive.filament_type = effective_type
+                        if effective_color:
+                            archive.filament_color = effective_color
+
                 # Back-fill created_by_id on reprint (#730): reprint reuses the
                 # source archive row rather than creating a new one, so an
                 # archive that was auto-created from a printer-initiated
