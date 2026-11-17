@@ -211,7 +211,7 @@ jobs:
           # The floor gates line coverage only; branch coverage is written to
           # the job summary and not gated yet. Raise this floor in the same PR
           # as the tests that lift coverage (CONTRIBUTING.md, "Coverage floors").
-          coverage json -q -o - | python ../scripts/coverage_gate.py --fail-under 80.0
+          coverage json -q -o - | python ../scripts/coverage_gate.py --fail-under 80.1
 
       - name: Enforce coverage of changed lines
         # Fails the job when less than 90% of the PR's new and changed lines
