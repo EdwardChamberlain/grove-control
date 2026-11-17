@@ -765,6 +765,7 @@ export default {
     uploaded: 'Caricato',
     notYetPrinted: 'Non ancora stampato',
     resetFilters: 'Reimposta filtri',
+    createdAutomatically: 'Le stampe vengono registrate automaticamente al termine',
     filters: {
       export: 'Esporta',
       exportCsv: 'Esporta come CSV',

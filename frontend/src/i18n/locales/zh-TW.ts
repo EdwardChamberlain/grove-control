@@ -765,6 +765,7 @@ export default {
     uploaded: '已上傳',
     notYetPrinted: '尚未列印',
     resetFilters: '重設篩選',
+    createdAutomatically: '列印完成後會自動記錄',
     filters: {
       export: '匯出',
       exportCsv: '匯出為 CSV',

@@ -303,8 +303,12 @@ describe('ArchivesPage collections, search and pagination', () => {
 
     await user.clear(search);
     await user.type(search, 'zzz');
-    expect(await screen.findByText('No archives match your search')).toBeInTheDocument();
+    expect(await screen.findByText('No prints match your filters')).toBeInTheDocument();
     expect(screen.getByText('0 of 2 prints')).toBeInTheDocument();
+
+    // The empty state offers a way back instead of leaving the filters stuck on.
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(await screen.findByText('2 of 2 prints')).toBeInTheDocument();
   });
 
   it('pages through a long list with the page size control', async () => {

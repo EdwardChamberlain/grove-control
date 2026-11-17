@@ -765,6 +765,7 @@ export default {
     uploaded: 'Téléversé',
     notYetPrinted: 'Pas encore imprimé',
     resetFilters: 'Réinitialiser les filtres',
+    createdAutomatically: 'Les impressions sont enregistrées automatiquement à la fin',
     filters: {
       export: 'Exporter',
       exportCsv: 'Exporter en CSV',

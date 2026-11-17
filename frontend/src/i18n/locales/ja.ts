@@ -764,6 +764,7 @@ export default {
     uploaded: 'アップロード',
     notYetPrinted: '未印刷',
     resetFilters: 'フィルターをリセット',
+    createdAutomatically: '印刷は完了時に自動的に記録されます',
     filters: {
       export: 'エクスポート',
       exportCsv: 'CSVでエクスポート',
