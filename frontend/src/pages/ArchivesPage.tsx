@@ -3156,8 +3156,8 @@ export function ArchivesPage() {
           <div className="flex items-start gap-3">
             <div>
               <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-                <ArchiveIcon className="w-7 h-7 text-bambu-green" />
-                Archives
+                <History className="w-7 h-7 text-bambu-green" />
+                {t('nav.archives')}
               </h1>
               <p className="text-bambu-gray mt-1">
                 {filteredArchives?.length || 0} of {archives?.length || 0} prints

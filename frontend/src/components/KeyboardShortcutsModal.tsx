@@ -43,7 +43,7 @@ function getShortcuts(
       }))
     : [
         { keys: ['1'], description: 'Go to Printers', isExternal: false },
-        { keys: ['2'], description: 'Go to Archives', isExternal: false },
+        { keys: ['2'], description: 'Go to History', isExternal: false },
         { keys: ['3'], description: 'Go to Queue', isExternal: false },
         { keys: ['4'], description: 'Go to Statistics', isExternal: false },
         { keys: ['5'], description: 'Go to Cloud Profiles', isExternal: false },
@@ -52,7 +52,7 @@ function getShortcuts(
 
   return [
     { category: 'Navigation', items: navShortcuts },
-    { category: 'Archives', items: [
+    { category: 'History', items: [
       { keys: ['/'], description: 'Focus search', isExternal: false },
       { keys: ['U'], description: 'Open upload modal', isExternal: false },
       { keys: ['Esc'], description: 'Clear selection / blur input', isExternal: false },
