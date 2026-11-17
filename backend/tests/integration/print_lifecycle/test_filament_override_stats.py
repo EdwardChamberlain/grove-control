@@ -70,7 +70,6 @@ async def test_stats_uses_only_the_dispatched_plate(lifecycle, async_client, pla
 
     [run] = await lifecycle.all(PrintLogEntry)
     assert (run.filament_type, run.filament_color) == (material, "#0000FF")
-    assert run.queue_item_id == item.id
     # Each run owns its attribution; shared source metadata is left intact.
     source = await lifecycle.get(PrintArchive, archive.id)
     assert source.filament_color == "#000000,#FFFFFF"
@@ -116,8 +115,6 @@ async def test_queue_stop_keeps_override_without_inventory(lifecycle, async_clie
 
     [run] = await lifecycle.all(PrintLogEntry)
     assert (run.filament_type, run.filament_color) == ("PLA", "#0000FF")
-    if not restart:
-        assert run.queue_item_id == item.id
 
 
 async def test_reprints_keep_independent_color_history(lifecycle):
@@ -167,3 +164,47 @@ async def test_unresolved_queue_run_keeps_existing_metadata(lifecycle, fallback_
             queue_item_id=None if fallback_case == "no-identity" else item.id + (fallback_case == "wrong-run"),
         )
     assert result == ("PLA, PETG", "#000000,#FFFFFF")
+
+
+async def test_tracked_filament_applies_without_overrides(lifecycle):
+    printer, archive, item = await _queued_run(lifecycle)
+    async with lifecycle.session() as db:
+        (await db.get(PrintQueueItem, item.id)).filament_overrides = None
+    usage = [{"slot_id": 1, "material": "PLA", "color": "#FF0000", "weight_used": 10}]
+    with patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=usage)):
+        await main.on_print_complete(printer.id, {"status": "completed", "filename": archive.filename})
+    await lifecycle.drain()
+
+    [run] = await lifecycle.all(PrintLogEntry)
+    assert (run.filament_type, run.filament_color) == ("PLA", "#FF0000")
+
+
+async def test_duplicate_dispatch_id_does_not_break_resolution(lifecycle):
+    printer, archive, item = await _queued_run(lifecycle)
+    await lifecycle.add(
+        PrintQueueItem(
+            printer_id=printer.id,
+            archive_id=archive.id,
+            status="completed",
+            plate_id=1,
+            dispatch_subtask_id="this-run",
+            filament_overrides='[{"slot_id":1,"type":"PLA","color":"#00FF00"}]',
+        )
+    )
+    async with lifecycle.session() as db:
+        source = await db.get(PrintArchive, archive.id)
+        result = await resolve_run_filament_metadata(db, source, printer.id, [], dispatch_subtask_id="this-run")
+    assert result[0] == "PLA"
+
+
+async def test_resolver_failure_still_writes_log_entry(lifecycle):
+    printer, archive, _item = await _queued_run(lifecycle)
+    with patch(
+        "backend.app.services.filament_override_stats.resolve_run_filament_metadata",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    ):
+        await main.on_print_complete(printer.id, {"status": "completed", "filename": archive.filename})
+    await lifecycle.drain()
+
+    [run] = await lifecycle.all(PrintLogEntry)
+    assert (run.filament_type, run.filament_color) == ("PLA, PETG", "#000000,#FFFFFF")

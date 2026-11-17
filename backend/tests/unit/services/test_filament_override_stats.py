@@ -111,3 +111,15 @@ def test_missing_metadata_stays_unknown():
 def test_oversized_metadata_does_not_truncate_filament_names_or_colors():
     slots = [{"slot_id": i + 1, "used_g": 10, "type": "PLA" * 20, "color": f"#{i:06x}"} for i in range(7)]
     assert effective_filament_metadata(slots, [], []) == (None, None)
+
+
+def test_oversized_colours_discard_materials_too():
+    slots = [{"slot_id": i + 1, "used_g": 10, "type": "PLA", "color": f"#{i:06x}"} for i in range(8)]
+    assert effective_filament_metadata(slots, [], [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF"}]) == (None, None)
+
+
+@pytest.mark.parametrize("overrides", [None, "broken-json", "[]"])
+def test_tracked_usage_applies_without_valid_overrides(overrides):
+    slots = [{"slot_id": 1, "used_g": 10, "type": "PLA", "color": "#000000"}]
+    usage = [{"slot_id": 1, "material": "PETG", "color": "#FF0000"}]
+    assert effective_filament_metadata(slots, usage, overrides) == ("PETG", "#FF0000")
