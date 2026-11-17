@@ -12,17 +12,37 @@ from collections.abc import Sequence
 from typing import Any
 
 
+def _normalized_color(value: Any) -> str:
+    """Return the six-digit CSS hex form used by archive color statistics."""
+    color = str(value or "").strip()
+    if not color:
+        return ""
+    if not color.startswith("#"):
+        color = f"#{color}"
+    if len(color) >= 9 and all(c in "0123456789abcdefABCDEF" for c in color[1:]):
+        color = color[:7]
+    return color.upper()
+
+
+def _slot_id(slot: dict[str, Any]) -> int:
+    try:
+        return int(slot.get("slot_id"))
+    except (TypeError, ValueError):
+        return 0
+
+
 def effective_filament_metadata(
     filament_slots: Sequence[dict[str, Any]] | None,
     usage_results: Sequence[dict[str, Any]] | None,
     filament_overrides: str | Sequence[dict[str, Any]] | None,
 ) -> tuple[str | None, str | None]:
-    """Return comma-separated material and color lists after applying overrides.
+    """Return effective per-run material and color metadata.
 
-    Slot IDs in 3MF metadata and queue overrides are one-based. Usage results
-    provide the inventory filament actually consumed when available; explicit
-    queue overrides take precedence because they are the user's chosen
-    substitution even when that filament has no inventory spool record.
+    Queue rows persist the resolved filament mapping, including untouched
+    sliced defaults. Only values that differ from the sliced slot are explicit
+    overrides. Inventory usage results provide actual spool metadata for other
+    slots; explicit overrides take precedence even if no inventory spool is
+    assigned.
     """
     if isinstance(filament_overrides, str):
         try:
@@ -30,6 +50,8 @@ def effective_filament_metadata(
         except (TypeError, ValueError):
             return None, None
     if not isinstance(filament_overrides, Sequence) or isinstance(filament_overrides, (str, bytes)):
+        return None, None
+    if not filament_slots:
         return None, None
 
     overrides_by_slot: dict[int, dict[str, Any]] = {}
@@ -42,7 +64,7 @@ def effective_filament_metadata(
             continue
         overrides_by_slot[slot_id] = item
 
-    if not overrides_by_slot or not filament_slots:
+    if not overrides_by_slot:
         return None, None
 
     actual_by_slot: dict[int, dict[str, Any]] = {}
@@ -57,12 +79,10 @@ def effective_filament_metadata(
 
     types: list[str] = []
     colors: list[str] = []
-    for slot in sorted(filament_slots, key=lambda value: int(value.get("slot_id", 0) or 0)):
-        if not isinstance(slot, dict):
-            continue
-        try:
-            slot_id = int(slot.get("slot_id"))
-        except (TypeError, ValueError):
+    valid_slots = [slot for slot in filament_slots if isinstance(slot, dict)]
+    for slot in sorted(valid_slots, key=_slot_id):
+        slot_id = _slot_id(slot)
+        if slot_id <= 0:
             continue
         try:
             if float(slot.get("used_g") or 0) <= 0:
@@ -70,21 +90,29 @@ def effective_filament_metadata(
         except (TypeError, ValueError):
             continue
 
+        source_type = str(slot.get("type") or "").strip()
+        source_color = _normalized_color(slot.get("color"))
         actual = actual_by_slot.get(slot_id, {})
         override = overrides_by_slot.get(slot_id, {})
-        material = (override.get("type") or actual.get("material") or slot.get("type") or "").strip()
-        color = (override.get("color") or actual.get("color") or slot.get("color") or "").strip()
+
+        override_type = str(override.get("type") or "").strip()
+        override_color = _normalized_color(override.get("color"))
+        is_explicit_override = bool(
+            (override_type and override_type != source_type)
+            or (override_color and override_color != source_color)
+        )
+
+        if is_explicit_override:
+            material = override_type or source_type
+            color = override_color or source_color
+        else:
+            material = str(actual.get("material") or source_type).strip()
+            color = _normalized_color(actual.get("color")) or source_color
+
         if material and material not in types:
             types.append(material)
         if color and color not in colors:
-            # Slicer and spool metadata store colors as hex; normalize colors
-            # selected from an AMS tray into CSS-compatible hex for the chart.
-            color = color if color.startswith("#") else f"#{color}"
-            if len(color) >= 9 and all(c in "0123456789abcdefABCDEF" for c in color[1:]):
-                color = color[:7]
-            color = color.upper()
-            if color not in colors:
-                colors.append(color)
+            colors.append(color)
 
     if not types and not colors:
         return None, None
