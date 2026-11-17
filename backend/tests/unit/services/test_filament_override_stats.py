@@ -31,6 +31,17 @@ def test_explicit_override_wins_over_inventory_usage_result():
     ) == ("PLA, PETG", "#00FF00,#FF0000")
 
 
+def test_persisted_sliced_defaults_do_not_replace_actual_spool_metadata():
+    filament_slots = [{"slot_id": 1, "used_g": 10.0, "type": "PLA", "color": "#000000"}]
+    usage_results = [{"slot_id": 1, "material": "PLA", "color": "#0000FF"}]
+
+    assert effective_filament_metadata(
+        filament_slots,
+        usage_results,
+        [{"slot_id": 1, "type": "PLA", "color": "#000000"}],
+    ) == ("PLA", "#0000FF")
+
+
 def test_no_override_leaves_sliced_metadata_unchanged():
     assert effective_filament_metadata(
         [{"slot_id": 1, "used_g": 10.0, "type": "PLA", "color": "#000000"}],
