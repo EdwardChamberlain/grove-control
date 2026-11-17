@@ -87,8 +87,7 @@ function main() {
   const { allowed, blocking } = evaluateAudit(report, lockfile);
 
   if (allowed.length > 0) {
-    console.warn(`Temporary development exception for ${exception.url}`);
-    console.warn(`Accepted until ${exception.expires} for ${exception.package}@${exception.version}.`);
+    console.warn(`::warning title=Temporary picomatch security exception::Development-only acceptance of ${exception.url} for ${exception.package}@${exception.version} expires ${exception.expires}. Update to an official fix before expiry.`);
     console.warn(`Affected development tools: ${allowed.join(', ')}`);
     console.warn('Crafted glob patterns can cause denial of service. Upgrade when an official fix is released.');
   }
