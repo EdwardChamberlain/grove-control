@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -1491,23 +1491,59 @@ type Collection = 'all' | 'recent' | 'this-week' | 'this-month' | 'favorites' | 
 // `archived` is the only status that means "uploaded but never sent to a printer."
 const PRINTED_STATUSES = ['completed', 'failed', 'aborted', 'cancelled', 'stopped'] as const;
 
-const collections: { id: Collection; label: string; icon: React.ReactNode }[] = [
-  { id: 'all', label: 'All Archives', icon: <FolderOpen className="w-4 h-4" /> },
-  { id: 'recent', label: 'Last 24 Hours', icon: <Clock className="w-4 h-4" /> },
-  { id: 'this-week', label: 'This Week', icon: <Calendar className="w-4 h-4" /> },
-  { id: 'this-month', label: 'This Month', icon: <Calendar className="w-4 h-4" /> },
-  { id: 'favorites', label: 'Favorites', icon: <Star className="w-4 h-4" /> },
-  { id: 'not-printed', label: 'Not Printed', icon: <Upload className="w-4 h-4" /> },
-  { id: 'printed', label: 'Printed', icon: <Printer className="w-4 h-4" /> },
-  { id: 'failed', label: 'Failed Prints', icon: <AlertCircle className="w-4 h-4" /> },
-  { id: 'duplicates', label: 'Duplicates', icon: <Copy className="w-4 h-4" /> },
+const collections: { id: Collection; icon: React.ReactNode }[] = [
+  { id: 'all', icon: <FolderOpen className="w-4 h-4" /> },
+  { id: 'recent', icon: <Clock className="w-4 h-4" /> },
+  { id: 'this-week', icon: <Calendar className="w-4 h-4" /> },
+  { id: 'this-month', icon: <Calendar className="w-4 h-4" /> },
+  { id: 'favorites', icon: <Star className="w-4 h-4" /> },
+  { id: 'not-printed', icon: <Upload className="w-4 h-4" /> },
+  { id: 'printed', icon: <Printer className="w-4 h-4" /> },
+  { id: 'failed', icon: <AlertCircle className="w-4 h-4" /> },
+  { id: 'duplicates', icon: <Copy className="w-4 h-4" /> },
 ];
+
+/** Quick time/state filter, shared by the grid (per archive) and the log (per print). */
+function matchesCollection(
+  collection: Collection,
+  date: Date,
+  status: string,
+  archive?: Pick<Archive, 'is_favorite' | 'duplicate_count'>,
+): boolean {
+  const now = new Date();
+  switch (collection) {
+    case 'recent':
+      return now.getTime() - date.getTime() < 24 * 60 * 60 * 1000;
+    case 'this-week':
+      return now.getTime() - date.getTime() < 7 * 24 * 60 * 60 * 1000;
+    case 'this-month':
+      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    case 'favorites':
+      return archive?.is_favorite === true;
+    case 'not-printed':
+      return status === 'archived';
+    case 'printed':
+      return (PRINTED_STATUSES as readonly string[]).includes(status);
+    case 'failed':
+      return status === 'failed' || status === 'aborted';
+    case 'duplicates':
+      return (archive?.duplicate_count ?? 0) > 0;
+    default:
+      return true;
+  }
+}
+
+function matchesStatusFilter(filter: string | null, status: string): boolean {
+  if (!filter) return true;
+  if (filter === 'stopped') return status === 'stopped' || status === 'aborted';
+  return status === filter;
+}
 
 export function ArchivesPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, hasAnyPermission } = useAuth();
+  const { hasPermission, hasAnyPermission, canModify } = useAuth();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [filterPrinter, setFilterPrinter] = useState<number | null>(() => {
@@ -1591,16 +1627,16 @@ export function ArchivesPage() {
   const [pendingNavigationArchiveId, setPendingNavigationArchiveId] = useState<number | null>(null);
 
   // Log view state
-  const [logFilterUser, setLogFilterUser] = useState<string | null>(() =>
+  const [filterUser, setFilterUser] = useState<string | null>(() =>
     localStorage.getItem('logFilterUser') || null
   );
-  const [logFilterStatus, setLogFilterStatus] = useState<string | null>(() =>
+  const [filterStatus, setFilterStatus] = useState<string | null>(() =>
     localStorage.getItem('logFilterStatus')
   );
-  const [logFilterDateFrom, setLogFilterDateFrom] = useState(() =>
+  const [filterDateFrom, setFilterDateFrom] = useState(() =>
     localStorage.getItem('logFilterDateFrom') || ''
   );
-  const [logFilterDateTo, setLogFilterDateTo] = useState(() =>
+  const [filterDateTo, setFilterDateTo] = useState(() =>
     localStorage.getItem('logFilterDateTo') || ''
   );
   const [logOffset, setLogOffset] = useState(() => {
@@ -1622,6 +1658,22 @@ export function ArchivesPage() {
   const handleNavigateToArchive = useCallback((archiveId: number) => {
     setPendingNavigationArchiveId(archiveId);
     setHighlightedArchiveId(archiveId);
+  }, []);
+
+  // Deep links from other pages: /archives?search=<text> and /archives?highlight=<id>.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const linkedSearch = searchParams.get('search');
+    const linkedHighlight = Number(searchParams.get('highlight'));
+    if (!linkedSearch && !linkedHighlight) return;
+    if (linkedSearch) setSearch(linkedSearch);
+    if (linkedHighlight) {
+      setSearch('');
+      setViewMode('grid');
+      handleNavigateToArchive(linkedHighlight);
+    }
+    setSearchParams({}, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Clear highlight after 5 seconds and scroll to highlighted element
@@ -1672,20 +1724,28 @@ export function ArchivesPage() {
   const { data: users } = useQuery({
     queryKey: ['users'],
     queryFn: api.getUsers,
-    enabled: viewMode === 'log',
   });
 
+  // Filters the print log can't apply on the server (they depend on the linked
+  // archive, or on fields the log API doesn't expose) switch it to a larger
+  // fetch that is filtered and paged here.
+  const logNeedsClientFilter = !!(
+    filterMaterial || filterColors.size > 0 || filterFavorites || hideFailed || hideDuplicates ||
+    filterTag || filterFileType !== 'all' || collection !== 'all'
+  );
+  const LOG_CLIENT_FETCH_LIMIT = 500;
+
   const { data: printLogData, isLoading: isLogLoading } = useQuery({
-    queryKey: ['print-log', filterPrinter, logFilterUser, logFilterStatus, logFilterDateFrom, logFilterDateTo, search, logOffset, logPageSize],
+    queryKey: ['print-log', filterPrinter, filterUser, filterStatus, filterDateFrom, filterDateTo, search, logNeedsClientFilter ? 'all' : logOffset, logNeedsClientFilter ? 'all' : logPageSize],
     queryFn: () => api.getPrintLog({
       search: search || undefined,
       printerId: filterPrinter || undefined,
-      username: logFilterUser || undefined,
-      status: logFilterStatus || undefined,
-      dateFrom: logFilterDateFrom || undefined,
-      dateTo: logFilterDateTo || undefined,
-      limit: logPageSize,
-      offset: logOffset,
+      username: filterUser || undefined,
+      status: filterStatus || undefined,
+      dateFrom: filterDateFrom || undefined,
+      dateTo: filterDateTo ? `${filterDateTo}T23:59:59` : undefined,
+      limit: logNeedsClientFilter ? LOG_CLIENT_FETCH_LIMIT : logPageSize,
+      offset: logNeedsClientFilter ? 0 : logOffset,
     }),
     enabled: viewMode === 'log',
   });
@@ -1737,6 +1797,52 @@ export function ArchivesPage() {
       showToast(t('archives.log.entryDeleteFailed'), 'error');
     },
   });
+
+  // Log rows act on the archive they were printed from.
+  const [logReprintArchive, setLogReprintArchive] = useState<Archive | null>(null);
+  const logFavouriteMutation = useMutation({
+    mutationFn: (id: number) => api.toggleFavorite(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['archives'] }),
+    onError: () => showToast(t('archives.toast.failedUpdateFavorites'), 'error'),
+  });
+  const downloadLogArchive = async (archive: Archive) => {
+    try {
+      await api.downloadArchive(archive.id, archive.filename);
+    } catch {
+      showToast(t('archives.log.downloadFailed'), 'error');
+    }
+  };
+  // Export honours the filters the server understands (printer, status, search);
+  // the rest are applied only to what you see on screen.
+  const runExport = async (format: 'csv' | 'xlsx') => {
+    setShowExportMenu(false);
+    setIsExporting(true);
+    try {
+      const status = filterStatus || (collection === 'failed' ? 'failed' : undefined);
+      const { blob, filename } = await api.exportArchives({
+        format,
+        printerId: filterPrinter || undefined,
+        status: status === 'stopped' ? undefined : status,
+        search: search || undefined,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(t('archives.toast.exportDownloaded'));
+    } catch {
+      showToast(t('archives.toast.exportFailed'), 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  const openArchiveInGrid = (archiveId: number) => {
+    setSearch('');
+    setViewMode('grid');
+    handleNavigateToArchive(archiveId);
+  };
 
   const updateLogEntryMutation = useMutation({
     mutationFn: ({ id, body }: { id: number; body: { failure_reason?: string | null; status?: string } }) =>
@@ -1806,8 +1912,12 @@ export function ArchivesPage() {
 
   // Reset page when filters/search/sort/collection change
   useEffect(() => {
+    setLogOffset(0);
+  }, [search, filterPrinter, filterUser, filterStatus, filterDateFrom, filterDateTo, filterMaterial, filterColors, colorFilterMode, filterFavorites, hideFailed, hideDuplicates, filterTag, filterFileType, collection]);
+
+  useEffect(() => {
     setPageIndex(0);
-  }, [search, filterPrinter, filterMaterial, filterColors, colorFilterMode, filterFavorites, hideFailed, hideDuplicates, filterTag, filterFileType, sortBy, collection]);
+  }, [filterUser, filterStatus, filterDateFrom, filterDateTo, search, filterPrinter, filterMaterial, filterColors, colorFilterMode, filterFavorites, hideFailed, hideDuplicates, filterTag, filterFileType, sortBy, collection]);
 
   useEffect(() => {
     try { localStorage.setItem('archivePageSize', String(pageSize)); } catch { /* ignore */ }
@@ -1827,36 +1937,36 @@ export function ArchivesPage() {
 
   // Persist log view filters
   useEffect(() => {
-    if (logFilterUser) {
-      localStorage.setItem('logFilterUser', logFilterUser);
+    if (filterUser) {
+      localStorage.setItem('logFilterUser', filterUser);
     } else {
       localStorage.removeItem('logFilterUser');
     }
-  }, [logFilterUser]);
+  }, [filterUser]);
 
   useEffect(() => {
-    if (logFilterStatus) {
-      localStorage.setItem('logFilterStatus', logFilterStatus);
+    if (filterStatus) {
+      localStorage.setItem('logFilterStatus', filterStatus);
     } else {
       localStorage.removeItem('logFilterStatus');
     }
-  }, [logFilterStatus]);
+  }, [filterStatus]);
 
   useEffect(() => {
-    if (logFilterDateFrom) {
-      localStorage.setItem('logFilterDateFrom', logFilterDateFrom);
+    if (filterDateFrom) {
+      localStorage.setItem('logFilterDateFrom', filterDateFrom);
     } else {
       localStorage.removeItem('logFilterDateFrom');
     }
-  }, [logFilterDateFrom]);
+  }, [filterDateFrom]);
 
   useEffect(() => {
-    if (logFilterDateTo) {
-      localStorage.setItem('logFilterDateTo', logFilterDateTo);
+    if (filterDateTo) {
+      localStorage.setItem('logFilterDateTo', filterDateTo);
     } else {
       localStorage.removeItem('logFilterDateTo');
     }
-  }, [logFilterDateTo]);
+  }, [filterDateTo]);
 
   useEffect(() => {
     localStorage.setItem('logOffset', logOffset.toString());
@@ -1884,36 +1994,15 @@ export function ArchivesPage() {
   const filteredArchives = archives
     ?.filter((a) => {
       // Collection filter
-      const now = new Date();
-      const archiveDate = parseUTCDate(a.created_at) || new Date(0);
-      let matchesCollection = true;
+      const matchesCol = matchesCollection(collection, parseUTCDate(getLastPrintedAt(a)) || new Date(0), a.status, a);
 
-      switch (collection) {
-        case 'recent':
-          matchesCollection = (now.getTime() - archiveDate.getTime()) < 24 * 60 * 60 * 1000;
-          break;
-        case 'this-week':
-          matchesCollection = (now.getTime() - archiveDate.getTime()) < 7 * 24 * 60 * 60 * 1000;
-          break;
-        case 'this-month':
-          matchesCollection = archiveDate.getMonth() === now.getMonth() && archiveDate.getFullYear() === now.getFullYear();
-          break;
-        case 'favorites':
-          matchesCollection = a.is_favorite === true;
-          break;
-        case 'not-printed':
-          matchesCollection = a.status === 'archived';
-          break;
-        case 'printed':
-          matchesCollection = (PRINTED_STATUSES as readonly string[]).includes(a.status);
-          break;
-        case 'failed':
-          matchesCollection = a.status === 'failed' || a.status === 'aborted';
-          break;
-        case 'duplicates':
-          matchesCollection = a.duplicate_count > 0;
-          break;
-      }
+      // Status / user / print-date filters (shared with the print log)
+      const matchesStatus = matchesStatusFilter(filterStatus, a.status);
+      const matchesUser = !filterUser || a.created_by_username === filterUser;
+      const printedAt = (parseUTCDate(getLastPrintedAt(a)) || new Date(0)).getTime();
+      const matchesDate =
+        (!filterDateFrom || printedAt >= new Date(`${filterDateFrom}T00:00:00`).getTime()) &&
+        (!filterDateTo || printedAt <= new Date(`${filterDateTo}T23:59:59.999`).getTime());
 
       // Search filter
       const matchesSearch = (a.print_name || a.filename).toLowerCase().includes(search.toLowerCase());
@@ -1949,7 +2038,7 @@ export function ArchivesPage() {
         (filterFileType === 'gcode' && isGcodeFile) ||
         (filterFileType === 'source' && !isGcodeFile);
 
-      return matchesCollection && matchesSearch && matchesMaterial && matchesColor && matchesFavorites && matchesHideFailed && matchesHideDuplicates && matchesTag && matchesFileType;
+      return matchesCol && matchesStatus && matchesUser && matchesDate && matchesSearch && matchesMaterial && matchesColor && matchesFavorites && matchesHideFailed && matchesHideDuplicates && matchesTag && matchesFileType;
     })
     .sort((a, b) => {
       switch (sortBy) {
@@ -1978,6 +2067,40 @@ export function ArchivesPage() {
   const paginatedArchives = showAll
     ? filteredArchives
     : filteredArchives?.slice(pageIndex * effectivePageSize, (pageIndex + 1) * effectivePageSize);
+
+  // Print log rows: one per print. Archive-level filters are applied through
+  // the linked archive (orphaned entries only match filters that don't need it).
+  const archiveById = new Map((archives ?? []).map((a) => [a.id, a]));
+  const logEntriesFiltered = !logNeedsClientFilter
+    ? printLogData?.items ?? []
+    : (printLogData?.items ?? []).filter((entry) => {
+        const linked = entry.archive_id != null ? archiveById.get(entry.archive_id) : undefined;
+        const printedAt = parseUTCDate(entry.started_at || entry.created_at) || new Date(0);
+        if (!matchesCollection(collection, printedAt, entry.status, linked)) return false;
+        if (collection === 'not-printed') return false;
+        if (filterMaterial && !entry.filament_type?.split(', ').includes(filterMaterial)) return false;
+        if (filterColors.size > 0) {
+          const colours = entry.filament_color?.split(',') || [];
+          const ok = colorFilterMode === 'or'
+            ? colours.some((c) => filterColors.has(c))
+            : [...filterColors].every((c) => colours.includes(c));
+          if (!ok) return false;
+        }
+        if (hideFailed && collection !== 'failed' && (entry.status === 'failed' || entry.status === 'aborted')) return false;
+        if (filterFavorites && collection !== 'favorites' && !linked?.is_favorite) return false;
+        if (filterTag && !linked?.tags?.split(',').map((t) => t.trim()).includes(filterTag)) return false;
+        if (filterFileType !== 'all') {
+          if (!linked) return false;
+          const sliced = isSlicedFile(linked);
+          if (filterFileType === 'gcode' ? !sliced : sliced) return false;
+        }
+        if (hideDuplicates && collection !== 'duplicates' && linked && linked.duplicate_count > 0 && linked.duplicate_sequence !== 0) return false;
+        return true;
+      });
+  const logTotal = logNeedsClientFilter ? logEntriesFiltered.length : printLogData?.total ?? 0;
+  const logRows = logNeedsClientFilter
+    ? logEntriesFiltered.slice(logOffset, logOffset + logPageSize)
+    : logEntriesFiltered;
 
   // Jump to the page containing the highlighted archive
   useEffect(() => {
@@ -2041,9 +2164,15 @@ export function ArchivesPage() {
     setHideDuplicates(false);
     setFilterTag(null);
     setFilterFileType('all');
+    setFilterStatus(null);
+    setFilterUser(null);
+    setFilterDateFrom('');
+    setFilterDateTo('');
+    setFilterColors(new Set());
+    setCollection('all');
   };
 
-  const hasTopFilters = search || filterPrinter || filterMaterial || filterFavorites || hideFailed || hideDuplicates || filterTag || filterFileType !== 'all';
+  const hasTopFilters = search || filterStatus || filterUser || filterDateFrom || filterDateTo || filterColors.size > 0 || collection !== 'all' || filterPrinter || filterMaterial || filterFavorites || hideFailed || hideDuplicates || filterTag || filterFileType !== 'all';
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -2176,7 +2305,7 @@ export function ArchivesPage() {
                 {t('nav.archives')}
               </h1>
               <p className="text-bambu-gray mt-1">
-                {filteredArchives?.length || 0} of {archives?.length || 0} prints
+                {viewMode === 'log' ? logTotal : filteredArchives?.length || 0} of {viewMode === 'log' ? (printLogData?.total ?? 0) : archives?.length || 0} prints
               </p>
             </div>
             <div className="mt-0.5">
@@ -2184,7 +2313,7 @@ export function ArchivesPage() {
                 value={collection}
                 onChange={(value) => setCollection(value as Collection)}
                 minWidthClass="min-w-36"
-                options={collections.map((c) => ({ value: c.id, label: c.label }))}
+                options={collections.map((c) => ({ value: c.id, label: t(`archives.collections.${c.id}`) }))}
               />
             </div>
           </div>
@@ -2202,67 +2331,23 @@ export function ArchivesPage() {
               ) : (
                 <FileSpreadsheet className="w-4 h-4" />
               )}
-              Export
+              {t('archives.filters.export')}
             </Button>
             {showExportMenu && (
               <div className="absolute right-0 top-full mt-1 w-48 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl z-20">
                 <button
                   className="w-full px-4 py-2 text-left text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center gap-2 rounded-t-lg"
-                  onClick={async () => {
-                    setShowExportMenu(false);
-                    setIsExporting(true);
-                    try {
-                      const { blob, filename } = await api.exportArchives({
-                        format: 'csv',
-                        printerId: filterPrinter || undefined,
-                        status: collection === 'failed' ? 'failed' : undefined,
-                        search: search || undefined,
-                      });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = filename;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      showToast(t('archives.toast.exportDownloaded'));
-                    } catch {
-                      showToast(t('archives.toast.exportFailed'), 'error');
-                    } finally {
-                      setIsExporting(false);
-                    }
-                  }}
+                  onClick={() => runExport('csv')}
                 >
                   <FileText className="w-4 h-4" />
-                  Export as CSV
+                  {t('archives.filters.exportCsv')}
                 </button>
                 <button
                   className="w-full px-4 py-2 text-left text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center gap-2 rounded-b-lg"
-                  onClick={async () => {
-                    setShowExportMenu(false);
-                    setIsExporting(true);
-                    try {
-                      const { blob, filename } = await api.exportArchives({
-                        format: 'xlsx',
-                        printerId: filterPrinter || undefined,
-                        status: collection === 'failed' ? 'failed' : undefined,
-                        search: search || undefined,
-                      });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = filename;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      showToast(t('archives.toast.exportDownloaded'));
-                    } catch {
-                      showToast(t('archives.toast.exportFailed'), 'error');
-                    } finally {
-                      setIsExporting(false);
-                    }
-                  }}
+                  onClick={() => runExport('xlsx')}
                 >
                   <FileSpreadsheet className="w-4 h-4" />
-                  Export as Excel
+                  {t('archives.filters.exportExcel')}
                 </button>
               </div>
             )}
@@ -2274,13 +2359,13 @@ export function ArchivesPage() {
               onClick={() => setShowCompareModal(true)}
             >
               <GitCompare className="w-4 h-4" />
-              Compare ({selectedIds.size})
+              {t('archives.filters.compare')} ({selectedIds.size})
             </Button>
           )}
           {!selectionMode && (
             <Button variant="secondary" onClick={() => setIsSelectionMode(true)}>
               <CheckSquare className="w-4 h-4" />
-              Select
+              {t('archives.filters.select')}
             </Button>
           )}
           {hasPermission('archives:purge') && (
@@ -2321,8 +2406,8 @@ export function ArchivesPage() {
         </button>
       </div>
 
-      {/* Filters (hidden in log view which has its own filters) */}
-      {viewMode !== 'log' && <Card className="mb-6">
+      {/* Filters: one bar shared by grid, calendar and log */}
+      <Card className="mb-6">
         <CardContent className="py-4">
           <div className="flex flex-col md:flex-row gap-3 md:gap-4 md:items-center md:flex-wrap">
             {/* Search - full width on mobile */}
@@ -2346,9 +2431,48 @@ export function ArchivesPage() {
                   onChange={(value) => setFilterPrinter(value === 'all' ? null : Number(value))}
                   minWidthClass="min-w-36"
                   options={[
-                    { value: 'all', label: 'All Printers' },
+                    { value: 'all', label: t('archives.log.allPrinters') },
                     ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
                   ]}
+                />
+              </div>
+              <ToolbarDropdown
+                value={filterStatus || 'all'}
+                onChange={(value) => setFilterStatus(value === 'all' ? null : value)}
+                minWidthClass="min-w-32"
+                options={[
+                  { value: 'all', label: t('archives.log.allStatuses') },
+                  { value: 'completed', label: t('archives.status.completed') },
+                  { value: 'failed', label: t('archives.status.failed') },
+                  { value: 'stopped', label: t('archives.status.stopped') },
+                  { value: 'cancelled', label: t('archives.log.cancelled') },
+                ]}
+              />
+              <ToolbarDropdown
+                value={filterUser || 'all'}
+                onChange={(value) => setFilterUser(value === 'all' ? null : value)}
+                minWidthClass="min-w-32"
+                options={[
+                  { value: 'all', label: t('archives.log.allUsers') },
+                  ...(users?.map((u) => ({ value: u.username, label: u.username })) ?? []),
+                ]}
+              />
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <label className="text-sm text-bambu-gray" htmlFor="history-date-from">{t('archives.log.dateFrom')}</label>
+                <input
+                  id="history-date-from"
+                  type="date"
+                  className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                  value={filterDateFrom}
+                  onChange={(e) => setFilterDateFrom(e.target.value)}
+                />
+                <label className="text-sm text-bambu-gray" htmlFor="history-date-to">{t('archives.log.dateTo')}</label>
+                <input
+                  id="history-date-to"
+                  type="date"
+                  className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                  value={filterDateTo}
+                  onChange={(e) => setFilterDateTo(e.target.value)}
                 />
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -2358,7 +2482,7 @@ export function ArchivesPage() {
                   onChange={(value) => setFilterMaterial(value === 'all' ? null : value)}
                   minWidthClass="min-w-36"
                   options={[
-                    { value: 'all', label: 'All Materials' },
+                    { value: 'all', label: t('archives.filters.allMaterials') },
                     ...uniqueMaterials.map((m) => ({ value: m, label: m })),
                   ]}
                 />
@@ -2370,9 +2494,9 @@ export function ArchivesPage() {
                   onChange={(value) => setFilterFileType(value as 'all' | 'gcode' | 'source')}
                   minWidthClass="min-w-36"
                   options={[
-                    { value: 'all', label: 'All Files' },
-                    { value: 'gcode', label: 'Sliced (GCODE)' },
-                    { value: 'source', label: 'Source Only' },
+                    { value: 'all', label: t('archives.filters.allFiles') },
+                    { value: 'gcode', label: t('archives.filters.sliced') },
+                    { value: 'source', label: t('archives.filters.sourceOnly') },
                   ]}
                 />
               </div>
@@ -2386,7 +2510,7 @@ export function ArchivesPage() {
                 title={filterFavorites ? t('archives.showAll') : t('archives.showFavoritesOnly')}
               >
                 <Star className={`w-4 h-4 ${filterFavorites ? 'fill-yellow-400' : ''}`} />
-                <span className="text-sm hidden md:inline">Favorites</span>
+                <span className="text-sm hidden md:inline">{t('archives.filters.favorites')}</span>
               </button>
               <button
                 onClick={() => setHideFailed(!hideFailed)}
@@ -2398,7 +2522,7 @@ export function ArchivesPage() {
                 title={hideFailed ? t('archives.showFailedPrints') : t('archives.hideFailedPrints')}
               >
                 <AlertCircle className={`w-4 h-4 ${hideFailed ? '' : ''}`} />
-                <span className="text-sm hidden md:inline">Hide Failed</span>
+                <span className="text-sm hidden md:inline">{t('archives.filters.hideFailed')}</span>
               </button>
               <button
                 onClick={() => setHideDuplicates(!hideDuplicates)}
@@ -2420,7 +2544,7 @@ export function ArchivesPage() {
                     onChange={(value) => setFilterTag(value === 'all' ? null : value)}
                     minWidthClass="min-w-32"
                     options={[
-                      { value: 'all', label: 'All Tags' },
+                      { value: 'all', label: t('archives.filters.allTags') },
                       ...uniqueTags.map((tag) => ({ value: tag, label: tag })),
                     ]}
                   />
@@ -2433,7 +2557,7 @@ export function ArchivesPage() {
                   </button>
                 </div>
               )}
-              <div className="flex items-center gap-2 flex-shrink-0">
+              {viewMode !== 'log' && <div className="flex items-center gap-2 flex-shrink-0">
                 <ArrowUpDown className="w-4 h-4 text-bambu-gray hidden md:block" />
                 <ToolbarDropdown<SortOption>
                   value={sortBy}
@@ -2448,7 +2572,7 @@ export function ArchivesPage() {
                     { value: 'size-asc', label: t('archives.sortSmallest') },
                   ]}
                 />
-              </div>
+              </div>}
             </div>
             {hasTopFilters && (
               <Button
@@ -2458,14 +2582,14 @@ export function ArchivesPage() {
                 className="text-bambu-gray hover:text-white"
               >
                 <X className="w-4 h-4" />
-                Reset
+                {t('archives.filters.reset')}
               </Button>
             )}
           </div>
           {/* Color Filter */}
           {uniqueColors.length > 0 && (
             <div className="flex items-center gap-3 mt-4 pt-4 border-t border-bambu-dark-tertiary">
-              <span className="text-xs text-bambu-gray">Colors:</span>
+              <span className="text-xs text-bambu-gray">{t('archives.filters.colors')}</span>
               {filterColors.size > 1 && (
                 <button
                   onClick={() => setColorFilterMode(m => m === 'or' ? 'and' : 'or')}
@@ -2506,7 +2630,7 @@ export function ArchivesPage() {
             </div>
           )}
         </CardContent>
-      </Card>}
+      </Card>
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}
       <PendingUploadsPanel />
@@ -2572,98 +2696,17 @@ export function ArchivesPage() {
         </>
       ) : viewMode === 'log' ? (
         <div className="space-y-4">
-          {/* Log filters */}
-          <Card>
-            <CardContent className="py-3">
-              <div className="flex flex-col md:flex-row gap-3 md:items-center md:flex-wrap">
-                {/* Search */}
-                <div className="flex-1 relative md:min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
-                  <input
-                    type="text"
-                    placeholder={t('archives.searchPlaceholder')}
-                    className="h-8 w-full pl-10 pr-4 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={search}
-                    onChange={(e) => { setSearch(e.target.value); setLogOffset(0); }}
-                  />
-                </div>
-                {/* Printer filter */}
-                <ToolbarDropdown
-                  value={filterPrinter ? String(filterPrinter) : 'all'}
-                  onChange={(value) => {
-                    setFilterPrinter(value === 'all' ? null : Number(value));
-                    setLogOffset(0);
-                  }}
-                  minWidthClass="min-w-36"
-                  options={[
-                    { value: 'all', label: t('archives.log.allPrinters') },
-                    ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
-                  ]}
-                />
-                {/* User filter */}
-                <ToolbarDropdown
-                  value={logFilterUser || 'all'}
-                  onChange={(value) => {
-                    setLogFilterUser(value === 'all' ? null : value);
-                    setLogOffset(0);
-                  }}
-                  minWidthClass="min-w-32"
-                  options={[
-                    { value: 'all', label: t('archives.log.allUsers') },
-                    ...(users?.map((u) => ({ value: u.username, label: u.username })) ?? []),
-                  ]}
-                />
-                {/* Status filter */}
-                <ToolbarDropdown
-                  value={logFilterStatus || 'all'}
-                  onChange={(value) => {
-                    setLogFilterStatus(value === 'all' ? null : value);
-                    setLogOffset(0);
-                  }}
-                  minWidthClass="min-w-32"
-                  options={[
-                    { value: 'all', label: t('archives.log.allStatuses') },
-                    { value: 'completed', label: t('archives.status.completed') },
-                    { value: 'failed', label: t('archives.status.failed') },
-                    { value: 'stopped', label: t('archives.status.stopped') },
-                    { value: 'cancelled', label: t('archives.log.cancelled') },
-                    { value: 'skipped', label: t('archives.log.skipped') },
-                  ]}
-                />
-                {/* Date range */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-bambu-gray">{t('archives.log.dateFrom')}</label>
-                  <input
-                    type="date"
-                    className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={logFilterDateFrom}
-                    onChange={(e) => { setLogFilterDateFrom(e.target.value); setLogOffset(0); }}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-bambu-gray">{t('archives.log.dateTo')}</label>
-                  <input
-                    type="date"
-                    className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={logFilterDateTo}
-                    onChange={(e) => { setLogFilterDateTo(e.target.value); setLogOffset(0); }}
-                  />
-                </div>
-                {/* Clear log button */}
-                <div className="ml-auto">
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => setShowClearLogConfirm(true)}
-                    disabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    {t('archives.log.clearLog')}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="flex justify-end">
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setShowClearLogConfirm(true)}
+              disabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
+            >
+              <Trash2 className="w-4 h-4" />
+              {t('archives.log.clearLog')}
+            </Button>
+          </div>
 
           {/* Log table */}
           <Card>
@@ -2671,9 +2714,15 @@ export function ArchivesPage() {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
               </div>
-            ) : !printLogData?.items.length ? (
+            ) : !logRows.length ? (
               <div className="text-center py-12 text-bambu-gray">
-                {t('archives.log.noEntries')}
+                <p>{t('archives.log.noEntries')}</p>
+                {hasTopFilters && (
+                  <Button variant="ghost" size="sm" className="mt-3" onClick={clearTopFilters}>
+                    <X className="w-4 h-4" />
+                    {t('archives.resetFilters')}
+                  </Button>
+                )}
               </div>
             ) : (
               <>
@@ -2681,6 +2730,7 @@ export function ArchivesPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-bambu-dark-tertiary text-bambu-gray text-left">
+                        {selectionMode && <th className="px-4 py-3 w-8" />}
                         <th className="px-4 py-3 font-medium">{t('archives.log.date')}</th>
                         <th className="px-4 py-3 font-medium">{t('archives.log.printName')}</th>
                         <th className="px-4 py-3 font-medium">{t('archives.log.printer')}</th>
@@ -2688,12 +2738,27 @@ export function ArchivesPage() {
                         <th className="px-4 py-3 font-medium">{t('archives.log.status')}</th>
                         <th className="px-4 py-3 font-medium">{t('archives.log.duration')}</th>
                         <th className="px-4 py-3 font-medium">{t('archives.log.filament')}</th>
+                        <th className="px-4 py-3 font-medium">{t('archives.log.cost')}</th>
                         <th className="px-4 py-3 font-medium w-10" aria-label={t('common.actions')} />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-bambu-dark-tertiary">
-                      {printLogData.items.map((entry) => (
-                        <tr key={entry.id} className="hover:bg-bambu-dark-secondary/50">
+                      {logRows.map((entry) => {
+                        const linked = entry.archive_id != null ? archiveById.get(entry.archive_id) : undefined;
+                        return (
+                        <tr key={entry.id} className="hover:bg-bambu-dark-secondary/50" data-archive-id={entry.archive_id ?? undefined}>
+                          {selectionMode && (
+                            <td className="px-4 py-3 w-8">
+                              {linked && (
+                                <input
+                                  type="checkbox"
+                                  aria-label={t('archives.log.selectRow')}
+                                  checked={selectedIds.has(linked.id)}
+                                  onChange={() => toggleSelect(linked.id)}
+                                />
+                              )}
+                            </td>
+                          )}
                           <td className="px-4 py-3 text-white whitespace-nowrap">
                             {formatDateTime(entry.started_at || entry.created_at, timeFormat)}
                           </td>
@@ -2756,8 +2821,55 @@ export function ArchivesPage() {
                               </span>
                             </div>
                           </td>
+                          <td className="px-4 py-3 text-bambu-gray-light whitespace-nowrap">
+                            {entry.cost != null ? `${currency}${entry.cost.toFixed(2)}` : '—'}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <div className="inline-flex items-center gap-2">
+                              {linked && (
+                                <>
+                                  {isSlicedFile(linked) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setLogReprintArchive(linked)}
+                                      disabled={!linked.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', linked.created_by_id)}
+                                      title={t('archives.menu.print')}
+                                      aria-label={t('archives.menu.print')}
+                                      className="text-bambu-gray hover:text-bambu-green disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
+                                    >
+                                      <Printer className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => logFavouriteMutation.mutate(linked.id)}
+                                    title={linked.is_favorite ? t('archives.menu.removeFromFavorites') : t('archives.menu.addToFavorites')}
+                                    aria-label={linked.is_favorite ? t('archives.menu.removeFromFavorites') : t('archives.menu.addToFavorites')}
+                                    className="text-bambu-gray hover:text-yellow-400 transition-colors"
+                                  >
+                                    <Star className={`w-4 h-4 ${linked.is_favorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadLogArchive(linked)}
+                                    disabled={!linked.file_path}
+                                    title={t('archives.menu.download')}
+                                    aria-label={t('archives.menu.download')}
+                                    className="text-bambu-gray hover:text-white disabled:opacity-40 transition-colors"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => openArchiveInGrid(linked.id)}
+                                    title={t('archives.log.openInGrid')}
+                                    aria-label={t('archives.log.openInGrid')}
+                                    className="text-bambu-gray hover:text-white transition-colors"
+                                  >
+                                    <ExternalLink className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -2797,7 +2909,8 @@ export function ArchivesPage() {
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2805,7 +2918,7 @@ export function ArchivesPage() {
                 <div className="flex items-center justify-between px-4 py-3 border-t border-bambu-dark-tertiary flex-wrap gap-2">
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-bambu-gray">
-                      {t('archives.log.showing', { count: Math.min(logOffset + logPageSize, printLogData.total), total: printLogData.total })}
+                      {t('archives.log.showing', { count: Math.min(logOffset + logPageSize, logTotal), total: logTotal })}
                     </span>
                     <div className="flex items-center gap-1.5">
                       <label className="text-xs text-bambu-gray">{t('archives.log.rowsPerPage')}</label>
@@ -2823,12 +2936,12 @@ export function ArchivesPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-bambu-gray">
-                      {t('archives.log.page')} {Math.floor(logOffset / logPageSize) + 1} / {Math.max(1, Math.ceil(printLogData.total / logPageSize))}
+                      {t('archives.log.page')} {Math.floor(logOffset / logPageSize) + 1} / {Math.max(1, Math.ceil(logTotal / logPageSize))}
                     </span>
                     <Button variant="secondary" size="sm" onClick={() => setLogOffset(Math.max(0, logOffset - logPageSize))} disabled={logOffset === 0}>
                       <ChevronLeft className="w-4 h-4" />
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={() => setLogOffset(logOffset + logPageSize)} disabled={logOffset + logPageSize >= printLogData.total}>
+                    <Button variant="secondary" size="sm" onClick={() => setLogOffset(logOffset + logPageSize)} disabled={logOffset + logPageSize >= logTotal}>
                       <ChevronRight className="w-4 h-4" />
                     </Button>
                   </div>
@@ -2895,6 +3008,15 @@ export function ArchivesPage() {
       )}
 
       {/* Clear Log Confirmation */}
+      {logReprintArchive && (
+        <PrintModal
+          mode="create"
+          archiveId={logReprintArchive.id}
+          archiveName={logReprintArchive.print_name || logReprintArchive.filename}
+          onClose={() => setLogReprintArchive(null)}
+        />
+      )}
+
       {showClearLogConfirm && (
         <ConfirmModal
           title={t('archives.log.clearLogTitle')}

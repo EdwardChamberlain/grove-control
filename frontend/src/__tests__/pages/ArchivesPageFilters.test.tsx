@@ -272,15 +272,15 @@ describe('ArchivesPage collections, search and pagination', () => {
   it('narrows to recent prints and to failed prints', async () => {
     const now = new Date().toISOString();
     useArchives([
-      archive(1, 'Fresh Print', { created_at: now }),
-      archive(2, 'Old Failure', { created_at: '2020-01-01T00:00:00Z', status: 'failed' }),
-      archive(3, 'Old Print', { created_at: '2020-01-01T00:00:00Z' }),
+      archive(1, 'Fresh Print', { created_at: now, started_at: now }),
+      archive(2, 'Old Failure', { created_at: '2020-01-01T00:00:00Z', started_at: '2020-01-01T00:00:00Z', status: 'failed' }),
+      archive(3, 'Old Print', { created_at: '2020-01-01T00:00:00Z', started_at: '2020-01-01T00:00:00Z' }),
     ]);
     const user = userEvent.setup();
     render(<ArchivesPage />);
 
     await screen.findAllByText('Old Print');
-    await pickOption(user, 'All Archives', 'Last 24 Hours');
+    await pickOption(user, 'All Prints', 'Last 24 Hours');
     expect(await screen.findByText('Fresh Print')).toBeInTheDocument();
     expect(screen.queryByText('Old Print')).not.toBeInTheDocument();
 
@@ -295,7 +295,7 @@ describe('ArchivesPage collections, search and pagination', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    const search = screen.getByPlaceholderText('Search archives...');
+    const search = screen.getByPlaceholderText('Search prints...');
 
     await user.type(search, 'brack');
     expect(await screen.findByText('1 of 2 prints')).toBeInTheDocument();

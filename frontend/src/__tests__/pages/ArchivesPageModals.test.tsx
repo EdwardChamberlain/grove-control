@@ -142,7 +142,7 @@ describe('ArchivesPage export', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.type(screen.getByPlaceholderText('Search archives...'), 'brack');
+    await user.type(screen.getByPlaceholderText('Search prints...'), 'brack');
     await user.click(screen.getByRole('button', { name: /^Export$/ }));
     await user.click(screen.getByRole('button', { name: 'Export as Excel' }));
 
