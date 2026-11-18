@@ -1165,6 +1165,7 @@ export default {
       tooltip: 'Trabalho mais curto primeiro — o agendador prioriza impressões mais curtas',
     },
     addedBy: 'Adicionado por {{name}}',
+    selectJob: 'Selecionar {{name}}',
     nextInQueue: 'Próximo na fila',
     clearPlateSuccess: 'Placa limpa — pronta para a próxima impressão',
     plateNumber: 'Placa {{index}}',

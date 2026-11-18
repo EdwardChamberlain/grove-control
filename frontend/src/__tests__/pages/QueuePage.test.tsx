@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { QueuePage } from '../../pages/QueuePage';
@@ -359,7 +359,8 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText(/^Scheduled · Jan 1, 2099/)).toBeInTheDocument();
+        expect(screen.getByText('Scheduled')).toBeInTheDocument();
+        expect(screen.getByText(/^Jan 1, 2099/)).toBeInTheDocument();
       });
     });
 
@@ -441,16 +442,68 @@ describe('QueuePage', () => {
   });
 
   describe('queue actions', () => {
-    it('shows edit button for pending items', async () => {
+    it('has no separate edit button: the job name is the edit link for pending items', async () => {
       render(<QueuePage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Test Print 1')).toBeInTheDocument();
-      });
+      const name = await screen.findByRole('button', { name: 'Test Print 1' });
+      expect(name).toHaveAttribute('title', 'Edit');
+      // Printing jobs cannot be edited, so their name is plain text.
+      expect(screen.queryByRole('button', { name: 'Active Print' })).not.toBeInTheDocument();
+    });
 
-      // Find the edit button (Pencil icon)
-      const editButtons = screen.getAllByTitle('Edit');
-      expect(editButtons.length).toBeGreaterThan(0);
+    it('opens the edit dialog when the job name is clicked', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Test Print 1' }));
+
+      expect(await screen.findByText('Edit Queue Item')).toBeInTheDocument();
+    });
+
+    it('opens the edit dialog when empty card space is clicked', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      const name = await screen.findByRole('button', { name: 'Test Print 1' });
+      const card = name.closest('.group') as HTMLElement;
+      await user.click(within(card).getByText('Test Printer'));
+
+      expect(await screen.findByText('Edit Queue Item')).toBeInTheDocument();
+    });
+
+    it('does not open the edit dialog when the cancel button is clicked', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      const card = (await screen.findByRole('button', { name: 'Test Print 1' })).closest('.group') as HTMLElement;
+      await user.click(within(card).getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
+      expect(await screen.findByText('Cancel Scheduled Print')).toBeInTheDocument();
+    });
+
+    it('shows a single cancel button per pending card and no edit or play button', async () => {
+      render(<QueuePage />);
+
+      const card = (await screen.findByRole('button', { name: 'Test Print 1' })).closest('.group') as HTMLElement;
+      expect(within(card).getAllByRole('button', { name: 'Cancel' })).toHaveLength(1);
+      expect(within(card).queryByTitle('Start Print')).not.toBeInTheDocument();
+      expect(within(card).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    });
+
+    it('labels the status gutter of a pending card as the drag handle', async () => {
+      render(<QueuePage />);
+
+      const card = (await screen.findByRole('button', { name: 'Test Print 1' })).closest('.group') as HTMLElement;
+      expect(within(card).getByLabelText('Drag to reorder (ASAP only)')).toBeInTheDocument();
+    });
+
+    it('does not give printing jobs a drag handle or checkbox', async () => {
+      render(<QueuePage />);
+
+      const card = (await screen.findByText('Active Print')).closest('.group') as HTMLElement;
+      expect(within(card).queryByLabelText('Drag to reorder (ASAP only)')).not.toBeInTheDocument();
+      expect(within(card).queryByRole('checkbox')).not.toBeInTheDocument();
     });
 
     it('shows cancel button for pending items', async () => {
@@ -540,6 +593,40 @@ describe('QueuePage', () => {
       await waitFor(() => {
         expect(screen.getByText('Staged')).toBeInTheDocument();
       });
+    });
+
+    it('puts the Start button in the footer strip beside the Staged note', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], manual_start: true, waiting_reason: 'Waiting on PLA (Ash Gray)' },
+        ])),
+      );
+
+      render(<QueuePage />);
+
+      const reason = await screen.findByText('Waiting on PLA (Ash Gray)');
+      const footer = reason.closest('div.border-t') as HTMLElement;
+      expect(within(footer).getByText('Staged')).toBeInTheDocument();
+      expect(within(footer).getByTitle('Start Print')).toBeInTheDocument();
+    });
+
+    it('starts a staged job from the footer button without opening the editor', async () => {
+      const user = userEvent.setup();
+      let started = false;
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([{ ...mockQueueItems[0], manual_start: true }])),
+        http.post('/api/v1/queue/:id/start', () => {
+          started = true;
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      render(<QueuePage />);
+
+      await user.click(await screen.findByTitle('Start Print'));
+
+      await waitFor(() => expect(started).toBe(true));
+      expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
     });
 
     it('shows start button for staged items', async () => {
@@ -661,12 +748,10 @@ describe('QueuePage', () => {
   });
 
   describe('auto power off badge', () => {
-    it('shows power off badge when auto_off_after is true', async () => {
+    it('shows power off icon when auto_off_after is true', async () => {
       render(<QueuePage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Auto power off')).toBeInTheDocument();
-      });
+      expect(await screen.findByRole('img', { name: 'Auto power off' })).toBeInTheDocument();
     });
   });
 
@@ -681,9 +766,7 @@ describe('QueuePage', () => {
 
       render(<QueuePage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('G-code')).toBeInTheDocument();
-      });
+      expect(await screen.findByRole('img', { name: 'G-code' })).toBeInTheDocument();
     });
 
     it('does not show G-code badge when gcode_injection is false', async () => {
@@ -693,7 +776,7 @@ describe('QueuePage', () => {
         expect(screen.getByText('Test Print 1')).toBeInTheDocument();
       });
 
-      expect(screen.queryByText('G-code')).not.toBeInTheDocument();
+      expect(screen.queryByRole('img', { name: 'G-code' })).not.toBeInTheDocument();
     });
   });
 
@@ -777,6 +860,58 @@ describe('QueuePage', () => {
 
       await waitFor(() => expect(secondCallSkippedCheck).toBe(true));
       expect(attempts).toBe(2);
+    });
+  });
+
+  describe('selection checkbox on the thumbnail', () => {
+    it('renders an accessible checkbox for pending jobs that reveals on hover', async () => {
+      render(<QueuePage />);
+
+      const checkbox = await screen.findByRole('checkbox', { name: 'Select Test Print 1' });
+      expect(checkbox).not.toBeChecked();
+      const label = checkbox.closest('label') as HTMLElement;
+      expect(label.className).toContain('sm:opacity-0');
+      expect(label.className).toContain('sm:group-hover:opacity-100');
+    });
+
+    it('selects a job from the checkbox and keeps every checkbox visible while something is selected', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          mockQueueItems[0],
+          { ...mockQueueItems[0], id: 5, position: 4, archive_name: 'Second Pending' },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('checkbox', { name: 'Select Test Print 1' }));
+
+      expect(screen.getByRole('checkbox', { name: 'Select Test Print 1' })).toBeChecked();
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+      const other = screen.getByRole('checkbox', { name: 'Select Second Pending' });
+      expect((other.closest('label') as HTMLElement).className).not.toContain('sm:opacity-0');
+      expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('permissions', () => {
+    it('does not make the card or name editable without update permission', async () => {
+      setAuthToken('read-only-token');
+      server.use(
+        http.get('*/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({ id: 9, username: 'viewer', is_admin: false, permissions: ['queue:read'] }),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      const name = await screen.findByText('Test Print 1');
+      expect(name.closest('button')).toBeNull();
+      await user.click(name);
+      expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
     });
   });
 });

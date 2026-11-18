@@ -1179,6 +1179,7 @@ export default {
       tooltip: 'Shortest Job First — scheduler prioritizes shorter prints',
     },
     addedBy: 'Added by {{name}}',
+    selectJob: 'Select {{name}}',
     nextInQueue: 'Next in queue',
     clearPlateSuccess: 'Plate cleared — ready for next print',
     plateNumber: 'Plate {{index}}',

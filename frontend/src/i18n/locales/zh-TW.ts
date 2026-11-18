@@ -1165,6 +1165,7 @@ export default {
       tooltip: '最短任務優先 — 排程器優先處理較短的列印任務',
     },
     addedBy: '由 {{name}} 新增',
+    selectJob: '選取 {{name}}',
     nextInQueue: '佇列中的下一個',
     clearPlateSuccess: '列印板已清理 — 準備進行下一個列印',
     plateNumber: '板 {{index}}',

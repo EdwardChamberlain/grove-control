@@ -1165,6 +1165,7 @@ export default {
       tooltip: 'Lavoro più breve prima — lo scheduler dà priorità alle stampe più brevi',
     },
     addedBy: 'Aggiunto da {{name}}',
+    selectJob: 'Seleziona {{name}}',
     nextInQueue: 'Prossimo in coda',
     clearPlateSuccess: 'Piatto liberato — pronto per la prossima stampa',
     plateNumber: 'Piatto {{index}}',

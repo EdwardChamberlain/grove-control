@@ -1164,6 +1164,7 @@ export default {
       tooltip: '短いジョブ優先 — スケジューラーが短い印刷を優先します',
     },
     addedBy: '{{name}} が追加',
+    selectJob: '{{name}} を選択',
     nextInQueue: '次のキュー',
     clearPlateSuccess: 'プレートをクリアしました — 次の印刷の準備完了',
     plateNumber: 'プレート {{index}}',

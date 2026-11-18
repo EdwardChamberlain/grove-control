@@ -1165,6 +1165,7 @@ export default {
       tooltip: 'En Kısa İş İlk — planlayıcı daha kısa baskılara öncelik verir',
     },
     addedBy: '{{name}} tarafından eklendi',
+    selectJob: '{{name}} öğesini seç',
     nextInQueue: 'Kuyrukta sıradaki',
     clearPlateSuccess: 'Plaka temizlendi — sonraki baskıya hazır',
     plateNumber: 'Plaka {{index}}',
