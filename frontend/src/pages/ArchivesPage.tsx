@@ -1,6 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useIsMobile } from '../hooks/useIsMobile';
+import { useHistoryFilters } from '../hooks/useHistoryFilters';
+import { HistoryFilterBar } from '../components/HistoryFilterBar';
+import {
+  exportIgnoredFilters, filterAndSortArchives, filterLogEntries, getActiveFilterChips, isSlicedFile,
+  needsClientLogFilter, statusFilterValues, type ViewMode,
+} from '../utils/historyFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -10,7 +15,6 @@ import {
   Package,
   Coins,
   Layers,
-  Search,
   Image,
   Box,
   Printer,
@@ -21,15 +25,12 @@ import {
   X,
   Globe,
   Pencil,
-  LayoutGrid,
-  CalendarDays,
   Star,
   Tag,
   StickyNote,
   FolderInput,
   Save,
   FolderOpen,
-  Calendar,
   AlertCircle,
   Copy,
   Film,
@@ -48,10 +49,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Settings,
-  SlidersHorizontal,
   User,
-  ClipboardList,
   Zap,
   Cog,
   History,
@@ -60,13 +58,13 @@ import { api } from '../api/client';
 import { SliceModal } from '../components/SliceModal';
 import { SaveArchiveToFilesModal } from '../components/SaveArchiveToFilesModal';
 import { openInSlicer, type SlicerType } from '../utils/slicer';
-import { formatDateTime, parseUTCDate, getLastPrintedAt, localDayBoundISO, type TimeFormat, formatDuration } from '../utils/date';
+import { formatDateTime, getLastPrintedAt, localDayBoundISO, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
-import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
+import { ReactSelect } from '../components/ToolbarControls';
 import { PrintModal } from '../components/PrintModal';
 import { PurgeArchivesModal } from '../components/PurgeArchivesModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -90,23 +88,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatFileSize } from '../utils/file';
 
 type TFunction = (key: string, options?: Record<string, unknown>) => string;
-
-/**
- * Check if an archive represents a sliced/printable file.
- * Uses filename (.gcode, .gcode.3mf) as primary check, then falls back to
- * metadata — a .3mf with total_layers or print_time is sliced (contains gcode),
- * while a raw source .3mf (CAD export) has neither.
- */
-function isSlicedFile(archive: { filename?: string | null; total_layers?: number | null; print_time_seconds?: number | null }): boolean {
-  const filename = archive.filename;
-  if (filename) {
-    const lower = filename.toLowerCase();
-    if (lower.endsWith('.gcode') || lower.includes('.gcode.')) return true;
-  }
-  // .3mf can be either sliced or source — check for gcode metadata
-  if (archive.total_layers || archive.print_time_seconds) return true;
-  return false;
-}
 
 // formatDate imported from '../utils/date' - handles UTC conversion
 
@@ -1483,106 +1464,15 @@ function ArchiveCard({
   );
 }
 
-type SortOption = 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc';
-type ViewMode = 'grid' | 'calendar' | 'log';
-type Collection = 'all' | 'recent' | 'this-week' | 'this-month' | 'favorites' | 'not-printed' | 'printed' | 'failed' | 'duplicates';
-
-// status values that indicate a print attempt has finished (regardless of outcome).
-// `archived` is the only status that means "uploaded but never sent to a printer."
-const PRINTED_STATUSES = ['completed', 'failed', 'aborted', 'cancelled', 'stopped'] as const;
-
-const collections: { id: Collection; icon: React.ReactNode }[] = [
-  { id: 'all', icon: <FolderOpen className="w-4 h-4" /> },
-  { id: 'recent', icon: <Clock className="w-4 h-4" /> },
-  { id: 'this-week', icon: <Calendar className="w-4 h-4" /> },
-  { id: 'this-month', icon: <Calendar className="w-4 h-4" /> },
-  { id: 'favorites', icon: <Star className="w-4 h-4" /> },
-  { id: 'not-printed', icon: <Upload className="w-4 h-4" /> },
-  { id: 'printed', icon: <Printer className="w-4 h-4" /> },
-  { id: 'failed', icon: <AlertCircle className="w-4 h-4" /> },
-  { id: 'duplicates', icon: <Copy className="w-4 h-4" /> },
-];
-
-/** Quick time/state filter, shared by the grid (per archive) and the log (per print). */
-function matchesCollection(
-  collection: Collection,
-  date: Date,
-  status: string,
-  archive?: Pick<Archive, 'is_favorite' | 'duplicate_count'>,
-): boolean {
-  const now = new Date();
-  switch (collection) {
-    case 'recent':
-      return now.getTime() - date.getTime() < 24 * 60 * 60 * 1000;
-    case 'this-week':
-      return now.getTime() - date.getTime() < 7 * 24 * 60 * 60 * 1000;
-    case 'this-month':
-      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-    case 'favorites':
-      return archive?.is_favorite === true;
-    case 'not-printed':
-      return status === 'archived';
-    case 'printed':
-      return (PRINTED_STATUSES as readonly string[]).includes(status);
-    case 'failed':
-      return status === 'failed' || status === 'aborted';
-    case 'duplicates':
-      return (archive?.duplicate_count ?? 0) > 0;
-    default:
-      return true;
-  }
-}
-
-// Status filter values and the raw statuses they cover. "Stopped" includes the
-// archive-only "aborted" so the grid, the log and the export agree.
-const STATUS_FILTER_VALUES: Record<string, string[]> = {
-  completed: ['completed'],
-  failed: ['failed'],
-  stopped: ['stopped', 'aborted'],
-  cancelled: ['cancelled'],
-};
-
-function matchesStatusFilter(filter: string | null, status: string): boolean {
-  if (!filter) return true;
-  return (STATUS_FILTER_VALUES[filter] ?? [filter]).includes(status);
-}
-
 export function ArchivesPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify } = useAuth();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [search, setSearch] = useState('');
-  const [filterPrinter, setFilterPrinter] = useState<number | null>(() => {
-    const saved = localStorage.getItem('archiveFilterPrinter');
-    return saved ? Number(saved) : null;
-  });
-  const [filterMaterial, setFilterMaterial] = useState<string | null>(() =>
-    localStorage.getItem('archiveFilterMaterial')
-  );
-  const [filterColors, setFilterColors] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('archiveFilterColors');
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
-  const [colorFilterMode, setColorFilterMode] = useState<'or' | 'and'>(() =>
-    (localStorage.getItem('archiveColorFilterMode') as 'or' | 'and') || 'or'
-  );
-  const [filterFavorites, setFilterFavorites] = useState(() =>
-    localStorage.getItem('archiveFilterFavorites') === 'true'
-  );
-  const [hideFailed, setHideFailed] = useState(() =>
-    localStorage.getItem('archiveHideFailed') === 'true'
-  );
-  const [hideDuplicates, setHideDuplicates] = useState(() =>
-    localStorage.getItem('archiveHideDuplicates') === 'true'
-  );
-  const [filterTag, setFilterTag] = useState<string | null>(() =>
-    localStorage.getItem('archiveFilterTag')
-  );
-  const [filterFileType, setFilterFileType] = useState<'all' | 'gcode' | 'source'>(() =>
-    (localStorage.getItem('archiveFilterFileType') as 'all' | 'gcode' | 'source') || 'all'
-  );
+  const filters = useHistoryFilters();
+  const { values, sortBy, setSearch } = filters;
+  const { search, filterPrinter, filterStatus, filterUser, filterDateFrom, filterDateTo, collection } = values;
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Install-step-4 nudge — covers the slicer-side variant of "Store sent files
   // on external storage" that the connection diagnostic can't detect (printer
@@ -1611,12 +1501,6 @@ export function ArchivesPage() {
     if (saved === 'list') return 'log';
     return saved === 'calendar' || saved === 'log' ? saved : 'grid';
   });
-  const [sortBy, setSortBy] = useState<SortOption>(() =>
-    (localStorage.getItem('archiveSortBy') as SortOption) || 'date-desc'
-  );
-  const [collection, setCollection] = useState<Collection>(() =>
-    (localStorage.getItem('archiveCollection') as Collection) || 'all'
-  );
   // Pagination state
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState<number>(() => {
@@ -1635,18 +1519,6 @@ export function ArchivesPage() {
   const [pendingNavigationArchiveId, setPendingNavigationArchiveId] = useState<number | null>(null);
 
   // Log view state
-  const [filterUser, setFilterUser] = useState<string | null>(() =>
-    localStorage.getItem('logFilterUser') || null
-  );
-  const [filterStatus, setFilterStatus] = useState<string | null>(() =>
-    localStorage.getItem('logFilterStatus')
-  );
-  const [filterDateFrom, setFilterDateFrom] = useState(() =>
-    localStorage.getItem('logFilterDateFrom') || ''
-  );
-  const [filterDateTo, setFilterDateTo] = useState(() =>
-    localStorage.getItem('logFilterDateTo') || ''
-  );
   const [logOffset, setLogOffset] = useState(() => {
     const saved = localStorage.getItem('logOffset');
     return saved ? Number(saved) : 0;
@@ -1713,10 +1585,7 @@ export function ArchivesPage() {
   // Filters the print log can't apply on the server (they depend on the linked
   // archive, or on fields the log API doesn't expose) switch it to a larger
   // fetch that is filtered and paged here.
-  const logNeedsClientFilter = !!(
-    filterMaterial || filterColors.size > 0 || filterFavorites || hideFailed || hideDuplicates ||
-    filterTag || filterFileType !== 'all' || collection !== 'all'
-  );
+  const logNeedsClientFilter = needsClientLogFilter(values);
   const LOG_CLIENT_FETCH_LIMIT = 500;
 
   const { data: printLogData, isLoading: isLogLoading } = useQuery({
@@ -1725,7 +1594,7 @@ export function ArchivesPage() {
       search: search || undefined,
       printerId: filterPrinter || undefined,
       username: filterUser || undefined,
-      status: filterStatus ? (STATUS_FILTER_VALUES[filterStatus] ?? [filterStatus]).join(',') : undefined,
+      status: filterStatus ? statusFilterValues(filterStatus).join(',') : undefined,
       dateFrom: filterDateFrom ? localDayBoundISO(filterDateFrom, 'start') : undefined,
       dateTo: filterDateTo ? localDayBoundISO(filterDateTo, 'end') : undefined,
       limit: logNeedsClientFilter ? LOG_CLIENT_FETCH_LIMIT : logPageSize,
@@ -1804,7 +1673,7 @@ export function ArchivesPage() {
     setShowExportMenu(false);
     setIsExporting(true);
     try {
-      const fromStatus = filterStatus ? (STATUS_FILTER_VALUES[filterStatus] ?? [filterStatus]) : null;
+      const fromStatus = filterStatus ? statusFilterValues(filterStatus) : null;
       const fromCollection = collection === 'failed' ? ['failed', 'aborted'] : null;
       const statuses = fromStatus && fromCollection
         ? fromStatus.filter((v) => fromCollection.includes(v))
@@ -1866,63 +1735,14 @@ export function ArchivesPage() {
     },
   });
 
-  // Persist all filters to localStorage
-  useEffect(() => {
-    if (filterPrinter !== null) {
-      localStorage.setItem('archiveFilterPrinter', filterPrinter.toString());
-    } else {
-      localStorage.removeItem('archiveFilterPrinter');
-    }
-  }, [filterPrinter]);
-
-  useEffect(() => {
-    if (filterMaterial) {
-      localStorage.setItem('archiveFilterMaterial', filterMaterial);
-    } else {
-      localStorage.removeItem('archiveFilterMaterial');
-    }
-  }, [filterMaterial]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveFilterColors', JSON.stringify([...filterColors]));
-  }, [filterColors]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveColorFilterMode', colorFilterMode);
-  }, [colorFilterMode]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveFilterFavorites', filterFavorites.toString());
-  }, [filterFavorites]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveHideFailed', hideFailed.toString());
-  }, [hideFailed]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveHideDuplicates', hideDuplicates.toString());
-  }, [hideDuplicates]);
-
-  useEffect(() => {
-    if (filterTag) {
-      localStorage.setItem('archiveFilterTag', filterTag);
-    } else {
-      localStorage.removeItem('archiveFilterTag');
-    }
-  }, [filterTag]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveFilterFileType', filterFileType);
-  }, [filterFileType]);
-
-  // Reset page when filters/search/sort/collection change
+  // Back to the first page whenever a filter or the sort changes (`values` only changes identity then).
   useEffect(() => {
     setLogOffset(0);
-  }, [search, filterPrinter, filterUser, filterStatus, filterDateFrom, filterDateTo, filterMaterial, filterColors, colorFilterMode, filterFavorites, hideFailed, hideDuplicates, filterTag, filterFileType, collection]);
+  }, [values]);
 
   useEffect(() => {
     setPageIndex(0);
-  }, [filterUser, filterStatus, filterDateFrom, filterDateTo, search, filterPrinter, filterMaterial, filterColors, colorFilterMode, filterFavorites, hideFailed, hideDuplicates, filterTag, filterFileType, sortBy, collection]);
+  }, [values, sortBy]);
 
   useEffect(() => {
     try { localStorage.setItem('archivePageSize', String(pageSize)); } catch { /* ignore */ }
@@ -1933,47 +1753,6 @@ export function ArchivesPage() {
   }, [viewMode]);
 
   useEffect(() => {
-    localStorage.setItem('archiveSortBy', sortBy);
-  }, [sortBy]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveCollection', collection);
-  }, [collection]);
-
-  // Persist log view filters
-  useEffect(() => {
-    if (filterUser) {
-      localStorage.setItem('logFilterUser', filterUser);
-    } else {
-      localStorage.removeItem('logFilterUser');
-    }
-  }, [filterUser]);
-
-  useEffect(() => {
-    if (filterStatus) {
-      localStorage.setItem('logFilterStatus', filterStatus);
-    } else {
-      localStorage.removeItem('logFilterStatus');
-    }
-  }, [filterStatus]);
-
-  useEffect(() => {
-    if (filterDateFrom) {
-      localStorage.setItem('logFilterDateFrom', filterDateFrom);
-    } else {
-      localStorage.removeItem('logFilterDateFrom');
-    }
-  }, [filterDateFrom]);
-
-  useEffect(() => {
-    if (filterDateTo) {
-      localStorage.setItem('logFilterDateTo', filterDateTo);
-    } else {
-      localStorage.removeItem('logFilterDateTo');
-    }
-  }, [filterDateTo]);
-
-  useEffect(() => {
     localStorage.setItem('logOffset', logOffset.toString());
   }, [logOffset]);
 
@@ -1981,88 +1760,19 @@ export function ArchivesPage() {
     localStorage.setItem('logPageSize', logPageSize.toString());
   }, [logPageSize]);
 
-  const printerMap = new Map(printers?.map((p) => [p.id, p.name]) || []);
+  const printerMap = useMemo(() => new Map(printers?.map((p) => [p.id, p.name]) || []), [printers]);
 
-  // Extract unique materials and colors from archives
-  const uniqueMaterials = [...new Set(
-    archives?.flatMap(a => a.filament_type?.split(', ') || []).filter(Boolean) || []
-  )].sort();
+  // Options for the filter menus, from the archives on hand.
+  const { uniqueMaterials, uniqueColors, uniqueTags } = useMemo(() => ({
+    uniqueMaterials: [...new Set(archives?.flatMap((a) => a.filament_type?.split(', ') || []).filter(Boolean) || [])].sort(),
+    uniqueColors: [...new Set(archives?.flatMap((a) => a.filament_color?.split(',') || []).filter(Boolean) || [])],
+    uniqueTags: [...new Set(archives?.flatMap((a) => a.tags?.split(',').map((t) => t.trim()) || []).filter(Boolean) || [])].sort(),
+  }), [archives]);
 
-  const uniqueColors = [...new Set(
-    archives?.flatMap(a => a.filament_color?.split(',') || []).filter(Boolean) || []
-  )];
-
-  const uniqueTags = [...new Set(
-    archives?.flatMap(a => a.tags?.split(',').map(t => t.trim()) || []).filter(Boolean) || []
-  )].sort();
-
-  const filteredArchives = archives
-    ?.filter((a) => {
-      // Collection filter
-      const matchesCol = matchesCollection(collection, parseUTCDate(getLastPrintedAt(a)) || new Date(0), a.status, a);
-
-      // Status / user / print-date filters (shared with the print log)
-      const matchesStatus = matchesStatusFilter(filterStatus, a.status);
-      const matchesUser = !filterUser || a.created_by_username === filterUser;
-      const printedAt = (parseUTCDate(getLastPrintedAt(a)) || new Date(0)).getTime();
-      const matchesDate =
-        (!filterDateFrom || printedAt >= new Date(`${filterDateFrom}T00:00:00`).getTime()) &&
-        (!filterDateTo || printedAt <= new Date(`${filterDateTo}T23:59:59.999`).getTime());
-
-      // Search filter
-      const matchesSearch = (a.print_name || a.filename).toLowerCase().includes(search.toLowerCase());
-
-      // Material filter
-      const matchesMaterial = !filterMaterial ||
-        (a.filament_type?.split(', ').includes(filterMaterial));
-
-      // Color filter (AND: must have all selected colors, OR: must have any selected color)
-      const archiveColors = a.filament_color?.split(',') || [];
-      const matchesColor = filterColors.size === 0 ||
-        (colorFilterMode === 'or'
-          ? archiveColors.some(c => filterColors.has(c))
-          : [...filterColors].every(c => archiveColors.includes(c)));
-
-      // Favorites filter (only apply if not using favorites collection)
-      const matchesFavorites = collection === 'favorites' || !filterFavorites || a.is_favorite;
-
-      // Hide failed filter (don't apply when viewing failed collection)
-      const matchesHideFailed = collection === 'failed' || !hideFailed || (a.status !== 'failed' && a.status !== 'aborted');
-
-      // Hide duplicates filter (don't apply when viewing duplicates collection)
-      const matchesHideDuplicates =
-        collection === 'duplicates' || !hideDuplicates || a.duplicate_count === 0 || a.duplicate_sequence === 0;
-
-      // Tag filter
-      const archiveTags = a.tags?.split(',').map(t => t.trim()) || [];
-      const matchesTag = !filterTag || archiveTags.includes(filterTag);
-
-      // File type filter (gcode = sliced, source = project file only)
-      const isGcodeFile = isSlicedFile(a);
-      const matchesFileType = filterFileType === 'all' ||
-        (filterFileType === 'gcode' && isGcodeFile) ||
-        (filterFileType === 'source' && !isGcodeFile);
-
-      return matchesCol && matchesStatus && matchesUser && matchesDate && matchesSearch && matchesMaterial && matchesColor && matchesFavorites && matchesHideFailed && matchesHideDuplicates && matchesTag && matchesFileType;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case 'date-desc':
-          return (parseUTCDate(getLastPrintedAt(b))?.getTime() || 0) - (parseUTCDate(getLastPrintedAt(a))?.getTime() || 0);
-        case 'date-asc':
-          return (parseUTCDate(getLastPrintedAt(a))?.getTime() || 0) - (parseUTCDate(getLastPrintedAt(b))?.getTime() || 0);
-        case 'name-asc':
-          return (a.print_name || a.filename).localeCompare(b.print_name || b.filename);
-        case 'name-desc':
-          return (b.print_name || b.filename).localeCompare(a.print_name || a.filename);
-        case 'size-desc':
-          return b.file_size - a.file_size;
-        case 'size-asc':
-          return a.file_size - b.file_size;
-        default:
-          return 0;
-      }
-    });
+  const filteredArchives = useMemo(
+    () => (archives ? filterAndSortArchives(archives, values, sortBy) : undefined),
+    [archives, values, sortBy],
+  );
 
   // Pagination
   const totalFiltered = filteredArchives?.length || 0;
@@ -2073,34 +1783,12 @@ export function ArchivesPage() {
     ? filteredArchives
     : filteredArchives?.slice(pageIndex * effectivePageSize, (pageIndex + 1) * effectivePageSize);
 
-  // Print log rows: one per print. Archive-level filters are applied through
-  // the linked archive (orphaned entries only match filters that don't need it).
-  const archiveById = new Map((archives ?? []).map((a) => [a.id, a]));
-  const logEntriesFiltered = !logNeedsClientFilter
-    ? printLogData?.items ?? []
-    : (printLogData?.items ?? []).filter((entry) => {
-        const linked = entry.archive_id != null ? archiveById.get(entry.archive_id) : undefined;
-        const printedAt = parseUTCDate(entry.started_at || entry.created_at) || new Date(0);
-        if (!matchesCollection(collection, printedAt, entry.status, linked)) return false;
-        if (filterMaterial && !entry.filament_type?.split(', ').includes(filterMaterial)) return false;
-        if (filterColors.size > 0) {
-          const colours = entry.filament_color?.split(',') || [];
-          const ok = colorFilterMode === 'or'
-            ? colours.some((c) => filterColors.has(c))
-            : [...filterColors].every((c) => colours.includes(c));
-          if (!ok) return false;
-        }
-        if (hideFailed && collection !== 'failed' && (entry.status === 'failed' || entry.status === 'aborted')) return false;
-        if (filterFavorites && collection !== 'favorites' && !linked?.is_favorite) return false;
-        if (filterTag && !linked?.tags?.split(',').map((t) => t.trim()).includes(filterTag)) return false;
-        if (filterFileType !== 'all') {
-          if (!linked) return false;
-          const sliced = isSlicedFile(linked);
-          if (filterFileType === 'gcode' ? !sliced : sliced) return false;
-        }
-        if (hideDuplicates && collection !== 'duplicates' && linked && linked.duplicate_count > 0 && linked.duplicate_sequence !== 0) return false;
-        return true;
-      });
+  // Print log rows: one per print. Archive-level filters are applied through the linked archive.
+  const archiveById = useMemo(() => new Map((archives ?? []).map((a) => [a.id, a])), [archives]);
+  const logEntriesFiltered = useMemo(
+    () => (logNeedsClientFilter ? filterLogEntries(printLogData?.items ?? [], archiveById, values) : printLogData?.items ?? []),
+    [logNeedsClientFilter, printLogData, archiveById, values],
+  );
   const logTotal = logNeedsClientFilter ? logEntriesFiltered.length : printLogData?.total ?? 0;
   const logRows = logNeedsClientFilter
     ? logEntriesFiltered.slice(logOffset, logOffset + logPageSize)
@@ -2184,129 +1872,11 @@ export function ArchivesPage() {
     setIsSelectionMode(false);
   };
 
-  const toggleColor = (color: string) => {
-    setFilterColors((prev) => {
-      const next = new Set(prev);
-      if (next.has(color)) {
-        next.delete(color);
-      } else {
-        next.add(color);
-      }
-      return next;
-    });
-  };
-
-  const clearTopFilters = () => {
-    setSearch('');
-    setFilterPrinter(null);
-    setFilterMaterial(null);
-    setFilterFavorites(false);
-    setHideFailed(false);
-    setHideDuplicates(false);
-    setFilterTag(null);
-    setFilterFileType('all');
-    setFilterStatus(null);
-    setFilterUser(null);
-    setFilterDateFrom('');
-    setFilterDateTo('');
-    setFilterColors(new Set());
-    setCollection('all');
-  };
-
-  const hasTopFilters = search || filterStatus || filterUser || filterDateFrom || filterDateTo || filterColors.size > 0 || collection !== 'all' || filterPrinter || filterMaterial || filterFavorites || hideFailed || hideDuplicates || filterTag || filterFileType !== 'all';
-
-  const isMobile = useIsMobile();
-  const [showFilters, setShowFilters] = useState(false);
-  useEffect(() => {
-    if (!showFilters) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowFilters(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [showFilters]);
-  const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-wide text-bambu-gray';
-
-  const primaryControls = (inPanel: boolean) => (
-    <>
-      <ToolbarDropdown
-        value={filterPrinter ? String(filterPrinter) : 'all'}
-        onChange={(value) => setFilterPrinter(value === 'all' ? null : Number(value))}
-        fullWidth={inPanel}
-        minWidthClass="min-w-32"
-        options={[
-          { value: 'all', label: t('archives.log.allPrinters') },
-          ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
-        ]}
-      />
-      <ToolbarDropdown
-        value={filterStatus || 'all'}
-        onChange={(value) => setFilterStatus(value === 'all' ? null : value)}
-        fullWidth={inPanel}
-        minWidthClass="min-w-32"
-        options={[
-          { value: 'all', label: t('archives.log.allStatuses') },
-          { value: 'completed', label: t('archives.status.completed') },
-          { value: 'failed', label: t('archives.status.failed') },
-          { value: 'stopped', label: t('archives.status.stopped') },
-          { value: 'cancelled', label: t('archives.log.cancelled') },
-        ]}
-      />
-      <ToolbarDropdown
-        value={collection}
-        onChange={(value) => setCollection(value as Collection)}
-        fullWidth={inPanel}
-        minWidthClass="min-w-32"
-        options={collections.map((c) => ({ value: c.id, label: t(`archives.collections.${c.id}`) }))}
-      />
-    </>
+  const activeChips = useMemo(
+    () => getActiveFilterChips(values, t, filterPrinter ? printerMap.get(filterPrinter) : undefined),
+    [values, t, filterPrinter, printerMap],
   );
-
-  const sortControl = (inPanel: boolean) => (
-    <ToolbarDropdown<SortOption>
-      value={sortBy}
-      onChange={setSortBy}
-      fullWidth={inPanel}
-      minWidthClass="min-w-36"
-      options={[
-        { value: 'date-desc', label: t('archives.sortRecentlyPrinted') },
-        { value: 'date-asc', label: t('archives.sortLeastRecentlyPrinted') },
-        { value: 'name-asc', label: `${t('archives.sortName')} A-Z` },
-        { value: 'name-desc', label: `${t('archives.sortName')} Z-A` },
-        { value: 'size-desc', label: t('archives.sortLargest') },
-        { value: 'size-asc', label: t('archives.sortSmallest') },
-      ]}
-    />
-  );
-
-  // Chips for everything currently filtering the results, so nothing hides silently.
-  const activeChips: { key: string; label: string; clear: () => void }[] = [];
-  if (search) activeChips.push({ key: 'search', label: `“${search}”`, clear: () => setSearch('') });
-  if (filterPrinter) activeChips.push({ key: 'printer', label: printerMap.get(filterPrinter) || t('archives.log.printer'), clear: () => setFilterPrinter(null) });
-  if (filterStatus) activeChips.push({ key: 'status', label: t(`archives.status.${filterStatus}`, { defaultValue: filterStatus }), clear: () => setFilterStatus(null) });
-  if (collection !== 'all') activeChips.push({ key: 'collection', label: t(`archives.collections.${collection}`), clear: () => setCollection('all') });
-  if (filterUser) activeChips.push({ key: 'user', label: filterUser, clear: () => setFilterUser(null) });
-  if (filterDateFrom) activeChips.push({ key: 'from', label: `${t('archives.log.dateFrom')} ${filterDateFrom}`, clear: () => setFilterDateFrom('') });
-  if (filterDateTo) activeChips.push({ key: 'to', label: `${t('archives.log.dateTo')} ${filterDateTo}`, clear: () => setFilterDateTo('') });
-  if (filterMaterial) activeChips.push({ key: 'material', label: filterMaterial, clear: () => setFilterMaterial(null) });
-  if (filterFileType !== 'all') activeChips.push({ key: 'filetype', label: filterFileType === 'gcode' ? t('archives.filters.sliced') : t('archives.filters.sourceOnly'), clear: () => setFilterFileType('all') });
-  if (filterTag) activeChips.push({ key: 'tag', label: filterTag, clear: () => setFilterTag(null) });
-  if (filterFavorites) activeChips.push({ key: 'favorites', label: t('archives.filters.favorites'), clear: () => setFilterFavorites(false) });
-  if (hideFailed) activeChips.push({ key: 'hidefailed', label: t('archives.filters.hideFailed'), clear: () => setHideFailed(false) });
-  if (hideDuplicates) activeChips.push({ key: 'hidedupes', label: t('archives.hideDuplicates'), clear: () => setHideDuplicates(false) });
-  filterColors.forEach((color) => activeChips.push({
-    key: `color-${color}`,
-    label: color,
-    clear: () => setFilterColors((prev) => { const next = new Set(prev); next.delete(color); return next; }),
-  }));
-  // Active filters the export cannot apply (they depend on archive details).
-  const exportIgnored = activeChips
-    .filter((c) => ['material', 'filetype', 'tag', 'favorites', 'hidefailed', 'hidedupes'].includes(c.key)
-      || c.key.startsWith('color-')
-      || (c.key === 'collection' && ['favorites', 'not-printed', 'printed', 'duplicates'].includes(collection)))
-    .map((c) => c.label);
-  // The badge counts what lives inside the panel; on a phone that is every filter except search.
-  const primaryActive = (filterPrinter ? 1 : 0) + (filterStatus ? 1 : 0) + (collection !== 'all' ? 1 : 0);
-  const panelOnlyActive = activeChips.length - primaryActive - (search ? 1 : 0);
-  const panelBadgeCount = isMobile ? activeChips.length - (search ? 1 : 0) : panelOnlyActive;
+  const exportIgnored = exportIgnoredFilters(activeChips, collection);
   const shownCount = viewMode === 'log' ? logTotal : filteredArchives?.length || 0;
 
   // Keyboard shortcuts
@@ -2326,13 +1896,12 @@ export function ArchivesPage() {
         searchInputRef.current?.focus();
         break;
       case 'Escape':
-        // Escape closes the Filters panel first; it must not also drop the selection.
-        if (selectionMode && !showFilters) {
+        if (selectionMode) {
           clearSelection();
         }
         break;
     }
-  }, [selectionMode, showFilters]);
+  }, [selectionMode]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -2514,289 +2083,20 @@ export function ArchivesPage() {
         </div>
       </div>
 
-      {/* One toolbar for every view: primary filters inline, the rest in the Filters panel */}
-      <div className="relative z-20 mb-3 flex items-center gap-2">
-        <div className="relative min-w-0 flex-1 md:min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
-          <input
-            ref={searchInputRef}
-            type="text"
-            placeholder={t('archives.searchPlaceholder')}
-            className="h-8 w-full pl-10 pr-4 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        {!isMobile && primaryControls(false)}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setShowFilters((open) => !open)}
-            aria-expanded={showFilters}
-            aria-haspopup="dialog"
-            aria-label={t('archives.filters.filters')}
-            title={t('archives.filters.filters')}
-            className={`h-8 flex items-center gap-2 px-2 md:px-3 rounded-lg border text-sm font-medium transition-colors ${
-              panelBadgeCount > 0 || showFilters
-                ? 'bg-bambu-dark border-bambu-green text-white'
-                : 'bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary'
-            }`}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            <span className="hidden md:inline">{t('archives.filters.filters')}</span>
-            {panelBadgeCount > 0 && (
-              <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-bambu-green text-white text-[11px] font-semibold flex items-center justify-center">
-                {panelBadgeCount}
-              </span>
-            )}
-          </button>
-          {showFilters && (
-            <>
-              <div className="fixed inset-0 z-10 bg-black/50 md:bg-transparent" onClick={() => setShowFilters(false)} />
-              <div
-                role="dialog"
-                aria-label={t('archives.filters.filters')}
-                className="fixed inset-x-0 bottom-0 z-20 max-h-[82vh] overflow-y-auto rounded-t-2xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-4 shadow-2xl md:absolute md:inset-x-auto md:bottom-auto md:left-auto md:right-0 md:top-full md:mt-1 md:w-[440px] md:rounded-xl"
-              >
-                <div className="mb-2 flex items-center justify-between md:hidden">
-                  <span className="text-base font-semibold text-white">{t('archives.filters.filters')}</span>
-                </div>
-                {isMobile && (
-                  <div className="mb-4 flex flex-col gap-2">
-                    {primaryControls(true)}
-                    {viewMode !== 'log' && sortControl(true)}
-                  </div>
-                )}
-                <div className={sectionHeadingClass}>{t('archives.filters.whoWhen')}</div>
-                <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <ToolbarDropdown
-                    value={filterUser || 'all'}
-                    fullWidth={isMobile}
-                    onChange={(value) => setFilterUser(value === 'all' ? null : value)}
-                    minWidthClass="min-w-32"
-                    options={[
-                      { value: 'all', label: t('archives.log.allUsers') },
-                      ...(users?.map((u) => ({ value: u.username, label: u.username })) ?? []),
-                    ]}
-                  />
-                  <label className="sr-only" htmlFor="history-date-from">{t('archives.log.dateFrom')}</label>
-                  <input
-                    id="history-date-from"
-                    type="date"
-                    title={t('archives.log.dateFrom')}
-                    className="h-8 min-w-[9rem] flex-1 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={filterDateFrom}
-                    onChange={(e) => setFilterDateFrom(e.target.value)}
-                  />
-                  <label className="sr-only" htmlFor="history-date-to">{t('archives.log.dateTo')}</label>
-                  <input
-                    id="history-date-to"
-                    type="date"
-                    title={t('archives.log.dateTo')}
-                    className="h-8 min-w-[9rem] flex-1 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={filterDateTo}
-                    onChange={(e) => setFilterDateTo(e.target.value)}
-                  />
-                </div>
-
-                <div className={sectionHeadingClass}>{t('archives.filters.what')}</div>
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <ToolbarDropdown
-                    value={filterMaterial || 'all'}
-                    onChange={(value) => setFilterMaterial(value === 'all' ? null : value)}
-                    minWidthClass="min-w-32"
-                    options={[
-                      { value: 'all', label: t('archives.filters.allMaterials') },
-                      ...uniqueMaterials.map((m) => ({ value: m, label: m })),
-                    ]}
-                  />
-                  <ToolbarDropdown
-                    value={filterFileType}
-                    onChange={(value) => setFilterFileType(value as 'all' | 'gcode' | 'source')}
-                    minWidthClass="min-w-32"
-                    options={[
-                      { value: 'all', label: t('archives.filters.allFiles') },
-                      { value: 'gcode', label: t('archives.filters.sliced') },
-                      { value: 'source', label: t('archives.filters.sourceOnly') },
-                    ]}
-                  />
-                  {uniqueTags.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <ToolbarDropdown
-                        value={filterTag || 'all'}
-                        onChange={(value) => setFilterTag(value === 'all' ? null : value)}
-                        minWidthClass="min-w-28"
-                        options={[
-                          { value: 'all', label: t('archives.filters.allTags') },
-                          ...uniqueTags.map((tag) => ({ value: tag, label: tag })),
-                        ]}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowTagManagement(true)}
-                        className="h-8 w-8 flex items-center justify-center rounded-lg bg-bambu-dark border border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-green transition-colors"
-                        title={t('archives.manageTags')}
-                        aria-label={t('archives.manageTags')}
-                      >
-                        <Settings className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFilterFavorites(!filterFavorites)}
-                    aria-pressed={filterFavorites}
-                    className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors ${
-                      filterFavorites
-                        ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
-                        : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                    }`}
-                    title={filterFavorites ? t('archives.showAll') : t('archives.showFavoritesOnly')}
-                  >
-                    <Star className={`w-4 h-4 ${filterFavorites ? 'fill-yellow-400' : ''}`} />
-                    <span className="text-sm">{t('archives.filters.favorites')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHideFailed(!hideFailed)}
-                    aria-pressed={hideFailed}
-                    className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors ${
-                      hideFailed
-                        ? 'bg-red-500/20 border-red-500 text-red-400'
-                        : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                    }`}
-                    title={hideFailed ? t('archives.showFailedPrints') : t('archives.hideFailedPrints')}
-                  >
-                    <AlertCircle className="w-4 h-4" />
-                    <span className="text-sm">{t('archives.filters.hideFailed')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHideDuplicates(!hideDuplicates)}
-                    aria-pressed={hideDuplicates}
-                    className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors ${
-                      hideDuplicates
-                        ? 'bg-purple-500/20 border-purple-500 text-purple-400'
-                        : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                    }`}
-                    title={t('archives.hideDuplicates')}
-                  >
-                    <Copy className="w-4 h-4" />
-                    <span className="text-sm">{t('archives.hideDuplicates')}</span>
-                  </button>
-                </div>
-
-                {uniqueColors.length > 0 && (
-                  <>
-                    <div className="mb-2 flex items-center gap-3">
-                      <span className={sectionHeadingClass + ' !mb-0'}>{t('archives.filters.colors').replace(/[:：]\s*$/, '')}</span>
-                      {filterColors.size > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setColorFilterMode(m => m === 'or' ? 'and' : 'or')}
-                          className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                            colorFilterMode === 'and'
-                              ? 'bg-bambu-green text-white'
-                              : 'bg-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                          }`}
-                          title={colorFilterMode === 'or' ? 'Match ANY selected color' : 'Match ALL selected colors'}
-                        >
-                          {colorFilterMode.toUpperCase()}
-                        </button>
-                      )}
-                    </div>
-                    <div className="mb-4 flex flex-wrap items-center gap-2 px-1">
-                      {uniqueColors.map((color) => (
-                        <button
-                          type="button"
-                          key={color}
-                          onClick={() => toggleColor(color)}
-                          aria-pressed={filterColors.has(color)}
-                          className={`w-6 h-6 rounded-full border-2 transition-all ${
-                            filterColors.has(color)
-                              ? 'border-bambu-green scale-110'
-                              : 'border-white/20 hover:border-white/40'
-                          }`}
-                          style={{ backgroundColor: color }}
-                          title={color}
-                        />
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                <div className="flex items-center justify-between border-t border-bambu-dark-tertiary pt-3">
-                  <Button variant="ghost" size="sm" onClick={clearTopFilters} className="text-bambu-gray hover:text-white">
-                    <X className="w-4 h-4" />
-                    {t('archives.filters.reset')}
-                  </Button>
-                  <Button size="sm" onClick={() => setShowFilters(false)}>
-                    {t('archives.filters.showCount', { count: shownCount })}
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-        {viewMode !== 'log' && !isMobile && (
-          <>
-            <div className="h-6 w-px bg-bambu-dark-tertiary" />
-            {sortControl(false)}
-          </>
-        )}
-        <div className="flex h-8 items-center border border-bambu-dark-tertiary rounded-lg overflow-hidden flex-shrink-0">
-          <button
-            type="button"
-            className={`h-8 w-8 flex items-center justify-center ${viewMode === 'grid' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-            onClick={() => setViewMode('grid')}
-            title={t('archives.gridView')}
-            aria-label={t('archives.gridView')}
-          >
-            <LayoutGrid className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            className={`h-8 w-8 flex items-center justify-center ${viewMode === 'calendar' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-            onClick={() => setViewMode('calendar')}
-            title={t('archives.calendarView')}
-            aria-label={t('archives.calendarView')}
-          >
-            <CalendarDays className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            className={`h-8 w-8 flex items-center justify-center ${viewMode === 'log' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-            onClick={() => setViewMode('log')}
-            title={t('archives.logView')}
-            aria-label={t('archives.logView')}
-          >
-            <ClipboardList className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Active filters, shown only when something is filtered */}
-      {activeChips.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-1.5">
-          {activeChips.map((chip) => (
-            <button
-              type="button"
-              key={chip.key}
-              onClick={chip.clear}
-              aria-label={t('archives.filters.removeFilter', { label: chip.label })}
-              className="h-[26px] flex items-center gap-1.5 rounded-full border border-bambu-green/50 bg-bambu-green/15 pl-2.5 pr-2 text-xs font-medium text-green-300 hover:bg-bambu-green/25 transition-colors"
-            >
-              {chip.label}
-              <X className="w-3 h-3" />
-            </button>
-          ))}
-          <Button variant="ghost" size="sm" onClick={clearTopFilters} className="text-bambu-gray hover:text-white">
-            {t('archives.filters.reset')}
-          </Button>
-        </div>
-      )}
+      <HistoryFilterBar
+        filters={filters}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        chips={activeChips}
+        printers={printers}
+        users={users}
+        uniqueMaterials={uniqueMaterials}
+        uniqueColors={uniqueColors}
+        uniqueTags={uniqueTags}
+        shownCount={shownCount}
+        searchInputRef={searchInputRef}
+        onManageTags={() => setShowTagManagement(true)}
+      />
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}
       <PendingUploadsPanel />
@@ -2808,10 +2108,10 @@ export function ArchivesPage() {
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-bambu-gray">
-              {hasTopFilters ? t('archives.noArchivesSearch') : t('archives.noArchivesYet')}
+              {filters.hasActive ? t('archives.noArchivesSearch') : t('archives.noArchivesYet')}
             </p>
-            {hasTopFilters ? (
-              <Button variant="ghost" size="sm" className="mt-3" onClick={clearTopFilters}>
+            {filters.hasActive ? (
+              <Button variant="ghost" size="sm" className="mt-3" onClick={filters.clearAll}>
                 <X className="w-4 h-4" />
                 {t('archives.resetFilters')}
               </Button>
@@ -2895,8 +2195,8 @@ export function ArchivesPage() {
             ) : !logRows.length ? (
               <div className="text-center py-12 text-bambu-gray">
                 <p>{t('archives.log.noEntries')}</p>
-                {hasTopFilters && (
-                  <Button variant="ghost" size="sm" className="mt-3" onClick={clearTopFilters}>
+                {filters.hasActive && (
+                  <Button variant="ghost" size="sm" className="mt-3" onClick={filters.clearAll}>
                     <X className="w-4 h-4" />
                     {t('archives.resetFilters')}
                   </Button>
