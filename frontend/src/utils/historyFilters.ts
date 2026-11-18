@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next';
 import type { Archive, PrintLogEntry } from '../api/client';
-import { getLastPrintedAt, parseUTCDate } from './date';
+import { getColorName } from './colors';
+import { getLastPrintedAt, localDayBoundISO, parseUTCDate } from './date';
 
 export type ViewMode = 'grid' | 'calendar' | 'log';
 export type SortOption = 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc';
@@ -36,13 +37,15 @@ export interface HistoryFilterValues {
 // `archived` is the only status that means "uploaded but never sent to a printer."
 const PRINTED_STATUSES = ['completed', 'failed', 'aborted', 'cancelled', 'stopped'] as const;
 
-// Status filter values and the raw statuses they cover. "Stopped" includes the
-// archive-only "aborted" so the grid, the log and the export agree.
-export const STATUS_FILTER_VALUES: Record<string, string[]> = {
+// Status filter values and the raw statuses they cover. The printer reports a cancelled
+// print as "aborted" and the grid card labels it "Cancelled", so Cancelled covers both.
+// The "Failed prints" collection and "Hide failed" deliberately treat any print that did
+// not complete (failed or aborted) as unsuccessful, as they always have.
+const STATUS_FILTER_VALUES: Record<string, string[]> = {
   completed: ['completed'],
   failed: ['failed'],
-  stopped: ['stopped', 'aborted'],
-  cancelled: ['cancelled'],
+  stopped: ['stopped'],
+  cancelled: ['cancelled', 'aborted'],
 };
 
 export function statusFilterValues(filter: string): string[] {
@@ -105,12 +108,61 @@ function matchesColors(colours: string[], selected: Set<string>, mode: ColorMode
     : [...selected].every((c) => colours.includes(c));
 }
 
+// Collections the server can apply to the log (by date or status); the rest need the linked archive.
+const SERVER_LOG_COLLECTIONS: Collection[] = ['all', 'recent', 'this-week', 'this-month', 'failed'];
+
 /** Filters that only the browser can apply to the print log (they need the linked archive). */
 export function needsClientLogFilter(f: HistoryFilterValues): boolean {
   return !!(
     f.filterMaterial || f.filterColors.size > 0 || f.filterFavorites || f.hideFailed || f.hideDuplicates ||
-    f.filterTag || f.filterFileType !== 'all' || f.collection !== 'all'
+    f.filterTag || f.filterFileType !== 'all' || !SERVER_LOG_COLLECTIONS.includes(f.collection)
   );
+}
+
+/** What the server can apply for the current filters: a status list and a print-date window. */
+export interface ServerFilterBounds {
+  /** Raw statuses to keep, or null for any. An empty list means nothing can match. */
+  statuses: string[] | null;
+  from: Date | null;
+  to: Date | null;
+}
+
+/**
+ * The status and date part of the filters, in the form the print-log and export
+ * endpoints take. Day bounds are local-day boundaries (as instants), and the
+ * time-based collections become a lower bound, so the server and the browser agree.
+ */
+export function getServerFilterBounds(f: HistoryFilterValues, now: Date = new Date()): ServerFilterBounds {
+  const fromStatus = f.filterStatus ? statusFilterValues(f.filterStatus) : null;
+  const fromCollection = f.collection === 'failed' ? ['failed', 'aborted'] : null;
+  const statuses = fromStatus && fromCollection
+    ? fromStatus.filter((v) => fromCollection.includes(v))
+    : fromStatus ?? fromCollection;
+
+  const collectionFrom =
+    f.collection === 'recent' ? new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    : f.collection === 'this-week' ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    : f.collection === 'this-month' ? new Date(now.getFullYear(), now.getMonth(), 1)
+    : null;
+  const dateFrom = f.filterDateFrom ? new Date(localDayBoundISO(f.filterDateFrom, 'start')) : null;
+  const from = [collectionFrom, dateFrom]
+    .filter((d): d is Date => d !== null)
+    .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  const to = f.filterDateTo ? new Date(localDayBoundISO(f.filterDateTo, 'end')) : null;
+  return { statuses, from, to };
+}
+
+/** Query parameters for the archive export that reproduce the current filters (where it can). */
+export function getExportParams(f: HistoryFilterValues, now: Date = new Date()) {
+  const { statuses, from, to } = getServerFilterBounds(f, now);
+  return {
+    printerId: f.filterPrinter || undefined,
+    status: statuses?.join(',') || undefined,
+    username: f.filterUser || undefined,
+    search: f.search || undefined,
+    printedFrom: from?.toISOString(),
+    printedTo: to?.toISOString(),
+  };
 }
 
 /** Grid/calendar rows: filter, then sort. Print dates are parsed once per archive, not per comparison. */
@@ -186,6 +238,12 @@ export interface ActiveFilterChip {
   label: string;
 }
 
+/** A readable name for a filter colour, or the hex code itself when it can't be named. */
+export function colorLabel(hex: string): string {
+  const name = getColorName(hex);
+  return name && name !== 'Unknown' ? name : hex;
+}
+
 /** One chip per active filter, in toolbar order, so nothing filters silently. */
 export function getActiveFilterChips(f: HistoryFilterValues, t: TFunction, printerName?: string): ActiveFilterChip[] {
   const chips: ActiveFilterChip[] = [];
@@ -203,7 +261,7 @@ export function getActiveFilterChips(f: HistoryFilterValues, t: TFunction, print
   if (f.filterFavorites) add('favorites', t('archives.filters.favorites'));
   if (f.hideFailed) add('hidefailed', t('archives.filters.hideFailed'));
   if (f.hideDuplicates) add('hidedupes', t('archives.hideDuplicates'));
-  f.filterColors.forEach((color) => add(`color-${color}`, color));
+  f.filterColors.forEach((color) => add(`color-${color}`, colorLabel(color)));
   return chips;
 }
 
@@ -214,11 +272,15 @@ export function panelBadgeCount(chips: ActiveFilterChip[], isMobile: boolean): n
   return chips.filter((c) => c.key !== 'search' && (isMobile || !PRIMARY_CHIP_KEYS.includes(c.key))).length;
 }
 
-/** Labels of active filters the export endpoint cannot apply (they depend on archive details). */
+// Filters that depend on archive details, which the export endpoint cannot apply.
+const EXPORT_UNSUPPORTED_KEYS = ['material', 'filetype', 'tag', 'favorites', 'hidefailed', 'hidedupes'];
+const EXPORT_UNSUPPORTED_COLLECTIONS: Collection[] = ['favorites', 'not-printed', 'printed', 'duplicates'];
+
+/** Labels of active filters the export cannot apply, so the menu can say so. */
 export function exportIgnoredFilters(chips: ActiveFilterChip[], collection: Collection): string[] {
   return chips
-    .filter((c) => ['material', 'filetype', 'tag', 'favorites', 'hidefailed', 'hidedupes'].includes(c.key)
+    .filter((c) => EXPORT_UNSUPPORTED_KEYS.includes(c.key)
       || c.key.startsWith('color-')
-      || (c.key === 'collection' && ['favorites', 'not-printed', 'printed', 'duplicates'].includes(collection)))
+      || (c.key === 'collection' && EXPORT_UNSUPPORTED_COLLECTIONS.includes(collection)))
     .map((c) => c.label);
 }

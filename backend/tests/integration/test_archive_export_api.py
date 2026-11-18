@@ -194,3 +194,53 @@ class TestArchiveExportMatchesHistoryFilters:
         response = await async_client.get("/api/v1/archives/export", params={"printed_from": "yesterday"})
 
         assert response.status_code == 400
+
+
+class TestArchiveExportByCreator:
+    """``created_by_username`` narrows the export to one user's archives."""
+
+    @pytest.fixture
+    async def owned(self, printer_factory, archive_factory, db_session):
+        from backend.app.models.user import User
+
+        alice = User(username="alice", password_hash="x", role="user")
+        bob = User(username="bob", password_hash="x", role="user")
+        db_session.add_all([alice, bob])
+        await db_session.commit()
+        await db_session.refresh(alice)
+        await db_session.refresh(bob)
+
+        printer = await printer_factory()
+        await archive_factory(printer.id, print_name="Alice print", created_by_id=alice.id)
+        await archive_factory(printer.id, print_name="Bob print", created_by_id=bob.id)
+        return {"alice": alice, "bob": bob}
+
+    async def test_filters_to_one_user(self, async_client: AsyncClient, owned):
+        response = await async_client.get("/api/v1/archives/export", params={"created_by_username": "alice"})
+
+        assert {row[1] for row in _csv(response)[1:]} == {"Alice print"}
+
+    async def test_unknown_user_exports_nothing(self, async_client: AsyncClient, owned):
+        response = await async_client.get("/api/v1/archives/export", params={"created_by_username": "nobody"})
+
+        assert _csv(response)[1:] == []
+
+    async def test_cannot_widen_a_read_own_callers_scope(self, db_session, owned):
+        from backend.app.services.export import ExportService
+
+        # A caller limited to their own archives (visible_to_user_id) asking for someone else's
+        # gets nothing: the username filter is ANDed with the ownership scope, never replacing it.
+        content, _, _ = await ExportService(db_session).export_archives(
+            visible_to_user_id=owned["alice"].id, created_by_username="bob"
+        )
+        assert _csv_text(content) == []
+
+        content, _, _ = await ExportService(db_session).export_archives(
+            visible_to_user_id=owned["alice"].id, created_by_username="alice"
+        )
+        assert {row[1] for row in _csv_text(content)} == {"Alice print"}
+
+
+def _csv_text(content: bytes) -> list[list[str]]:
+    """Data rows (header dropped) of a CSV export."""
+    return list(csv.reader(io.StringIO(content.decode("utf-8"))))[1:]

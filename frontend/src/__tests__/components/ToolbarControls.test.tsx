@@ -66,6 +66,29 @@ describe('ReactSelect', () => {
   });
 });
 
+describe('ToolbarDropdown keyboard', () => {
+  it('closes its menu on Escape and marks the key handled so a surrounding panel can stay open', async () => {
+    const user = userEvent.setup();
+    const outer = vi.fn();
+    render(
+      <div onKeyDown={(e) => outer(e.defaultPrevented)}>
+        <ToolbarDropdown value="a" onChange={vi.fn()} options={[{ value: 'a', label: 'Option A' }, { value: 'b', label: 'Option B' }]} />
+      </div>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Option A' }));
+    expect(await screen.findByRole('button', { name: 'Option B' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'Option B' })).not.toBeInTheDocument();
+    expect(outer).toHaveBeenLastCalledWith(true);
+
+    // With the menu closed, Escape is left alone for whatever contains the dropdown.
+    await user.keyboard('{Escape}');
+    expect(outer).toHaveBeenLastCalledWith(false);
+  });
+});
+
 describe('dropdowns near the bottom of the screen', () => {
   const VIEWPORT_HEIGHT = 800;
   let triggerTop = 740;

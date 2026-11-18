@@ -725,6 +725,12 @@ export default {
     resetFilters: '필터 초기화',
     createdAutomatically: '출력은 완료되면 자동으로 기록됩니다',
     filters: {
+      filtersWithCount: '필터 ({{count}}개 적용 중)',
+      exportLogNote: '개별 출력이 아니라 모델별로 한 행(소유자, 최근 프린터, 마지막 출력)을 내보냅니다.',
+      matchAny: '선택한 색상 중 하나라도 일치',
+      matchAll: '선택한 색상 모두 일치',
+      colorModeOr: 'OR',
+      colorModeAnd: 'AND',
       exportNote: '내보내기에 적용되지 않음: {{filters}}',
       filters: '필터',
       whoWhen: '사용자 및 기간',

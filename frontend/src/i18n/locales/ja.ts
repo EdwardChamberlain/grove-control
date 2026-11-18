@@ -766,6 +766,12 @@ export default {
     resetFilters: 'フィルターをリセット',
     createdAutomatically: '印刷は完了時に自動的に記録されます',
     filters: {
+      filtersWithCount: 'フィルター（{{count}}件有効）',
+      exportLogNote: '個々の印刷ではなく、モデルごとに1行（所有者、最新のプリンター、最後の印刷）をエクスポートします。',
+      matchAny: '選択した色のいずれか',
+      matchAll: '選択した色すべて',
+      colorModeOr: 'OR',
+      colorModeAnd: 'AND',
       exportNote: 'エクスポートには適用されません: {{filters}}',
       filters: 'フィルター',
       whoWhen: 'ユーザーと期間',

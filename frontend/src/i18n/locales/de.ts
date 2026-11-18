@@ -767,6 +767,12 @@ export default {
     resetFilters: 'Filter zurücksetzen',
     createdAutomatically: 'Drucke werden automatisch erfasst, sobald sie fertig sind',
     filters: {
+      filtersWithCount: 'Filter ({{count}} aktiv)',
+      exportLogNote: 'Exportiert eine Zeile pro Modell (Besitzer, letzter Drucker und letzter Druck), nicht jeden einzelnen Druck.',
+      matchAny: 'Mindestens eine gewählte Farbe',
+      matchAll: 'Alle gewählten Farben',
+      colorModeOr: 'ODER',
+      colorModeAnd: 'UND',
       exportNote: 'Nicht im Export berücksichtigt: {{filters}}',
       filters: 'Filter',
       whoWhen: 'Wer & wann',

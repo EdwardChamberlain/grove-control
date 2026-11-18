@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { TFunction } from 'i18next';
 import type { Archive, PrintLogEntry } from '../../api/client';
 import {
+  colorLabel,
   exportIgnoredFilters,
   filterAndSortArchives,
   filterLogEntries,
   getActiveFilterChips,
+  getExportParams,
+  getServerFilterBounds,
   isSlicedFile,
   needsClientLogFilter,
   panelBadgeCount,
@@ -59,10 +62,14 @@ describe('filterAndSortArchives', () => {
     expect(names(filterAndSortArchives(list, filters({ search: 'brack' }), 'name-asc'))).toEqual(['Bracket']);
   });
 
-  it('treats the Stopped status as stopped or aborted', () => {
-    const mixed = [archive(1, 'Halted', { status: 'stopped' }), archive(2, 'Killed', { status: 'aborted' }), archive(3, 'Done')];
-    expect(names(filterAndSortArchives(mixed, filters({ filterStatus: 'stopped' }), 'name-asc'))).toEqual(['Halted', 'Killed']);
-    expect(statusFilterValues('stopped')).toEqual(['stopped', 'aborted']);
+  it('treats Cancelled as cancelled or aborted, and keeps Stopped separate', () => {
+    const mixed = [
+      archive(1, 'Halted', { status: 'stopped' }), archive(2, 'Killed', { status: 'aborted' }),
+      archive(3, 'Dropped', { status: 'cancelled' }), archive(4, 'Done'),
+    ];
+    expect(names(filterAndSortArchives(mixed, filters({ filterStatus: 'cancelled' }), 'name-asc'))).toEqual(['Dropped', 'Killed']);
+    expect(names(filterAndSortArchives(mixed, filters({ filterStatus: 'stopped' }), 'name-asc'))).toEqual(['Halted']);
+    expect(statusFilterValues('cancelled')).toEqual(['cancelled', 'aborted']);
     expect(statusFilterValues('something-else')).toEqual(['something-else']);
   });
 
@@ -148,7 +155,57 @@ describe('needsClientLogFilter', () => {
     expect(needsClientLogFilter(none)).toBe(false);
     expect(needsClientLogFilter(filters({ search: 'x', filterPrinter: 1, filterStatus: 'failed', filterUser: 'ada' }))).toBe(false);
     expect(needsClientLogFilter(filters({ filterMaterial: 'PLA' }))).toBe(true);
-    expect(needsClientLogFilter(filters({ collection: 'recent' }))).toBe(true);
+    // Time-based collections and "failed" become a date bound or status list on the server.
+    expect(needsClientLogFilter(filters({ collection: 'recent' }))).toBe(false);
+    expect(needsClientLogFilter(filters({ collection: 'failed' }))).toBe(false);
+    expect(needsClientLogFilter(filters({ collection: 'favorites' }))).toBe(true);
+  });
+});
+
+describe('getServerFilterBounds and getExportParams', () => {
+  const now = new Date(2026, 5, 15, 12, 0, 0); // local noon, 15 June 2026
+
+  it('has no bounds when nothing is filtered', () => {
+    expect(getServerFilterBounds(none, now)).toEqual({ statuses: null, from: null, to: null });
+    expect(getExportParams(none, now)).toEqual({
+      printerId: undefined, status: undefined, username: undefined, search: undefined,
+      printedFrom: undefined, printedTo: undefined,
+    });
+  });
+
+  it('turns the time-based collections into a lower bound', () => {
+    const day = 24 * 60 * 60 * 1000;
+    expect(getServerFilterBounds(filters({ collection: 'recent' }), now).from?.getTime()).toBe(now.getTime() - day);
+    expect(getServerFilterBounds(filters({ collection: 'this-week' }), now).from?.getTime()).toBe(now.getTime() - 7 * day);
+    expect(getServerFilterBounds(filters({ collection: 'this-month' }), now).from).toEqual(new Date(2026, 5, 1));
+  });
+
+  it('uses the later of the collection bound and the From date', () => {
+    const early = getServerFilterBounds(filters({ collection: 'recent', filterDateFrom: '2026-01-01' }), now);
+    expect(early.from?.getTime()).toBe(now.getTime() - 24 * 60 * 60 * 1000);
+    const late = getServerFilterBounds(filters({ collection: 'recent', filterDateFrom: '2026-06-15' }), now);
+    expect(late.from).toEqual(new Date('2026-06-15T00:00:00'));
+  });
+
+  it('uses local-day bounds for the date range, end of day inclusive', () => {
+    const b = getServerFilterBounds(filters({ filterDateFrom: '2026-03-01', filterDateTo: '2026-03-31' }), now);
+    expect(b.from?.toISOString()).toBe(new Date('2026-03-01T00:00:00').toISOString());
+    expect(b.to?.toISOString()).toBe(new Date('2026-03-31T23:59:59.999').toISOString());
+  });
+
+  it('combines a status with the failed collection, and flags a combination that cannot match', () => {
+    expect(getServerFilterBounds(filters({ collection: 'failed' }), now).statuses).toEqual(['failed', 'aborted']);
+    expect(getServerFilterBounds(filters({ collection: 'failed', filterStatus: 'cancelled' }), now).statuses).toEqual(['aborted']);
+    expect(getServerFilterBounds(filters({ collection: 'failed', filterStatus: 'completed' }), now).statuses).toEqual([]);
+  });
+
+  it('turns the filters into export parameters', () => {
+    const params = getExportParams(
+      filters({ search: 'gear', filterPrinter: 4, filterUser: 'ada', filterStatus: 'stopped', filterDateFrom: '2026-03-01' }),
+      now,
+    );
+    expect(params).toMatchObject({ printerId: 4, username: 'ada', search: 'gear', status: 'stopped' });
+    expect(params.printedFrom).toBe(new Date('2026-03-01T00:00:00').toISOString());
   });
 });
 
@@ -177,6 +234,13 @@ describe('active filter chips', () => {
 
   it('labels a source-only file type', () => {
     expect(getActiveFilterChips(filters({ filterFileType: 'source' }), t)[0].label).toBe('archives.filters.sourceOnly');
+  });
+});
+
+describe('colorLabel', () => {
+  it('names a colour, and falls back to the hex code when it cannot', () => {
+    expect(colorLabel('#FF0000')).toBe('Red');
+    expect(colorLabel('#f00')).toBe('#f00');
   });
 });
 

@@ -142,8 +142,8 @@ describe('ArchivesPage export', () => {
     expect(requests[0].get('printed_to')).toBe(new Date('2026-12-31T23:59:59.999').toISOString());
   });
 
-  it('treats aborted as stopped in the grid and in the export', async () => {
-    setStorage({ archiveViewMode: 'grid', logFilterStatus: 'stopped' });
+  it('treats aborted as cancelled in the grid and in the export', async () => {
+    setStorage({ archiveViewMode: 'grid', logFilterStatus: 'cancelled' });
     const requests: URLSearchParams[] = [];
     useBaseHandlers([
       http.get('/api/v1/archives/export', ({ request }) => {
@@ -165,7 +165,7 @@ describe('ArchivesPage export', () => {
     await user.click(screen.getByRole('button', { name: /^Export$/ }));
     await user.click(screen.getByRole('button', { name: 'Export as CSV' }));
     await waitFor(() => expect(requests).toHaveLength(1));
-    expect(requests[0].get('status')).toBe('stopped,aborted');
+    expect(requests[0].get('status')).toBe('cancelled,aborted');
   });
 
   it('downloads a CSV export of the current view', async () => {

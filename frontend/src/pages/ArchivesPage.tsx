@@ -2,9 +2,10 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useHistoryFilters } from '../hooks/useHistoryFilters';
 import { HistoryFilterBar } from '../components/HistoryFilterBar';
+import { HistoryLogTable } from '../components/HistoryLogTable';
 import {
-  exportIgnoredFilters, filterAndSortArchives, filterLogEntries, getActiveFilterChips, isSlicedFile,
-  needsClientLogFilter, statusFilterValues, type ViewMode,
+  exportIgnoredFilters, filterAndSortArchives, filterLogEntries, getActiveFilterChips, getExportParams,
+  getServerFilterBounds, isSlicedFile, needsClientLogFilter, type ViewMode,
 } from '../utils/historyFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -58,7 +59,7 @@ import { api } from '../api/client';
 import { SliceModal } from '../components/SliceModal';
 import { SaveArchiveToFilesModal } from '../components/SaveArchiveToFilesModal';
 import { openInSlicer, type SlicerType } from '../utils/slicer';
-import { formatDateTime, getLastPrintedAt, localDayBoundISO, type TimeFormat, formatDuration } from '../utils/date';
+import { formatDateTime, getLastPrintedAt, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
@@ -1468,11 +1469,11 @@ export function ArchivesPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, hasAnyPermission, canModify } = useAuth();
+  const { hasPermission, hasAnyPermission } = useAuth();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filters = useHistoryFilters();
   const { values, sortBy, setSearch } = filters;
-  const { search, filterPrinter, filterStatus, filterUser, filterDateFrom, filterDateTo, collection } = values;
+  const { search, filterPrinter, filterUser, collection } = values;
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Install-step-4 nudge — covers the slicer-side variant of "Store sent files
   // on external storage" that the connection diagnostic can't detect (printer
@@ -1519,10 +1520,7 @@ export function ArchivesPage() {
   const [pendingNavigationArchiveId, setPendingNavigationArchiveId] = useState<number | null>(null);
 
   // Log view state
-  const [logOffset, setLogOffset] = useState(() => {
-    const saved = localStorage.getItem('logOffset');
-    return saved ? Number(saved) : 0;
-  });
+  const [logOffset, setLogOffset] = useState(0);
   const [showClearLogConfirm, setShowClearLogConfirm] = useState(false);
   const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<number | null>(null);
   // Per-row classification editor for Print Log entries (#1687 part 4).
@@ -1557,9 +1555,13 @@ export function ArchivesPage() {
   }, []);
 
 
+  // The print log filters by the printer each run used, but an archive only remembers its
+  // latest printer. So in the log the archive lookup must not be narrowed by the printer
+  // filter, or reprinted models would lose their row actions.
+  const archivePrinter = viewMode === 'log' ? undefined : filterPrinter || undefined;
   const { data: archives, isLoading } = useQuery({
-    queryKey: ['archives', filterPrinter],
-    queryFn: () => api.getArchives(filterPrinter || undefined),
+    queryKey: ['archives', archivePrinter],
+    queryFn: () => api.getArchives(archivePrinter),
   });
 
   const { data: printers } = useQuery({
@@ -1587,20 +1589,26 @@ export function ArchivesPage() {
   // fetch that is filtered and paged here.
   const logNeedsClientFilter = needsClientLogFilter(values);
   const LOG_CLIENT_FETCH_LIMIT = 500;
+  const bounds = useMemo(() => getServerFilterBounds(values), [values]);
+  // Status filter and collection that exclude each other can't match anything.
+  const logCanMatch = !bounds.statuses || bounds.statuses.length > 0;
 
   const { data: printLogData, isLoading: isLogLoading } = useQuery({
-    queryKey: ['print-log', filterPrinter, filterUser, filterStatus, filterDateFrom, filterDateTo, search, logNeedsClientFilter ? 'all' : logOffset, logNeedsClientFilter ? 'all' : logPageSize],
+    queryKey: [
+      'print-log', filterPrinter, filterUser, bounds.statuses?.join(','), bounds.from?.toISOString(), bounds.to?.toISOString(),
+      search, logNeedsClientFilter ? 'all' : logOffset, logNeedsClientFilter ? 'all' : logPageSize,
+    ],
     queryFn: () => api.getPrintLog({
       search: search || undefined,
       printerId: filterPrinter || undefined,
       username: filterUser || undefined,
-      status: filterStatus ? statusFilterValues(filterStatus).join(',') : undefined,
-      dateFrom: filterDateFrom ? localDayBoundISO(filterDateFrom, 'start') : undefined,
-      dateTo: filterDateTo ? localDayBoundISO(filterDateTo, 'end') : undefined,
+      status: bounds.statuses?.join(',') || undefined,
+      dateFrom: bounds.from?.toISOString(),
+      dateTo: bounds.to?.toISOString(),
       limit: logNeedsClientFilter ? LOG_CLIENT_FETCH_LIMIT : logPageSize,
       offset: logNeedsClientFilter ? 0 : logOffset,
     }),
-    enabled: viewMode === 'log',
+    enabled: viewMode === 'log' && logCanMatch,
   });
 
   const timeFormat: TimeFormat = settings?.time_format || 'system';
@@ -1673,32 +1681,7 @@ export function ArchivesPage() {
     setShowExportMenu(false);
     setIsExporting(true);
     try {
-      const fromStatus = filterStatus ? statusFilterValues(filterStatus) : null;
-      const fromCollection = collection === 'failed' ? ['failed', 'aborted'] : null;
-      const statuses = fromStatus && fromCollection
-        ? fromStatus.filter((v) => fromCollection.includes(v))
-        : fromStatus ?? fromCollection;
-
-      const now = new Date();
-      const collectionFrom =
-        collection === 'recent' ? new Date(now.getTime() - 24 * 60 * 60 * 1000)
-        : collection === 'this-week' ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        : collection === 'this-month' ? new Date(now.getFullYear(), now.getMonth(), 1)
-        : null;
-      const dateFromBound = filterDateFrom ? new Date(localDayBoundISO(filterDateFrom, 'start')) : null;
-      const printedFrom = [collectionFrom, dateFromBound]
-        .filter((d): d is Date => d !== null)
-        .sort((x, y) => y.getTime() - x.getTime())[0];
-
-      const { blob, filename } = await api.exportArchives({
-        format,
-        printerId: filterPrinter || undefined,
-        status: statuses?.join(',') || undefined,
-        username: filterUser || undefined,
-        search: search || undefined,
-        printedFrom: printedFrom?.toISOString(),
-        printedTo: filterDateTo ? localDayBoundISO(filterDateTo, 'end') : undefined,
-      });
+      const { blob, filename } = await api.exportArchives({ format, ...getExportParams(values) });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -1753,10 +1736,6 @@ export function ArchivesPage() {
   }, [viewMode]);
 
   useEffect(() => {
-    localStorage.setItem('logOffset', logOffset.toString());
-  }, [logOffset]);
-
-  useEffect(() => {
     localStorage.setItem('logPageSize', logPageSize.toString());
   }, [logPageSize]);
 
@@ -1779,6 +1758,9 @@ export function ArchivesPage() {
   const showAll = pageSize === -1;
   const effectivePageSize = showAll ? totalFiltered || 1 : pageSize;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / effectivePageSize));
+  useEffect(() => {
+    if (pageIndex >= totalPages) setPageIndex(Math.max(0, totalPages - 1));
+  }, [pageIndex, totalPages]);
   const paginatedArchives = showAll
     ? filteredArchives
     : filteredArchives?.slice(pageIndex * effectivePageSize, (pageIndex + 1) * effectivePageSize);
@@ -1793,6 +1775,13 @@ export function ArchivesPage() {
   const logRows = logNeedsClientFilter
     ? logEntriesFiltered.slice(logOffset, logOffset + logPageSize)
     : logEntriesFiltered;
+  // If rows disappear from under the current page (e.g. un-favouriting the last one under a
+  // favourites filter), step back to the last page that still has rows.
+  useEffect(() => {
+    if (printLogData && logOffset > 0 && logOffset >= logTotal) {
+      setLogOffset(Math.max(0, Math.floor((logTotal - 1) / logPageSize) * logPageSize));
+    }
+  }, [printLogData, logOffset, logTotal, logPageSize]);
   // Client-side filters only see the newest LOG_CLIENT_FETCH_LIMIT entries.
   const logTruncated = logNeedsClientFilter && (printLogData?.total ?? 0) > LOG_CLIENT_FETCH_LIMIT;
 
@@ -2046,6 +2035,11 @@ export function ArchivesPage() {
                   <FileSpreadsheet className="w-4 h-4" />
                   {t('archives.filters.exportExcel')}
                 </button>
+                {viewMode === 'log' && (
+                  <p className="border-t border-bambu-dark-tertiary px-4 py-2 text-xs text-bambu-gray">
+                    {t('archives.filters.exportLogNote')}
+                  </p>
+                )}
                 {exportIgnored.length > 0 && (
                   <p className="border-t border-bambu-dark-tertiary px-4 py-2 text-xs text-bambu-gray">
                     {t('archives.filters.exportNote', { filters: exportIgnored.join(', ') })}
@@ -2186,247 +2180,34 @@ export function ArchivesPage() {
             </Button>
           </div>
 
-          {/* Log table */}
-          <Card>
-            {isLogLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
-              </div>
-            ) : !logRows.length ? (
-              <div className="text-center py-12 text-bambu-gray">
-                <p>{t('archives.log.noEntries')}</p>
-                {filters.hasActive && (
-                  <Button variant="ghost" size="sm" className="mt-3" onClick={filters.clearAll}>
-                    <X className="w-4 h-4" />
-                    {t('archives.resetFilters')}
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-bambu-dark-tertiary text-bambu-gray text-left">
-                        {selectionMode && <th className="px-4 py-3 w-8" />}
-                        <th className="px-4 py-3 font-medium">{t('archives.log.date')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.printName')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.printer')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.user')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.status')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.duration')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.filament')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.cost')}</th>
-                        <th className="px-4 py-3 font-medium w-10" aria-label={t('common.actions')} />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-bambu-dark-tertiary">
-                      {logRows.map((entry) => {
-                        const linked = entry.archive_id != null ? archiveById.get(entry.archive_id) : undefined;
-                        return (
-                        <tr key={entry.id} className="hover:bg-bambu-dark-secondary/50" data-archive-id={entry.archive_id ?? undefined}>
-                          {selectionMode && (
-                            <td className="px-4 py-3 w-8">
-                              {linked && (
-                                <input
-                                  type="checkbox"
-                                  aria-label={t('archives.log.selectRow')}
-                                  checked={selectedIds.has(linked.id)}
-                                  onChange={() => toggleSelect(linked.id)}
-                                />
-                              )}
-                            </td>
-                          )}
-                          <td className="px-4 py-3 text-white whitespace-nowrap">
-                            {formatDateTime(entry.started_at || entry.created_at, timeFormat)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              {entry.thumbnail_path && (
-                                <img
-                                  src={api.getPrintLogThumbnail(entry.id)}
-                                  alt=""
-                                  className="w-8 h-8 rounded object-cover flex-shrink-0"
-                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                />
-                              )}
-                              <span className="text-white break-words" title={entry.print_name || ''}>
-                                {entry.print_name || '—'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-bambu-gray-light">{entry.printer_name || '—'}</td>
-                          <td className="px-4 py-3 text-bambu-gray-light">{entry.created_by_username || '—'}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              entry.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                              entry.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                              entry.status === 'stopped' ? 'bg-yellow-500/20 text-yellow-400' :
-                              entry.status === 'cancelled' ? 'bg-orange-500/20 text-orange-400' :
-                              entry.status === 'skipped' ? 'bg-blue-500/20 text-blue-400' :
-                              'bg-gray-500/20 text-gray-400'
-                            }`}>
-                              {entry.status}
-                            </span>
-                            {entry.failure_reason && (
-                              <span className="block text-[10px] text-bambu-gray mt-0.5">
-                                {t(`editArchive.failureReasons.${entry.failure_reason}`, { defaultValue: entry.failure_reason })}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-bambu-gray-light whitespace-nowrap">
-                            {entry.duration_seconds ? formatDuration(entry.duration_seconds) : '—'}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              {entry.filament_color && (
-                                <div className="flex items-center gap-0.5 flex-wrap">
-                                  {entry.filament_color.split(',').map((color, i) => {
-                                    const trimmed = color.trim();
-                                    return (
-                                      <span
-                                        key={i}
-                                        className="w-3 h-3 rounded-full border border-black/20 flex-shrink-0"
-                                        style={{ backgroundColor: trimmed.startsWith('#') ? trimmed : undefined }}
-                                        title={trimmed}
-                                      />
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              <span className="text-bambu-gray-light text-xs">
-                                {entry.filament_type || '—'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-bambu-gray-light whitespace-nowrap">
-                            {entry.cost != null ? `${currency}${entry.cost.toFixed(2)}` : '—'}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              {linked && (
-                                <>
-                                  {isSlicedFile(linked) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setLogReprintArchive(linked)}
-                                      disabled={!linked.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', linked.created_by_id)}
-                                      title={t('archives.menu.print')}
-                                      aria-label={t('archives.menu.print')}
-                                      className="text-bambu-gray hover:text-bambu-green disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
-                                    >
-                                      <Printer className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => logFavouriteMutation.mutate(linked.id)}
-                                    title={linked.is_favorite ? t('archives.menu.removeFromFavorites') : t('archives.menu.addToFavorites')}
-                                    aria-label={linked.is_favorite ? t('archives.menu.removeFromFavorites') : t('archives.menu.addToFavorites')}
-                                    className="text-bambu-gray hover:text-yellow-400 transition-colors"
-                                  >
-                                    <Star className={`w-4 h-4 ${linked.is_favorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => downloadLogArchive(linked)}
-                                    disabled={!linked.file_path}
-                                    title={t('archives.menu.download')}
-                                    aria-label={t('archives.menu.download')}
-                                    className="text-bambu-gray hover:text-white disabled:opacity-40 transition-colors"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => openArchiveInGrid(linked.id)}
-                                    title={t('archives.log.openInGrid')}
-                                    aria-label={t('archives.log.openInGrid')}
-                                    className="text-bambu-gray hover:text-white transition-colors"
-                                  >
-                                    <ExternalLink className="w-4 h-4" />
-                                  </button>
-                                </>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingLogEntry(entry);
-                                  setEditingLogFailureReason(entry.failure_reason || '');
-                                  setEditingLogStatus(entry.status);
-                                }}
-                                disabled={
-                                  updateLogEntryMutation.isPending ||
-                                  !(hasPermission('archives:update_all') || hasPermission('archives:update_own'))
-                                }
-                                title={
-                                  hasPermission('archives:update_all') || hasPermission('archives:update_own')
-                                    ? t('archives.log.editEntryTitle')
-                                    : t('archives.permission.noEdit')
-                                }
-                                className="text-bambu-gray hover:text-bambu-blue disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPendingDeleteEntryId(entry.id)}
-                                disabled={
-                                  deleteLogEntryMutation.isPending ||
-                                  !(hasPermission('archives:delete_all') || hasPermission('archives:delete_own'))
-                                }
-                                title={
-                                  hasPermission('archives:delete_all') || hasPermission('archives:delete_own')
-                                    ? t('archives.log.deleteEntryTitle')
-                                    : t('archives.permission.noDelete')
-                                }
-                                className="text-bambu-gray hover:text-red-400 disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Pagination */}
-                <div className="flex items-center justify-between px-4 py-3 border-t border-bambu-dark-tertiary flex-wrap gap-2">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-bambu-gray">
-                      {t('archives.log.showing', { count: Math.min(logOffset + logPageSize, logTotal), total: logTotal })}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <label className="text-xs text-bambu-gray">{t('archives.log.rowsPerPage')}</label>
-                      <ReactSelect
-                        className="px-2 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-xs focus:border-bambu-green focus:outline-none"
-                        value={logPageSize}
-                        onChange={(e) => { setLogPageSize(Number(e.target.value)); setLogOffset(0); }}
-                      >
-                        <option value={10}>10</option>
-                        <option value={25}>25</option>
-                        <option value={50}>50</option>
-                        <option value={100}>100</option>
-                      </ReactSelect>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-bambu-gray">
-                      {t('archives.log.page')} {Math.floor(logOffset / logPageSize) + 1} / {Math.max(1, Math.ceil(logTotal / logPageSize))}
-                    </span>
-                    <Button variant="secondary" size="sm" onClick={() => setLogOffset(Math.max(0, logOffset - logPageSize))} disabled={logOffset === 0}>
-                      <ChevronLeft className="w-4 h-4" />
-                    </Button>
-                    <Button variant="secondary" size="sm" onClick={() => setLogOffset(logOffset + logPageSize)} disabled={logOffset + logPageSize >= logTotal}>
-                      <ChevronRight className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </Card>
+          <HistoryLogTable
+            rows={logRows}
+            isLoading={isLogLoading}
+            total={logTotal}
+            offset={logOffset}
+            pageSize={logPageSize}
+            onOffsetChange={setLogOffset}
+            onPageSizeChange={setLogPageSize}
+            archiveById={archiveById}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            timeFormat={timeFormat}
+            currency={currency}
+            hasActiveFilters={filters.hasActive}
+            onResetFilters={filters.clearAll}
+            onReprint={setLogReprintArchive}
+            onToggleFavourite={(id) => logFavouriteMutation.mutate(id)}
+            onDownload={downloadLogArchive}
+            onShowInGrid={openArchiveInGrid}
+            onEdit={(entry) => {
+              setEditingLogEntry(entry);
+              setEditingLogFailureReason(entry.failure_reason || '');
+              setEditingLogStatus(entry.status);
+            }}
+            onDelete={setPendingDeleteEntryId}
+            busy={{ editing: updateLogEntryMutation.isPending, deleting: deleteLogEntryMutation.isPending }}
+          />
 
         </div>
       ) : null}

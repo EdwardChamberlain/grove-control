@@ -767,6 +767,12 @@ export default {
     resetFilters: 'Reimposta filtri',
     createdAutomatically: 'Le stampe vengono registrate automaticamente al termine',
     filters: {
+      filtersWithCount: 'Filtri ({{count}} attivi)',
+      exportLogNote: 'Esporta una riga per modello (proprietario, ultima stampante e ultima stampa), non ogni singola stampa.',
+      matchAny: 'Uno qualsiasi dei colori scelti',
+      matchAll: 'Tutti i colori scelti',
+      colorModeOr: 'O',
+      colorModeAnd: 'E',
       exportNote: 'Non applicato all\'esportazione: {{filters}}',
       filters: 'Filtri',
       whoWhen: 'Chi e quando',

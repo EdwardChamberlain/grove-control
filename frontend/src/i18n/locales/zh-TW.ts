@@ -767,6 +767,12 @@ export default {
     resetFilters: '重設篩選',
     createdAutomatically: '列印完成後會自動記錄',
     filters: {
+      filtersWithCount: '篩選（{{count}} 項生效）',
+      exportLogNote: '每個模型匯出一列（擁有者、最近的印表機和最後一次列印），而非每次列印。',
+      matchAny: '符合任一所選顏色',
+      matchAll: '符合所有所選顏色',
+      colorModeOr: '或',
+      colorModeAnd: '且',
       exportNote: '匯出時不適用：{{filters}}',
       filters: '篩選',
       whoWhen: '使用者與時間',
