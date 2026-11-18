@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Queue: redesigned the job card. A full-height status gutter (Waiting,
+  Printing, Pending, Scheduled and so on) replaces the status pill and doubles
+  as the drag handle for pending jobs, where the icon swaps for a grip on hover.
+  The selection checkbox now appears on the thumbnail on hover (and stays on every
+  card once something is ticked). Edit is no longer a button: click the job name
+  or the card. Cancel is the only action button. Staged jobs show Start in the
+  footer strip beside the waiting reason, and option badges are now icons with
+  tooltips. On mobile, tapping a card opens the editor and the checkbox is always shown.
 - Archive is now a record of prints only. Remove `POST /archives/upload` and
   `POST /archives/upload-bulk`, which created Archive entries for files that
   were never printed, along with the unused `UploadModal` and its API client

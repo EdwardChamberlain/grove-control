@@ -1115,6 +1115,7 @@ export default {
       tooltip: '最短任务优先 — 调度器优先处理较短的打印任务',
     },
     addedBy: '由 {{name}} 添加',
+    selectJob: '选择 {{name}}',
     nextInQueue: '队列中的下一个',
     clearPlateSuccess: '打印板已清理 — 准备进行下一个打印',
     plateNumber: '板 {{index}}',

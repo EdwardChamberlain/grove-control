@@ -19,6 +19,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import type { LucideIcon } from 'lucide-react';
 import { queueItemDisplayName } from '../utils/queueItemName';
 import {
   Clock,
@@ -59,7 +60,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
+import { type TimeFormat, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
 import { Card } from '../components/Card';
@@ -85,56 +86,158 @@ function formatHeatSoakCountdown(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function StatusBadge({ status, scheduledTime, waitingReason, printerState, t }: { status: PrintQueueItem['status']; scheduledTime?: string | null; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
-  // A future pending job has its own explicit status. The relative timestamp
-  // in the row is useful context, but the pill makes the scheduler state clear.
-  if (status === 'pending' && scheduledTime && (parseUTCDate(scheduledTime)?.getTime() ?? 0) > Date.now()) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
-        <Calendar className="w-3.5 h-3.5" />
-        {t('queue.status.scheduled')} · {formatDate(scheduledTime)}
-      </span>
-    );
-  }
+type QueueTone = {
+  /** Gutter label/icon colour. */
+  text: string;
+  /** Gutter background + divider. */
+  gutter: string;
+  /** Card border colour. */
+  border: string;
+  /** Faint wash laid over the card, or '' for none. */
+  wash: string;
+  /** Footer strip background, border and text colour. */
+  footer: string;
+  /** Ring drawn around a selected card. */
+  ring: string;
+};
 
-  // Special case: pending with waiting_reason shows as "Waiting"
-  if (status === 'pending' && waitingReason) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-purple-400 bg-purple-400/10 border-purple-400/20">
-        <Clock className="w-3.5 h-3.5" />
-        {t('queue.status.waiting')}
-      </span>
-    );
-  }
+const QUEUE_TONES = {
+  waiting: {
+    text: 'text-purple-300',
+    gutter: 'bg-purple-400/20 border-purple-400/40',
+    border: 'border-purple-400/45',
+    wash: 'bg-purple-400/[0.07]',
+    footer: 'bg-purple-400/10 border-purple-400/25 text-purple-300',
+    ring: 'ring-1 ring-purple-400',
+  },
+  active: {
+    text: 'text-green-400',
+    gutter: 'bg-bambu-green/20 border-bambu-green/45',
+    border: 'border-bambu-green/50',
+    wash: 'bg-bambu-green/[0.07]',
+    footer: 'bg-bambu-green/10 border-bambu-green/30',
+    ring: 'ring-1 ring-bambu-green',
+  },
+  neutral: {
+    text: 'text-gray-200',
+    gutter: 'bg-bambu-gray-light/15 border-bambu-gray-dark',
+    border: 'border-bambu-gray-dark',
+    wash: '',
+    footer: 'bg-bambu-dark/40 border-bambu-dark-tertiary text-bambu-gray-light',
+    ring: 'ring-1 ring-gray-300',
+  },
+  scheduled: {
+    text: 'text-yellow-300',
+    gutter: 'bg-yellow-400/15 border-yellow-400/40',
+    border: 'border-yellow-400/40',
+    wash: 'bg-yellow-400/[0.06]',
+    footer: 'bg-yellow-400/10 border-yellow-400/25 text-yellow-300',
+    ring: 'ring-1 ring-yellow-400',
+  },
+  preheating: {
+    text: 'text-amber-300',
+    gutter: 'bg-amber-400/15 border-amber-400/40',
+    border: 'border-amber-400/40',
+    wash: 'bg-amber-400/[0.06]',
+    footer: 'bg-amber-400/10 border-amber-400/25 text-amber-300',
+    ring: 'ring-1 ring-amber-400',
+  },
+  completed: {
+    text: 'text-emerald-300',
+    gutter: 'bg-emerald-400/15 border-emerald-400/35',
+    border: 'border-emerald-400/35',
+    wash: '',
+    footer: 'bg-emerald-400/10 border-emerald-400/25 text-emerald-300',
+    ring: 'ring-1 ring-emerald-400',
+  },
+  failed: {
+    text: 'text-red-300',
+    gutter: 'bg-red-400/15 border-red-400/40',
+    border: 'border-red-400/40',
+    wash: 'bg-red-400/[0.05]',
+    footer: 'bg-red-400/10 border-red-400/25 text-red-300',
+    ring: 'ring-1 ring-red-400',
+  },
+  skipped: {
+    text: 'text-orange-300',
+    gutter: 'bg-orange-400/15 border-orange-400/35',
+    border: 'border-orange-400/35',
+    wash: '',
+    footer: 'bg-orange-400/10 border-orange-400/25 text-orange-300',
+    ring: 'ring-1 ring-orange-400',
+  },
+  cancelled: {
+    text: 'text-gray-300',
+    gutter: 'bg-gray-400/15 border-gray-400/30',
+    border: 'border-gray-400/30',
+    wash: '',
+    footer: 'bg-gray-400/10 border-gray-400/25 text-gray-300',
+    ring: 'ring-1 ring-gray-400',
+  },
+} satisfies Record<string, QueueTone>;
 
-  // Special case: printing but printer is paused
+/** Status colour, icon and label for a queue card's gutter. */
+function resolveQueueTone(
+  item: PrintQueueItem,
+  printerState: string | null | undefined,
+  t: (key: string) => string,
+): { tone: QueueTone; Icon: LucideIcon; label: string } {
+  const { status } = item;
+  // A future pending job has its own explicit status.
+  if (status === 'pending' && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now()) {
+    return { tone: QUEUE_TONES.scheduled, Icon: Calendar, label: t('queue.status.scheduled') };
+  }
+  // Pending with a waiting_reason is blocked on something (filament, printer).
+  if (status === 'pending' && item.waiting_reason) {
+    return { tone: QUEUE_TONES.waiting, Icon: Clock, label: t('queue.status.waiting') };
+  }
   if (status === 'printing' && printerState === 'PAUSE') {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-yellow-400 bg-yellow-400/10 border-yellow-400/20">
-        <Pause className="w-3.5 h-3.5" />
-        {t('queue.status.paused')}
-      </span>
-    );
+    return { tone: QUEUE_TONES.scheduled, Icon: Pause, label: t('queue.status.paused') };
   }
+  switch (status) {
+    case 'pending': return { tone: QUEUE_TONES.neutral, Icon: List, label: t('queue.status.pending') };
+    case 'preheating': return { tone: QUEUE_TONES.preheating, Icon: Timer, label: t('heatSoak.status') };
+    case 'dispatching': return { tone: QUEUE_TONES.waiting, Icon: Timer, label: t('queue.status.dispatching') };
+    case 'printing': return { tone: QUEUE_TONES.active, Icon: Printer, label: t('queue.status.printing') };
+    case 'completed': return { tone: QUEUE_TONES.completed, Icon: CheckCircle, label: t('queue.status.completed') };
+    case 'failed': return { tone: QUEUE_TONES.failed, Icon: XCircle, label: t('queue.status.failed') };
+    case 'skipped': return { tone: QUEUE_TONES.skipped, Icon: SkipForward, label: t('queue.status.skipped') };
+    default: return { tone: QUEUE_TONES.cancelled, Icon: X, label: t('queue.status.cancelled') };
+  }
+}
 
-  const config = {
-    pending: { icon: Clock, color: 'text-status-warning bg-status-warning/10 border-status-warning/20', label: t('queue.status.pending') },
-    preheating: { icon: Timer, color: 'text-amber-300 bg-amber-500/10 border-amber-500/20', label: t('heatSoak.status') },
-    dispatching: { icon: Timer, color: 'text-purple-300 bg-purple-500/10 border-purple-500/20', label: t('queue.status.dispatching') },
-    printing: { icon: Play, color: 'text-blue-400 bg-blue-400/10 border-blue-400/20', label: t('queue.status.printing') },
-    completed: { icon: CheckCircle, color: 'text-status-ok bg-status-ok/10 border-status-ok/20', label: t('queue.status.completed') },
-    failed: { icon: XCircle, color: 'text-status-error bg-status-error/10 border-status-error/20', label: t('queue.status.failed') },
-    skipped: { icon: SkipForward, color: 'text-orange-400 bg-orange-400/10 border-orange-400/20', label: t('queue.status.skipped') },
-    cancelled: { icon: X, color: 'text-gray-400 bg-gray-400/10 border-gray-400/20', label: t('queue.status.cancelled') },
-  };
+const ACTION_VARIANTS = {
+  danger: 'border-red-400/25 bg-red-400/10 text-red-400 hover:border-red-400/50 hover:bg-red-400/20',
+  success: 'border-bambu-green/30 bg-bambu-green/10 text-bambu-green hover:border-bambu-green/60 hover:bg-bambu-green/20',
+} as const;
 
-  const { icon: Icon, color, label } = config[status];
-
+/** The single square action button at the right of a queue card. */
+function QueueActionButton({
+  variant,
+  onClick,
+  disabled,
+  title,
+  label,
+  children,
+}: {
+  variant: keyof typeof ACTION_VARIANTS;
+  onClick: () => void;
+  disabled?: boolean;
+  title: string;
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${color}`}>
-      <Icon className="w-3.5 h-3.5" />
-      {label}
-    </span>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={label}
+      className={`flex h-11 w-11 items-center justify-center rounded-[10px] border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${ACTION_VARIANTS[variant]}`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -357,7 +460,6 @@ function CalibrationModeToggle({
 // Sortable queue item for drag and drop
 function SortableQueueItem({
   item,
-  position,
   onEdit,
   onCancel,
   onRemove,
@@ -368,6 +470,7 @@ function SortableQueueItem({
   onStart,
   timeFormat = 'system',
   isSelected = false,
+  selectionActive = false,
   onToggleSelect,
   hasPermission,
   canModify,
@@ -377,7 +480,6 @@ function SortableQueueItem({
   t,
 }: {
   item: PrintQueueItem;
-  position?: number;
   onEdit: () => void;
   onCancel: () => void;
   onRemove: () => void;
@@ -388,6 +490,8 @@ function SortableQueueItem({
   onStart: () => void;
   timeFormat?: TimeFormat;
   isSelected?: boolean;
+  /** True while any job is ticked: every card then shows its checkbox. */
+  selectionActive?: boolean;
   onToggleSelect?: () => void;
   hasPermission: (permission: Permission) => boolean;
   canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
@@ -448,8 +552,6 @@ function SortableQueueItem({
   const isPending = item.status === 'pending';
   const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
 
-  const isMobileSelectable = isPending && onToggleSelect;
-
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   useEffect(() => {
     if (item.status !== 'preheating') return;
@@ -463,420 +565,465 @@ function SortableQueueItem({
     ? Math.max(0, item.heat_soak_minutes * 60 - Math.floor((countdownNow - preheatStartedAt.getTime()) / 1000))
     : null;
 
+  const displayName = `${queueItemDisplayName(item, (n) => t('common.plusNMore', { count: n }))}${
+    (platesData?.is_multi_plate ?? false) && item.plate_id !== undefined && item.plate_id !== null
+      ? ` • ${plates.find(plate => plate.index === item.plate_id)?.name || t('queue.plateNumber', { index: item.plate_id })}`
+      : ''
+  }`;
+  const { tone, Icon: StatusIcon, label: statusLabel } = resolveQueueTone(item, printerState, t);
+  const canUpdate = canModify('queue', 'update', item.created_by_id);
+  const canDelete = canModify('queue', 'delete', item.created_by_id);
+  const canEditItem = isPending && canUpdate;
+  const showCheckbox = isPending && !!onToggleSelect;
+  const checkboxAlwaysVisible = isSelected || selectionActive;
+  const bed = getBedTypeInfo(item.bed_type);
+  const showStartButton = isPending && item.manual_start;
+  const showWaitingReason = isPending && !!item.waiting_reason;
+  const showStagedFooter = showStartButton || showWaitingReason;
+  const stopTitle = !canUpdate ? t('queue.permissions.noStopPrint') : t('queue.actions.stopPrint');
+
+  const optionIcons = (
+    <>
+      {item.require_previous_success && (
+        <span
+          role="img"
+          aria-label={t('queue.badges.requiresPrevious')}
+          title={t('queue.badges.requiresPrevious')}
+          className="inline-flex shrink-0 text-orange-400"
+        >
+          <Check className="w-3.5 h-3.5" />
+        </span>
+      )}
+      {item.auto_off_after && (
+        <span
+          role="img"
+          aria-label={t('queue.badges.autoPowerOff')}
+          title={t('queue.badges.autoPowerOff')}
+          className="inline-flex shrink-0 text-blue-400"
+        >
+          <Power className="w-3.5 h-3.5" />
+        </span>
+      )}
+      {item.gcode_injection && (
+        <span
+          role="img"
+          aria-label={t('queue.badges.gcodeInjection')}
+          title={t('queue.badges.gcodeInjection')}
+          className="inline-flex shrink-0 text-emerald-400"
+        >
+          <Code className="w-3.5 h-3.5" />
+        </span>
+      )}
+    </>
+  );
+
+  const printerLabel =
+    (item.variants?.length ?? 0) > 1 && !item.printer_id
+      ? // A cross-model item (#671) is waiting on several models at once.
+        // Showing only target_model would name whichever candidate is
+        // first and read as a lie the moment the other one runs.
+        `${t('queue.filter.any')} ${item.variants!.map(v => v.target_model).join(' / ')}${item.target_location ? ` @ ${item.target_location}` : ''}`
+      : item.target_model && !item.printer_id
+        ? `${t('queue.filter.any')} ${item.target_model}${item.target_location ? ` @ ${item.target_location}` : ''}${item.required_filament_types?.length ? ` (${item.required_filament_types.join(', ')})` : ''}`
+        : item.printer_id === null
+          ? t('queue.filter.unassigned')
+          : (item.printer_name || `${t('common.printer')} #${item.printer_id}`);
+  const printerTone =
+    item.printer_id === null && !item.target_model ? 'text-orange-400'
+    : item.target_model && !item.printer_id ? 'text-blue-400'
+    : isPrinting ? 'text-bambu-green-light'
+    : 'text-bambu-gray-light';
+
+  const scheduleText = isPending && !item.manual_start
+    ? (item.scheduled_time
+        ? ((parseUTCDate(item.scheduled_time)?.getTime() ?? 0) - Date.now() < -60000
+            ? t?.('queue.time.overdue') ?? 'Overdue'
+            : formatRelativeTime(item.scheduled_time, timeFormat, t))
+        : t?.('queue.time.asap') ?? 'ASAP')
+    : null;
+
+  const heatSoakText = item.status === 'preheating'
+    ? (heatSoakRemainingSeconds !== null
+        ? t('heatSoak.remaining', { time: formatHeatSoakCountdown(heatSoakRemainingSeconds) })
+        : t('heatSoak.waitingForConfirmation'))
+    : null;
+
+  const printingProgress = isPrinting && status
+    ? (() => {
+        // Gate progress/remaining/layer on printer actually running this print.
+        // Between dispatch and RUNNING transition (H2D/P1 MQTT lag), status.progress
+        // is stale from the previous print — showing 100% then snapping back to 0%
+        // once the new print starts. Only trust these fields when state is active.
+        const isActive = status.state === 'RUNNING' || status.state === 'PAUSE';
+        return {
+          progress: isActive ? (status.progress || 0) : 0,
+          remaining: isActive ? status.remaining_time : null,
+          layerNum: isActive ? status.layer_num : null,
+          totalLayers: isActive ? status.total_layers : null,
+        };
+      })()
+    : null;
+
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canEditItem) return;
+    // Links, buttons, inputs and the drag handle keep their own behaviour.
+    if ((e.target as HTMLElement).closest('a, button, input, label, [data-no-card-click]')) return;
+    onEdit();
+  };
+
   return (
     <div
       ref={setNodeRef}
       style={style}
+      onClick={handleCardClick}
       className={`
-        group relative bg-bambu-dark-secondary rounded-xl border transition-all duration-200
-        border-l-[3px] ${
-          isPrinting ? 'border-l-blue-500' :
-          isDispatching ? 'border-l-purple-500' :
-          isPending ? 'border-l-yellow-500' :
-          item.status === 'completed' ? 'border-l-emerald-500' :
-          item.status === 'failed' ? 'border-l-red-500' :
-          'border-l-gray-500'
-        }
+        group relative flex overflow-hidden rounded-xl border bg-bambu-dark-secondary transition-all duration-200
+        ${tone.border}
+        ${canEditItem ? 'cursor-pointer hover:brightness-110' : ''}
+        ${isSelected ? tone.ring : ''}
         ${isDragging ? 'opacity-50 scale-[1.02] shadow-xl z-50' : ''}
-        ${isPrinting ? 'border-blue-500/30 bg-gradient-to-r from-blue-500/5 to-transparent' : ''}
-        ${isDispatching ? 'border-purple-500/30 bg-gradient-to-r from-purple-500/5 to-transparent' : ''}
-        ${isSelected && isMobileSelectable ? 'sm:border-bambu-dark-tertiary border-bambu-green/40' : ''}
-        ${!isSelected && !isPrinting && !isDispatching ? 'border-bambu-dark-tertiary hover:border-bambu-dark-tertiary/80' : ''}
-        ${isMobileSelectable ? 'sm:cursor-default' : ''}
       `}
-      onClick={isMobileSelectable ? () => {
-        if (window.innerWidth < 640) onToggleSelect();
-      } : undefined}
     >
-      {/* Mobile selected left accent bar */}
-      {isMobileSelectable && isSelected && (
-        <div className="sm:hidden absolute left-0 top-3 bottom-3 w-1 rounded-full bg-bambu-green" />
-      )}
+      {tone.wash && <div aria-hidden="true" className={`pointer-events-none absolute inset-0 ${tone.wash}`} />}
 
-      <div className="flex items-start sm:items-center gap-2 sm:gap-4 p-3 sm:p-4">
-        {/* Mobile selection indicator — left accent bar only, no tick */}
-
-        {/* Selection checkbox for pending items - hidden on mobile, tap card instead */}
-        {isPending && onToggleSelect && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleSelect();
-            }}
-            className={`hidden sm:flex items-center justify-center w-6 h-6 rounded border transition-colors shrink-0 ${
-              isSelected
-                ? 'bg-bambu-green border-bambu-green text-white'
-                : 'border-white/30 bg-black/30 hover:border-bambu-green/50'
-            }`}
-          >
-            {isSelected && <Check className="w-4 h-4" />}
-          </button>
-        )}
-
-        {isPending && (onMoveUp || onMoveDown) && (
-          <div className="sm:hidden flex flex-col gap-0.5 shrink-0">
-            <button
-              type="button"
-              aria-label={t('queue.moveUp')}
-              disabled={!onMoveUp}
-              onClick={(e) => {
-                e.stopPropagation();
-                onMoveUp?.();
-              }}
-              className="flex h-5 w-6 items-center justify-center rounded text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white disabled:opacity-25"
-            >
-              <ChevronUp className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              aria-label={t('queue.moveDown')}
-              disabled={!onMoveDown}
-              onClick={(e) => {
-                e.stopPropagation();
-                onMoveDown?.();
-              }}
-              className="flex h-5 w-6 items-center justify-center rounded text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white disabled:opacity-25"
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
-
-        {/* Drag handle or position number - hidden on mobile */}
-        {isPending ? (
+      {/* Status gutter: status icon + label. For pending jobs it doubles as the
+          drag handle — the icon swaps for a grip on hover. */}
+      <div className={`relative z-10 flex w-12 sm:w-[80px] flex-none flex-col items-center justify-center border-r ${tone.gutter} ${tone.text}`} data-no-card-click>
+        {isPending && canReorder ? (
           <div
             {...attributes}
             {...listeners}
-            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark cursor-grab active:cursor-grabbing hover:bg-bambu-dark-tertiary transition-colors touch-manipulation shrink-0"
+            aria-label={t('queue.dragToReorder')}
+            title={t('queue.dragToReorder')}
+            className="group/grip hidden sm:flex h-full w-full cursor-grab flex-col items-center justify-center gap-1.5 px-1 transition-colors hover:bg-white/10 active:cursor-grabbing touch-manipulation"
           >
-            <GripVertical className="w-4 h-4 text-bambu-gray" />
-          </div>
-        ) : position !== undefined ? (
-          <div className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark text-bambu-gray text-sm font-medium shrink-0">
-            #{position}
+            <StatusIcon className="h-6 w-6 group-hover/grip:hidden" />
+            <GripVertical className="hidden h-6 w-6 group-hover/grip:block" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.04em]">{statusLabel}</span>
           </div>
         ) : (
-          <div className="hidden sm:block w-8 shrink-0" />
+          <div className="hidden sm:flex flex-col items-center justify-center gap-1.5 px-1">
+            <StatusIcon className="h-6 w-6" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.04em]">{statusLabel}</span>
+          </div>
         )}
-
-        {/* Thumbnail - use plate-specific thumbnail if plate_id is set */}
-        <div className="w-10 h-10 sm:w-14 sm:h-14 flex-shrink-0 bg-bambu-dark rounded-lg overflow-hidden">
-          {item.archive_thumbnail ? (
-            <img
-              src={
-                item.plate_id != null
-                  ? api.getArchivePlateThumbnail(item.archive_id!, item.plate_id)
-                  : api.getArchiveThumbnail(item.archive_id!)
-              }
-              alt=""
-              className="w-full h-full object-cover"
-            />
-          ) : item.library_file_thumbnail ? (
-            <img
-              src={
-                item.plate_id != null
-                  ? api.getLibraryFilePlateThumbnail(item.library_file_id!, item.plate_id)
-                  : api.getLibraryFileThumbnailUrl(item.library_file_id!)
-              }
-              alt=""
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-bambu-gray">
-              <Layers className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
+        {/* Mobile: compact gutter with the status icon and up/down reorder buttons */}
+        <div className="sm:hidden flex flex-col items-center gap-1" title={statusLabel}>
+          <StatusIcon className="h-5 w-5" aria-label={statusLabel} />
+          {isPending && (onMoveUp || onMoveDown) && (
+            <>
+              <button
+                type="button"
+                aria-label={t('queue.moveUp')}
+                disabled={!onMoveUp}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveUp?.();
+                }}
+                className="flex h-5 w-6 items-center justify-center rounded hover:bg-white/10 disabled:opacity-25"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label={t('queue.moveDown')}
+                disabled={!onMoveDown}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMoveDown?.();
+                }}
+                className="flex h-5 w-6 items-center justify-center rounded hover:bg-white/10 disabled:opacity-25"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </>
           )}
         </div>
+      </div>
 
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <p className="text-sm sm:text-base text-white font-medium truncate">
-              {queueItemDisplayName(item, (n) => t('common.plusNMore', { count: n }))}
-              {(platesData?.is_multi_plate ?? false) && item.plate_id !== undefined && item.plate_id !== null && ` • ${plates.find(plate => plate.index === item.plate_id)?.name || t('queue.plateNumber', { index: item.plate_id })}`}
-            </p>
-            {item.archive_id ? (
-              <Link
-                to={`/archives?highlight=${item.archive_id}`}
-                className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
-                title={t('queue.viewArchive')}
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-3 sm:gap-3.5 px-3 py-2.5 sm:pl-[18px] sm:pr-3">
+          {/* Thumbnail with hover-revealed selection checkbox */}
+          <div className="relative h-11 w-11 flex-none">
+            <div className={`h-11 w-11 overflow-hidden rounded-lg bg-bambu-dark ${isSelected ? 'ring-2 ring-bambu-green' : ''}`}>
+              {item.archive_thumbnail ? (
+                <img
+                  src={
+                    item.plate_id != null
+                      ? api.getArchivePlateThumbnail(item.archive_id!, item.plate_id)
+                      : api.getArchiveThumbnail(item.archive_id!)
+                  }
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : item.library_file_thumbnail ? (
+                <img
+                  src={
+                    item.plate_id != null
+                      ? api.getLibraryFilePlateThumbnail(item.library_file_id!, item.plate_id)
+                      : api.getLibraryFileThumbnailUrl(item.library_file_id!)
+                  }
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-bambu-gray">
+                  <Layers className="h-5 w-5" />
+                </div>
+              )}
+            </div>
+            {showCheckbox && (
+              <label
+                className={`absolute -left-2 -top-2 flex h-6 w-6 cursor-pointer items-center justify-center rounded-[7px] border bg-bambu-dark shadow-md transition-opacity ${
+                  isSelected ? 'border-bambu-green' : 'border-bambu-gray-dark'
+                } ${
+                  checkboxAlwaysVisible
+                    ? 'opacity-100'
+                    : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100'
+                }`}
               >
-                <ExternalLink className="w-3.5 h-3.5" />
-              </Link>
-            ) : item.library_file_id ? (
-              <Link
-                to={`/library?highlight=${item.library_file_id}`}
-                className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
-                title={t('queue.viewInFileManager')}
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-              </Link>
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => onToggleSelect?.()}
+                  aria-label={t('queue.selectJob', { name: displayName })}
+                  className="m-0 h-4 w-4 cursor-pointer accent-bambu-green"
+                />
+              </label>
+            )}
+          </div>
+
+          {/* Info */}
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="flex min-w-0 items-center gap-2">
+              {canEditItem ? (
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  title={t('common.edit')}
+                  className="min-w-0 truncate text-left text-sm font-semibold text-white hover:underline hover:decoration-bambu-gray-light hover:underline-offset-[3px] focus-visible:underline sm:text-[15px]"
+                >
+                  {displayName}
+                </button>
+              ) : (
+                <p className="min-w-0 truncate text-sm font-semibold text-white sm:text-[15px]">{displayName}</p>
+              )}
+              {item.archive_id ? (
+                <Link
+                  to={`/archives?highlight=${item.archive_id}`}
+                  className="flex-shrink-0 text-bambu-gray transition-colors hover:text-bambu-green"
+                  title={t('queue.viewArchive')}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </Link>
+              ) : item.library_file_id ? (
+                <Link
+                  to={`/library?highlight=${item.library_file_id}`}
+                  className="flex-shrink-0 text-bambu-gray transition-colors hover:text-bambu-green"
+                  title={t('queue.viewInFileManager')}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </Link>
+              ) : null}
+              {optionIcons}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-bambu-gray-light sm:text-[13px]">
+              <span className={`flex items-center gap-1.5 ${printerTone}`}>
+                <Printer className="h-3.5 w-3.5" />
+                <span className="max-w-[160px] truncate sm:max-w-none">{printerLabel}</span>
+              </span>
+              {bed && (
+                <span className="flex items-center gap-1.5" title={bed.label}>
+                  <img src={bed.icon} alt="" className="h-4 w-4 object-contain" />
+                  <span className="max-w-[140px] truncate">{bed.label}</span>
+                </span>
+              )}
+              {item.created_by_username && (
+                <span className="hidden items-center gap-1.5 sm:flex" title={t('queue.addedBy', { name: item.created_by_username })}>
+                  <User className="h-3.5 w-3.5" />
+                  {item.created_by_username}
+                </span>
+              )}
+              {scheduleText && (
+                <span className="flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" />
+                  {scheduleText}
+                </span>
+              )}
+              {/* Time and weight sit in the right-hand column on wider screens */}
+              <span className="flex items-center gap-3 sm:hidden">
+                {item.print_time_seconds ? (
+                  <span className="flex items-center gap-1">
+                    <Timer className="h-3 w-3" />
+                    {formatDuration(item.print_time_seconds)}
+                  </span>
+                ) : null}
+                {item.filament_used_grams ? (
+                  <span className="flex items-center gap-1">
+                    <Weight className="h-3 w-3" />
+                    {formatWeight(item.filament_used_grams)}
+                  </span>
+                ) : null}
+              </span>
+            </div>
+          </div>
+
+          {/* Time + weight */}
+          <div className="hidden min-w-[72px] flex-none flex-col items-end gap-0.5 sm:flex">
+            {item.print_time_seconds ? (
+              <span className="text-[15px] font-semibold text-white">{formatDuration(item.print_time_seconds)}</span>
+            ) : null}
+            {item.filament_used_grams ? (
+              <span className="text-xs text-bambu-gray-light">{formatWeight(item.filament_used_grams)}</span>
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-bambu-gray">
-            <span className={`flex items-center gap-1 sm:gap-1.5 ${item.printer_id === null && !item.target_model ? 'text-orange-400' : ''} ${item.target_model && !item.printer_id ? 'text-blue-400' : ''}`}>
-              <Printer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span className="truncate max-w-[120px] sm:max-w-none">
-              {/* A cross-model item (#671) is waiting on several models at once.
-                  Showing only target_model would name whichever candidate is
-                  first and read as a lie the moment the other one runs. */}
-              {(item.variants?.length ?? 0) > 1 && !item.printer_id
-                ? `${t('queue.filter.any')} ${item.variants!.map(v => v.target_model).join(' / ')}${item.target_location ? ` @ ${item.target_location}` : ''}`
-                : item.target_model && !item.printer_id
-                ? `${t('queue.filter.any')} ${item.target_model}${item.target_location ? ` @ ${item.target_location}` : ''}${item.required_filament_types?.length ? ` (${item.required_filament_types.join(', ')})` : ''}`
-                : item.printer_id === null
-                  ? t('queue.filter.unassigned')
-                  : (item.printer_name || `${t('common.printer')} #${item.printer_id}`)}
-              </span>
-            </span>
-            {item.print_time_seconds && (
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <Timer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                {formatDuration(item.print_time_seconds)}
-              </span>
-            )}
-            {item.filament_used_grams && (
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <Weight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                {formatWeight(item.filament_used_grams)}
-              </span>
-            )}
-            {(() => {
-              // Build plate badge so the user knows which plate to mount before
-              // walking to the printer (#1281). Hidden when the 3MF doesn't
-              // carry curr_bed_type or the slicer used an unknown label.
-              const bed = getBedTypeInfo(item.bed_type);
-              if (!bed) return null;
-              return (
-                <span className="flex items-center gap-1 sm:gap-1.5" title={bed.label}>
-                  <img src={bed.icon} alt="" className="w-3.5 h-3.5 sm:w-4 sm:h-4 object-contain" />
-                  <span className="truncate max-w-[120px]">{bed.label}</span>
-                </span>
-              );
-            })()}
-            {item.created_by_username && (
-              <span className="hidden sm:flex items-center gap-1.5" title={t('queue.addedBy', { name: item.created_by_username })}>
-                <User className="w-3.5 h-3.5" />
-                {item.created_by_username}
-              </span>
-            )}
-            {isPending && !item.manual_start && (
-              <span className="flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5" />
-                {item.scheduled_time
-                  ? ((parseUTCDate(item.scheduled_time)?.getTime() ?? 0) - Date.now() < -60000
-                      ? t?.('queue.time.overdue') ?? 'Overdue'
-                      : formatRelativeTime(item.scheduled_time, timeFormat, t))
-                  : t?.('queue.time.asap') ?? 'ASAP'}
-              </span>
-            )}
-          </div>
-
-          {/* Options badges */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
-            {item.manual_start && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20 flex items-center gap-1">
-                <Hand className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                {t('queue.badges.staged')}
-              </span>
-            )}
-            {item.require_previous_success && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-orange-500/10 text-orange-400 rounded-full border border-orange-500/20">
-                {t('queue.badges.requiresPrevious')}
-              </span>
-            )}
-            {item.auto_off_after && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded-full border border-blue-500/20 flex items-center gap-1">
-                <Power className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                {t('queue.badges.autoPowerOff')}
-              </span>
-            )}
-            {item.gcode_injection && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20 flex items-center gap-1">
-                <Code className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                {t('queue.badges.gcodeInjection')}
-              </span>
-            )}
-          </div>
-
-          {/* Progress bar for printing items - TODO: integrate with WebSocket */}
-          {isPrinting && status && (() => {
-            // Gate progress/remaining/layer on printer actually running this print.
-            // Between dispatch and RUNNING transition (H2D/P1 MQTT lag), status.progress
-            // is stale from the previous print — showing 100% then snapping back to 0%
-            // once the new print starts. Only trust these fields when state is active.
-            const isActive = status.state === 'RUNNING' || status.state === 'PAUSE';
-            const progress = isActive ? (status.progress || 0) : 0;
-            const remaining = isActive ? status.remaining_time : null;
-            const layerNum = isActive ? status.layer_num : null;
-            const totalLayers = isActive ? status.total_layers : null;
-            return (
-              <div className="mt-2 sm:mt-3">
-                <div className="flex items-center justify-between text-xs sm:text-sm">
-                  <div className="flex-1 bg-bambu-dark-tertiary rounded-full h-1.5 sm:h-2 mr-3">
-                    <div
-                      className="bg-bambu-green h-1.5 sm:h-2 rounded-full transition-all"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <span className="text-white">{Math.round(progress)}%</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-1.5 sm:mt-2 text-[10px] sm:text-xs text-bambu-gray">
-                  {remaining != null && remaining > 0 && (
-                    <>
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {formatDuration(remaining * 60)}
-                      </span>
-                      <span className="text-bambu-green font-medium" title={t('printers.estimatedCompletion')}>
-                        ETA {formatETA(remaining, timeFormat, t)}
-                      </span>
-                    </>
-                  )}
-                  {layerNum != null && totalLayers != null && totalLayers > 0 && (
-                    <span className="flex items-center gap-1">
-                      <Layers className="w-3 h-3" />
-                      {layerNum}/{totalLayers}
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {item.status === 'preheating' && (
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-300">
-              <Timer className="w-3 h-3" />
-              <span>
-                {heatSoakRemainingSeconds !== null
-                  ? t('heatSoak.remaining', { time: formatHeatSoakCountdown(heatSoakRemainingSeconds) })
-                  : t('heatSoak.waitingForConfirmation')}
-              </span>
-            </div>
-          )}
-
-          {/* Waiting reason for model-based assignments */}
-          {item.waiting_reason && item.status === 'pending' && (
-            <p className="text-[10px] sm:text-xs text-purple-400 mt-1.5 sm:mt-2 flex items-start gap-1">
-              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-              <span>{item.waiting_reason}</span>
-            </p>
-          )}
-
-          {/* Filament-short flag from the dispatch pre-flight (#1496). */}
-          {item.filament_short && item.status === 'pending' && (
-            <p
-              className="text-[10px] sm:text-xs text-yellow-400 mt-1.5 sm:mt-2 flex items-start gap-1"
-              title={t('queue.filamentShort.rowTooltip')}
-            >
-              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-              <span>{t('queue.filamentShort.rowBadge')}</span>
-            </p>
-          )}
-
-          {/* Error message */}
-          {item.error_message && (
-            <p className="text-[10px] sm:text-xs text-red-400 mt-1.5 sm:mt-2 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />
-              {item.error_message}
-            </p>
-          )}
-        </div>
-
-        {/* Status badge + Actions */}
-        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <StatusBadge status={item.status} scheduledTime={item.scheduled_time} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
-
-          <div className="flex items-center gap-0.5 sm:gap-1">
-            {item.status === 'preheating' && onSkipHeatSoak && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onSkipHeatSoak}
-                disabled={isSkippingHeatSoak || !canModify('queue', 'update', item.created_by_id)}
-                aria-label={t('heatSoak.skip')}
-                title={!canModify('queue', 'update', item.created_by_id) ? t('queue.permissions.noStopPrint') : t('heatSoak.skip')}
-                className="min-h-[26px] border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200"
-              >
-                <SkipForward className="w-4 h-4" />
-              </Button>
-            )}
+          {/* Single action slot */}
+          <div className="flex flex-none items-center gap-2" data-no-card-click>
             {(isDispatching || isPrinting) && (
-              <Button
-                variant="ghost"
-                size="sm"
+              <QueueActionButton
+                variant="danger"
                 onClick={onStop}
-                disabled={!canModify('queue', 'update', item.created_by_id)}
-                aria-label={t('queue.actions.stopPrint')}
-                title={!canModify('queue', 'update', item.created_by_id) ? t('queue.permissions.noStopPrint') : t('queue.actions.stopPrint')}
-                className="min-h-[26px] border border-red-500/30 bg-red-500/10 px-2 py-1 text-red-400 hover:bg-red-500/20 hover:text-red-300"
+                disabled={!canUpdate}
+                title={stopTitle}
+                label={t('queue.actions.stopPrint')}
               >
-                <X className="w-4 h-4" />
-              </Button>
+                <X className="h-[18px] w-[18px]" />
+              </QueueActionButton>
             )}
             {isPending && (
-              <>
-                {item.manual_start && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onStart}
-                    disabled={!canModify('queue', 'update', item.created_by_id)}
-                    title={!canModify('queue', 'update', item.created_by_id) ? t('queue.permissions.noStartPrint') : t('queue.actions.startPrint')}
-                    className="text-bambu-green hover:text-bambu-green-light hover:bg-bambu-green/10 p-1.5 sm:p-2"
-                  >
-                    <Play className="w-4 h-4" />
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onEdit}
-                  disabled={!canModify('queue', 'update', item.created_by_id)}
-                  title={!canModify('queue', 'update', item.created_by_id) ? t('queue.permissions.noEdit') : t('common.edit')}
-                  className="p-1.5 sm:p-2"
-                >
-                  <Pencil className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onCancel}
-                  disabled={!canModify('queue', 'delete', item.created_by_id)}
-                  title={!canModify('queue', 'delete', item.created_by_id) ? t('queue.permissions.noCancel') : t('common.cancel')}
-                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 sm:p-2"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </>
+              <QueueActionButton
+                variant="danger"
+                onClick={onCancel}
+                disabled={!canDelete}
+                title={!canDelete ? t('queue.permissions.noCancel') : t('common.cancel')}
+                label={t('common.cancel')}
+              >
+                <X className="h-[18px] w-[18px]" />
+              </QueueActionButton>
             )}
             {isHistory && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
+                <QueueActionButton
+                  variant="success"
                   onClick={onRequeue}
                   disabled={!hasPermission('queue:create')}
                   title={!hasPermission('queue:create') ? t('queue.permissions.noRequeue') : t('queue.actions.requeue')}
-                  className="text-bambu-green hover:text-bambu-green/80 hover:bg-bambu-green/10 p-1.5 sm:p-2"
+                  label={t('queue.actions.requeue')}
                 >
-                  <RefreshCw className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
+                  <RefreshCw className="h-[18px] w-[18px]" />
+                </QueueActionButton>
+                <QueueActionButton
+                  variant="danger"
                   onClick={onRemove}
-                  disabled={!canModify('queue', 'delete', item.created_by_id)}
-                  title={!canModify('queue', 'delete', item.created_by_id) ? t('queue.permissions.noRemove') : t('common.remove')}
-                  className="p-1.5 sm:p-2"
+                  disabled={!canDelete}
+                  title={!canDelete ? t('queue.permissions.noRemove') : t('common.remove')}
+                  label={t('common.remove')}
                 >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                  <Trash2 className="h-[18px] w-[18px]" />
+                </QueueActionButton>
               </>
             )}
           </div>
         </div>
+
+        {/* Footer strips: only rendered when there is something to say */}
+        {showStagedFooter && (
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t px-4 py-1.5 text-xs ${tone.footer}`}>
+            {showWaitingReason ? (
+              <span className="flex min-w-0 flex-1 items-start gap-2">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                <span>{item.waiting_reason}</span>
+              </span>
+            ) : (
+              <span className="flex-1" />
+            )}
+            {item.manual_start && (
+              <span className="flex items-center gap-1.5">
+                <Hand className="h-3 w-3" />
+                {t('queue.badges.staged')}
+              </span>
+            )}
+            {showStartButton && (
+              <button
+                type="button"
+                onClick={onStart}
+                disabled={!canUpdate}
+                title={!canUpdate ? t('queue.permissions.noStartPrint') : t('queue.actions.startPrint')}
+                className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-bambu-green bg-bambu-green/15 px-3 text-xs font-semibold text-green-400 transition-colors hover:bg-bambu-green/25 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play className="h-3 w-3 fill-current" />
+                {t('queue.startNow')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Filament-short flag from the dispatch pre-flight (#1496). */}
+        {item.filament_short && item.status === 'pending' && (
+          <div
+            className="flex items-start gap-2 border-t border-yellow-400/25 bg-yellow-400/10 px-4 py-1.5 text-xs text-yellow-300"
+            title={t('queue.filamentShort.rowTooltip')}
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+            <span>{t('queue.filamentShort.rowBadge')}</span>
+          </div>
+        )}
+
+        {/* Progress for printing items */}
+        {printingProgress && (
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2 text-xs text-bambu-gray-light ${tone.footer}`}>
+            <div className="h-1.5 min-w-[120px] flex-1 rounded-full bg-bambu-dark-tertiary">
+              <div
+                className="h-1.5 rounded-full bg-bambu-green-light transition-all"
+                style={{ width: `${printingProgress.progress}%` }}
+              />
+            </div>
+            <span className="text-[13px] font-bold text-white">{Math.round(printingProgress.progress)}%</span>
+            {printingProgress.remaining != null && printingProgress.remaining > 0 && (
+              <>
+                <span>{formatDuration(printingProgress.remaining * 60)}</span>
+                <span className="font-medium text-green-400" title={t('printers.estimatedCompletion')}>
+                  ETA {formatETA(printingProgress.remaining, timeFormat, t)}
+                </span>
+              </>
+            )}
+            {printingProgress.layerNum != null && printingProgress.totalLayers != null && printingProgress.totalLayers > 0 && (
+              <span className="flex items-center gap-1">
+                <Layers className="h-3 w-3" />
+                {printingProgress.layerNum}/{printingProgress.totalLayers}
+              </span>
+            )}
+          </div>
+        )}
+
+        {item.status === 'preheating' && (
+          <div className={`flex items-center gap-2 border-t px-4 py-1.5 text-xs ${tone.footer}`}>
+            <Timer className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="flex-1">{heatSoakText}</span>
+            {onSkipHeatSoak && (
+              <button
+                type="button"
+                onClick={onSkipHeatSoak}
+                disabled={isSkippingHeatSoak || !canUpdate}
+                aria-label={t('heatSoak.skip')}
+                title={!canUpdate ? t('queue.permissions.noStopPrint') : t('heatSoak.skip')}
+                className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-400/15 px-2.5 text-amber-200 transition-colors hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <SkipForward className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Error message */}
+        {item.error_message && (
+          <div className="flex items-center gap-2 border-t border-red-400/25 bg-red-400/10 px-4 py-1.5 text-xs text-red-400">
+            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+            {item.error_message}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -926,6 +1073,7 @@ function QueueRowRender({
       onStart={() => startMutation.mutate({ id: row.item.id })}
       timeFormat={timeFormat}
       isSelected={selectedItems.includes(row.item.id)}
+      selectionActive={selectedItems.length > 0}
       onToggleSelect={() => handleToggleSelect(row.item.id)}
       hasPermission={hasPermission}
       canModify={canModify}

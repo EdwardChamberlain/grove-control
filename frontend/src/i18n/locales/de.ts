@@ -1115,6 +1115,7 @@ export default {
       tooltip: 'Kürzester Auftrag zuerst — Scheduler bevorzugt kürzere Drucke',
     },
     addedBy: 'Hinzugefügt von {{name}}',
+    selectJob: '{{name}} auswählen',
     nextInQueue: 'Nächster in der Warteschlange',
     clearPlateSuccess: 'Druckplatte freigegeben — bereit für nächsten Druck',
     plateNumber: 'Platte {{index}}',

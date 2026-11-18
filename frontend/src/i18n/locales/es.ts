@@ -1115,6 +1115,7 @@ export default {
       tooltip: 'Trabajo más corto primero — el planificador prioriza las impresiones más cortas',
     },
     addedBy: 'Añadido por {{name}}',
+    selectJob: 'Seleccionar {{name}}',
     nextInQueue: 'Siguiente en la cola',
     clearPlateSuccess: 'Cama despejada — lista para la próxima impresión',
     plateNumber: 'Cama {{index}}',
