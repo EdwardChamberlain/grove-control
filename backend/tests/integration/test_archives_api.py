@@ -783,6 +783,36 @@ class TestPrintLogDateFilter:
         assert [i["print_name"] for i in body["items"]] == ["new"]
 
 
+class TestPrintLogStatusAndTimezone:
+    """Status accepts a list, and bounds may carry a timezone."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_status_list_and_timezone_aware_bounds(self, async_client: AsyncClient, db_session):
+        from datetime import datetime
+
+        from backend.app.models.print_log import PrintLogEntry
+
+        db_session.add_all(
+            [
+                PrintLogEntry(print_name="stop", status="stopped", started_at=datetime(2026, 6, 2, 1, 0)),
+                PrintLogEntry(print_name="abort", status="aborted", started_at=datetime(2026, 6, 2, 2, 0)),
+                PrintLogEntry(print_name="done", status="completed", started_at=datetime(2026, 6, 2, 3, 0)),
+            ]
+        )
+        await db_session.commit()
+
+        body = (await async_client.get("/api/v1/print-log/", params={"status": "stopped,aborted"})).json()
+        assert {i["print_name"] for i in body["items"]} == {"stop", "abort"}
+
+        # 00:00 at UTC+10 on 2 June is 14:00 UTC on 1 June: all three prints are inside.
+        body = (await async_client.get("/api/v1/print-log/", params={"date_from": "2026-06-02T00:00:00+10:00"})).json()
+        assert {i["print_name"] for i in body["items"]} == {"stop", "abort", "done"}
+        # The same wall-clock time in UTC starts at 00:00 UTC: still all three; 02:30 UTC drops two.
+        body = (await async_client.get("/api/v1/print-log/", params={"date_from": "2026-06-02T02:30:00+00:00"})).json()
+        assert {i["print_name"] for i in body["items"]} == {"done"}
+
+
 class TestPrintLogCostFields:
     """``GET /print-log/`` returns the per-run cost and energy figures."""
 

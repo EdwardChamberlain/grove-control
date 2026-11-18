@@ -422,3 +422,40 @@ describe('ArchivesPage filters panel', () => {
     }
   });
 });
+
+describe('ArchivesPage last-printed label and deep links on a cold load', () => {
+  it('only says "Not yet printed" for archives that were never sent to a printer', async () => {
+    useArchives([
+      archive(1, 'Uploaded Only', { status: 'archived', started_at: null, completed_at: null }),
+      archive(2, 'Ran Without Start', { status: 'completed', started_at: null, completed_at: null }),
+    ]);
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Uploaded Only');
+    // One card is genuinely unprinted; the other ran, so it shows a date instead.
+    expect(screen.getAllByText('Not yet printed')).toHaveLength(1);
+  });
+
+  it('finds a highlighted archive on a later page when the page opens cold', async () => {
+    setStorage({ archiveViewMode: 'grid', archivePageSize: '25' });
+    const many = Array.from({ length: 26 }, (_, i) => archive(i + 1, `Print ${String(i + 1).padStart(2, '0')}`));
+    useArchives(many);
+    window.history.pushState({}, '', '/archives?highlight=1');
+    // jsdom has no scrollIntoView; the page calls it once the highlighted card exists.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      render(<ArchivesPage />);
+
+      // Print 01 is the oldest, so it sits on page 2; the jump has to wait for the data.
+      expect(await screen.findByText('Page 2 of 2')).toBeInTheDocument();
+      expect(screen.getByText('Print 01')).toBeInTheDocument();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(screen.queryByText(/not visible/i)).not.toBeInTheDocument();
+      expect(scrollIntoView).toHaveBeenCalled();
+    } finally {
+      delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+      window.history.pushState({}, '', '/');
+    }
+  });
+});

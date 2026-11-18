@@ -949,6 +949,9 @@ async def export_archives(
     date_from: str | None = Query(None, description="Start date (ISO format)"),
     date_to: str | None = Query(None, description="End date (ISO format)"),
     search: str | None = None,
+    created_by_username: str | None = Query(None, description="Only archives created by this user"),
+    printed_from: str | None = Query(None, description="Last printed on or after (ISO 8601, may carry a timezone)"),
+    printed_to: str | None = Query(None, description="Last printed on or before (ISO 8601, may carry a timezone)"),
     db: AsyncSession = Depends(get_db),
     auth_result: tuple[User | None, bool] = Depends(
         require_ownership_permission(
@@ -992,6 +995,18 @@ async def export_archives(
         except ValueError:
             raise HTTPException(400, "Invalid date_to format")
 
+    def _parse_instant(value: str | None, name: str):
+        if not value:
+            return None
+        try:
+            # ``Z`` is only accepted by fromisoformat from Python 3.11, which the app requires.
+            return datetime.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(400, f"Invalid {name} format")
+
+    printed_from_dt = _parse_instant(printed_from, "printed_from")
+    printed_to_dt = _parse_instant(printed_to, "printed_to")
+
     service = ExportService(db)
     try:
         file_bytes, filename, content_type = await service.export_archives(
@@ -1004,6 +1019,9 @@ async def export_archives(
             date_to=date_to_dt,
             search=search,
             visible_to_user_id=visible_to_user_id,
+            created_by_username=created_by_username,
+            printed_from=printed_from_dt,
+            printed_to=printed_to_dt,
         )
     except ImportError as e:
         raise HTTPException(500, str(e))

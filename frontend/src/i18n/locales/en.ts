@@ -781,6 +781,7 @@ export default {
     resetFilters: 'Reset filters',
     createdAutomatically: 'Prints are recorded automatically when they finish',
     filters: {
+      exportNote: 'Not applied to export: {{filters}}',
       filters: 'Filters',
       whoWhen: 'Who & when',
       what: 'What',
@@ -1079,6 +1080,7 @@ export default {
       hasTimelapse: 'Has timelapse',
     },
     log: {
+      truncatedNote: 'Filtering the newest {{limit}} of {{total}} prints. Narrow the dates or search to reach older ones.',
       cost: 'Cost',
       openInGrid: 'Show in grid',
       selectRow: 'Select print',

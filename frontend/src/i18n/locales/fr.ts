@@ -767,6 +767,7 @@ export default {
     resetFilters: 'Réinitialiser les filtres',
     createdAutomatically: 'Les impressions sont enregistrées automatiquement à la fin',
     filters: {
+      exportNote: 'Non appliqué à l\'export : {{filters}}',
       filters: 'Filtres',
       whoWhen: 'Qui et quand',
       what: 'Quoi',
@@ -1065,6 +1066,7 @@ export default {
       hasTimelapse: 'A un timelapse',
     },
     log: {
+      truncatedNote: 'Filtrage des {{limit}} impressions les plus récentes sur {{total}}. Réduisez les dates ou la recherche pour atteindre les plus anciennes.',
       cost: 'Coût',
       openInGrid: 'Afficher dans la grille',
       selectRow: "Sélectionner l'impression",

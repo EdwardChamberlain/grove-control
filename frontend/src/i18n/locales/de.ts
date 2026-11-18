@@ -767,6 +767,7 @@ export default {
     resetFilters: 'Filter zurücksetzen',
     createdAutomatically: 'Drucke werden automatisch erfasst, sobald sie fertig sind',
     filters: {
+      exportNote: 'Nicht im Export berücksichtigt: {{filters}}',
       filters: 'Filter',
       whoWhen: 'Wer & wann',
       what: 'Was',
@@ -1065,6 +1066,7 @@ export default {
       hasTimelapse: 'Hat Zeitraffer',
     },
     log: {
+      truncatedNote: 'Gefiltert werden die neuesten {{limit}} von {{total}} Drucken. Zeitraum oder Suche eingrenzen, um ältere zu erreichen.',
       cost: 'Kosten',
       openInGrid: 'Im Raster anzeigen',
       selectRow: 'Druck auswählen',

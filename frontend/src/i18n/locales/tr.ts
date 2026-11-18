@@ -767,6 +767,7 @@ export default {
     resetFilters: 'Filtreleri sıfırla',
     createdAutomatically: 'Baskılar tamamlandığında otomatik olarak kaydedilir',
     filters: {
+      exportNote: 'Dışa aktarmada uygulanmaz: {{filters}}',
       filters: 'Filtreler',
       whoWhen: 'Kim ve ne zaman',
       what: 'Ne',
@@ -1065,6 +1066,7 @@ export default {
       hasTimelapse: 'Zaman atlamalı videosu var',
     },
     log: {
+      truncatedNote: '{{total}} baskının en yeni {{limit}} tanesi filtreleniyor. Daha eskilere ulaşmak için tarihleri veya aramayı daraltın.',
       cost: 'Maliyet',
       openInGrid: 'Izgarada göster',
       selectRow: 'Baskıyı seç',

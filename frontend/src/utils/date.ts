@@ -486,3 +486,12 @@ export function getLastPrintedAt(a: {
 }): string {
   return a.last_run_at || a.started_at || a.created_at;
 }
+
+/**
+ * Start or end of a local calendar day (`YYYY-MM-DD` from a date input) as a UTC
+ * ISO instant, so the server compares against stored UTC timestamps the same
+ * way the browser does for rows it already holds.
+ */
+export function localDayBoundISO(ymd: string, edge: 'start' | 'end'): string {
+  return new Date(edge === 'start' ? `${ymd}T00:00:00` : `${ymd}T23:59:59.999`).toISOString();
+}

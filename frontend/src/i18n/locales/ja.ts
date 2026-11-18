@@ -766,6 +766,7 @@ export default {
     resetFilters: 'フィルターをリセット',
     createdAutomatically: '印刷は完了時に自動的に記録されます',
     filters: {
+      exportNote: 'エクスポートには適用されません: {{filters}}',
       filters: 'フィルター',
       whoWhen: 'ユーザーと期間',
       what: '内容',
@@ -1064,6 +1065,7 @@ export default {
       hasTimelapse: 'タイムラプスあり',
     },
     log: {
+      truncatedNote: '{{total}}件中、新しい{{limit}}件を絞り込んでいます。古いものは日付や検索で絞ってください。',
       cost: 'コスト',
       openInGrid: 'グリッドで表示',
       selectRow: '印刷を選択',

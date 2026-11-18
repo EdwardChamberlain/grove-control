@@ -60,7 +60,7 @@ import { api } from '../api/client';
 import { SliceModal } from '../components/SliceModal';
 import { SaveArchiveToFilesModal } from '../components/SaveArchiveToFilesModal';
 import { openInSlicer, type SlicerType } from '../utils/slicer';
-import { formatDateTime, parseUTCDate, getLastPrintedAt, type TimeFormat, formatDuration } from '../utils/date';
+import { formatDateTime, parseUTCDate, getLastPrintedAt, localDayBoundISO, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
@@ -1099,7 +1099,7 @@ function ArchiveCard({
         {/* Date, Size & Creator */}
         <div className="flex items-center justify-between text-xs text-bambu-gray border-t border-bambu-dark-tertiary pt-3">
           <span title={`${t('archives.uploaded')}: ${formatDateTime(archive.created_at, timeFormat)}`}>
-            {archive.last_run_at || archive.started_at ? formatDateTime(getLastPrintedAt(archive), timeFormat) : t('archives.notYetPrinted')}
+            {archive.last_run_at || archive.started_at || archive.status !== 'archived' ? formatDateTime(getLastPrintedAt(archive), timeFormat) : t('archives.notYetPrinted')}
           </span>
           <div className="flex items-center gap-2">
             {archive.created_by_username && (
@@ -1533,10 +1533,18 @@ function matchesCollection(
   }
 }
 
+// Status filter values and the raw statuses they cover. "Stopped" includes the
+// archive-only "aborted" so the grid, the log and the export agree.
+const STATUS_FILTER_VALUES: Record<string, string[]> = {
+  completed: ['completed'],
+  failed: ['failed'],
+  stopped: ['stopped', 'aborted'],
+  cancelled: ['cancelled'],
+};
+
 function matchesStatusFilter(filter: string | null, status: string): boolean {
   if (!filter) return true;
-  if (filter === 'stopped') return status === 'stopped' || status === 'aborted';
-  return status === filter;
+  return (STATUS_FILTER_VALUES[filter] ?? [filter]).includes(status);
 }
 
 export function ArchivesPage() {
@@ -1676,30 +1684,6 @@ export function ArchivesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Clear highlight after 5 seconds and scroll to highlighted element
-  useEffect(() => {
-    if (highlightedArchiveId) {
-      // Scroll to highlighted element after a short delay (to let the view render)
-      const scrollTimer = setTimeout(() => {
-        const element = document.querySelector(`[data-archive-id="${highlightedArchiveId}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else if (pendingNavigationArchiveId === highlightedArchiveId) {
-          showToast(t('archives.originalPrintNotVisible'), 'warning');
-        }
-        if (pendingNavigationArchiveId === highlightedArchiveId) {
-          setPendingNavigationArchiveId(null);
-        }
-      }, 100);
-
-      // Clear highlight after 5 seconds
-      const clearTimer = setTimeout(() => setHighlightedArchiveId(null), 5000);
-      return () => {
-        clearTimeout(scrollTimer);
-        clearTimeout(clearTimer);
-      };
-    }
-  }, [highlightedArchiveId, pendingNavigationArchiveId, showToast, t]);
 
   const { data: archives, isLoading } = useQuery({
     queryKey: ['archives', filterPrinter],
@@ -1741,9 +1725,9 @@ export function ArchivesPage() {
       search: search || undefined,
       printerId: filterPrinter || undefined,
       username: filterUser || undefined,
-      status: filterStatus || undefined,
-      dateFrom: filterDateFrom || undefined,
-      dateTo: filterDateTo ? `${filterDateTo}T23:59:59` : undefined,
+      status: filterStatus ? (STATUS_FILTER_VALUES[filterStatus] ?? [filterStatus]).join(',') : undefined,
+      dateFrom: filterDateFrom ? localDayBoundISO(filterDateFrom, 'start') : undefined,
+      dateTo: filterDateTo ? localDayBoundISO(filterDateTo, 'end') : undefined,
       limit: logNeedsClientFilter ? LOG_CLIENT_FETCH_LIMIT : logPageSize,
       offset: logNeedsClientFilter ? 0 : logOffset,
     }),
@@ -1812,18 +1796,39 @@ export function ArchivesPage() {
       showToast(t('archives.log.downloadFailed'), 'error');
     }
   };
-  // Export honours the filters the server understands (printer, status, search);
-  // the rest are applied only to what you see on screen.
+  // Export honours the filters the server understands: printer, status, user, search
+  // and the last-printed range (including the time-based collections). Filters that
+  // depend on archive details (material, tags, colours...) are listed in the menu
+  // instead of being silently ignored.
   const runExport = async (format: 'csv' | 'xlsx') => {
     setShowExportMenu(false);
     setIsExporting(true);
     try {
-      const status = filterStatus || (collection === 'failed' ? 'failed' : undefined);
+      const fromStatus = filterStatus ? (STATUS_FILTER_VALUES[filterStatus] ?? [filterStatus]) : null;
+      const fromCollection = collection === 'failed' ? ['failed', 'aborted'] : null;
+      const statuses = fromStatus && fromCollection
+        ? fromStatus.filter((v) => fromCollection.includes(v))
+        : fromStatus ?? fromCollection;
+
+      const now = new Date();
+      const collectionFrom =
+        collection === 'recent' ? new Date(now.getTime() - 24 * 60 * 60 * 1000)
+        : collection === 'this-week' ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        : collection === 'this-month' ? new Date(now.getFullYear(), now.getMonth(), 1)
+        : null;
+      const dateFromBound = filterDateFrom ? new Date(localDayBoundISO(filterDateFrom, 'start')) : null;
+      const printedFrom = [collectionFrom, dateFromBound]
+        .filter((d): d is Date => d !== null)
+        .sort((x, y) => y.getTime() - x.getTime())[0];
+
       const { blob, filename } = await api.exportArchives({
         format,
         printerId: filterPrinter || undefined,
-        status: status === 'stopped' ? undefined : status,
+        status: statuses?.join(',') || undefined,
+        username: filterUser || undefined,
         search: search || undefined,
+        printedFrom: printedFrom?.toISOString(),
+        printedTo: filterDateTo ? localDayBoundISO(filterDateTo, 'end') : undefined,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -2077,7 +2082,6 @@ export function ArchivesPage() {
         const linked = entry.archive_id != null ? archiveById.get(entry.archive_id) : undefined;
         const printedAt = parseUTCDate(entry.started_at || entry.created_at) || new Date(0);
         if (!matchesCollection(collection, printedAt, entry.status, linked)) return false;
-        if (collection === 'not-printed') return false;
         if (filterMaterial && !entry.filament_type?.split(', ').includes(filterMaterial)) return false;
         if (filterColors.size > 0) {
           const colours = entry.filament_color?.split(',') || [];
@@ -2101,6 +2105,8 @@ export function ArchivesPage() {
   const logRows = logNeedsClientFilter
     ? logEntriesFiltered.slice(logOffset, logOffset + logPageSize)
     : logEntriesFiltered;
+  // Client-side filters only see the newest LOG_CLIENT_FETCH_LIMIT entries.
+  const logTruncated = logNeedsClientFilter && (printLogData?.total ?? 0) > LOG_CLIENT_FETCH_LIMIT;
 
   // Jump to the page containing the highlighted archive
   useEffect(() => {
@@ -2111,8 +2117,42 @@ export function ArchivesPage() {
         if (targetPage !== pageIndex) setPageIndex(targetPage);
       }
     }
+  // Re-run once the archives arrive so a deep link on a cold load still finds its page.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightedArchiveId]);
+  }, [highlightedArchiveId, isLoading]);
+
+  // Clear highlight after 5 seconds and scroll to highlighted element
+  useEffect(() => {
+    // Wait for the archives to load: a deep link opened on a cold page would
+    // otherwise look for an element that does not exist yet.
+    if (highlightedArchiveId && !isLoading) {
+      // Scroll to highlighted element after a short delay (to let the view render)
+      const scrollTimer = setTimeout(() => {
+        const element = document.querySelector(`[data-archive-id="${highlightedArchiveId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (pendingNavigationArchiveId === highlightedArchiveId) {
+          showToast(t('archives.originalPrintNotVisible'), 'warning');
+        }
+        if (pendingNavigationArchiveId === highlightedArchiveId) {
+          setPendingNavigationArchiveId(null);
+        }
+      }, 100);
+
+      // Clear highlight after 5 seconds
+      const clearTimer = setTimeout(() => setHighlightedArchiveId(null), 5000);
+      return () => {
+        clearTimeout(scrollTimer);
+        clearTimeout(clearTimer);
+      };
+    }
+  }, [highlightedArchiveId, pendingNavigationArchiveId, isLoading, showToast, t]);
+
+  // The log and the grid list different things, so a selection made in one means nothing in the other.
+  const inLogView = viewMode === 'log';
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [inLogView]);
 
   const selectionMode = isSelectionMode || selectedIds.size > 0;
 
@@ -2129,6 +2169,11 @@ export function ArchivesPage() {
   };
 
   const selectAll = () => {
+    if (viewMode === 'log') {
+      // Only the archives behind the rows on screen, never ones the log doesn't show.
+      setSelectedIds(new Set(logRows.flatMap((e) => (e.archive_id != null && archiveById.has(e.archive_id) ? [e.archive_id] : []))));
+      return;
+    }
     if (filteredArchives) {
       setSelectedIds(new Set(filteredArchives.map((a) => a.id)));
     }
@@ -2252,6 +2297,12 @@ export function ArchivesPage() {
     label: color,
     clear: () => setFilterColors((prev) => { const next = new Set(prev); next.delete(color); return next; }),
   }));
+  // Active filters the export cannot apply (they depend on archive details).
+  const exportIgnored = activeChips
+    .filter((c) => ['material', 'filetype', 'tag', 'favorites', 'hidefailed', 'hidedupes'].includes(c.key)
+      || c.key.startsWith('color-')
+      || (c.key === 'collection' && ['favorites', 'not-printed', 'printed', 'duplicates'].includes(collection)))
+    .map((c) => c.label);
   // The badge counts what lives inside the panel; on a phone that is every filter except search.
   const primaryActive = (filterPrinter ? 1 : 0) + (filterStatus ? 1 : 0) + (collection !== 'all' ? 1 : 0);
   const panelOnlyActive = activeChips.length - primaryActive - (search ? 1 : 0);
@@ -2275,12 +2326,13 @@ export function ArchivesPage() {
         searchInputRef.current?.focus();
         break;
       case 'Escape':
-        if (selectionMode) {
+        // Escape closes the Filters panel first; it must not also drop the selection.
+        if (selectionMode && !showFilters) {
           clearSelection();
         }
         break;
     }
-  }, [selectionMode]);
+  }, [selectionMode, showFilters]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -2400,7 +2452,7 @@ export function ArchivesPage() {
             <Button
               variant="secondary"
               onClick={() => setShowExportMenu(!showExportMenu)}
-              disabled={isExporting}
+              disabled={isExporting || shownCount === 0}
             >
               {isExporting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -2410,7 +2462,7 @@ export function ArchivesPage() {
               {t('archives.filters.export')}
             </Button>
             {showExportMenu && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl z-20">
+              <div className="absolute right-0 top-full mt-1 w-56 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl z-20">
                 <button
                   className="w-full px-4 py-2 text-left text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center gap-2 rounded-t-lg"
                   onClick={() => runExport('csv')}
@@ -2425,6 +2477,11 @@ export function ArchivesPage() {
                   <FileSpreadsheet className="w-4 h-4" />
                   {t('archives.filters.exportExcel')}
                 </button>
+                {exportIgnored.length > 0 && (
+                  <p className="border-t border-bambu-dark-tertiary px-4 py-2 text-xs text-bambu-gray">
+                    {t('archives.filters.exportNote', { filters: exportIgnored.join(', ') })}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -2812,7 +2869,12 @@ export function ArchivesPage() {
         </>
       ) : viewMode === 'log' ? (
         <div className="space-y-4">
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-3">
+            {logTruncated ? (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                {t('archives.log.truncatedNote', { limit: LOG_CLIENT_FETCH_LIMIT, total: printLogData?.total ?? 0 })}
+              </p>
+            ) : <span />}
             <Button
               variant="danger"
               size="sm"
