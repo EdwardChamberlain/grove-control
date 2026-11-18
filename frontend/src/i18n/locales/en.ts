@@ -781,6 +781,12 @@ export default {
     resetFilters: 'Reset filters',
     createdAutomatically: 'Prints are recorded automatically when they finish',
     filters: {
+      filtersWithCount: 'Filters ({{count}} active)',
+      exportLogNote: 'Exports one row per model (its owner, latest printer and last print), not each individual print.',
+      matchAny: 'Match ANY selected colour',
+      matchAll: 'Match ALL selected colours',
+      colorModeOr: 'OR',
+      colorModeAnd: 'AND',
       exportNote: 'Not applied to export: {{filters}}',
       filters: 'Filters',
       whoWhen: 'Who & when',

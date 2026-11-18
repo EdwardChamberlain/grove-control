@@ -767,6 +767,12 @@ export default {
     resetFilters: 'Filtreleri sıfırla',
     createdAutomatically: 'Baskılar tamamlandığında otomatik olarak kaydedilir',
     filters: {
+      filtersWithCount: 'Filtreler ({{count}} etkin)',
+      exportLogNote: 'Her baskı yerine model başına bir satır (sahibi, son yazıcı ve son baskı) dışa aktarır.',
+      matchAny: 'Seçilen renklerden herhangi biri',
+      matchAll: 'Seçilen renklerin hepsi',
+      colorModeOr: 'VEYA',
+      colorModeAnd: 'VE',
       exportNote: 'Dışa aktarmada uygulanmaz: {{filters}}',
       filters: 'Filtreler',
       whoWhen: 'Kim ve ne zaman',

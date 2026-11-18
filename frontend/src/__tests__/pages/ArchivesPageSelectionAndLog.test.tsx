@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
+import { setAuthToken } from '../../api/client';
 import { server } from '../mocks/server';
 
 function archive(id: number, name: string, extra: Record<string, unknown> = {}) {
@@ -324,6 +325,132 @@ describe('ArchivesPage print log selection and limits', () => {
 
     await screen.findByText('Log Benchy');
     expect(screen.queryByText(/Filtering the newest/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ArchivesPage print log: printer filter, server filters and paging', () => {
+  const entry = (id: number, over: Record<string, unknown> = {}) => ({
+    id, archive_id: 1, print_name: `Run ${id}`, printer_name: 'X1 Carbon', printer_id: 1, created_by_username: 'ada',
+    status: 'completed', duration_seconds: 60, started_at: '2026-01-01T10:00:00Z', created_at: '2026-01-01T10:00:00Z', ...over,
+  });
+
+  it('keeps a reprinted model\'s row actions when filtering the log by the printer it used', async () => {
+    // Printed on printer 1, then reprinted on printer 2: the archive now says printer 2.
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+      ({ archiveViewMode: 'log', archiveFilterPrinter: '1' } as Record<string, string>)[key] ?? null,
+    );
+    const archiveQueries: URLSearchParams[] = [];
+    const reprinted = archive(1, 'Benchy', { printer_id: 2 });
+    server.use(
+      http.get('/api/v1/archives/', ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        archiveQueries.push(params);
+        const printerId = params.get('printer_id');
+        return HttpResponse.json(printerId ? [reprinted].filter((a) => a.printer_id === Number(printerId)) : [reprinted]);
+      }),
+      http.get('/api/v1/archives/stats', () => HttpResponse.json({ total_prints: 1 })),
+      http.get('/api/v1/printers/', () => HttpResponse.json([{ id: 1, name: 'X1 Carbon', model: 'X1C' }, { id: 2, name: 'P1S', model: 'P1S' }])),
+      http.get('/api/v1/projects/', () => HttpResponse.json([])),
+      http.get('/api/v1/archives/tags', () => HttpResponse.json([])),
+      http.get('/api/v1/print-log/', () => HttpResponse.json({ items: [entry(11)], total: 1 })),
+    );
+    render(<ArchivesPage />);
+
+    await screen.findByText('Run 11');
+    // The lookup was not narrowed by the printer filter, so the row still has its archive actions.
+    expect(await screen.findByTitle('Add to Favorites')).toBeInTheDocument();
+    expect(archiveQueries.every((q) => !q.has('printer_id'))).toBe(true);
+  });
+
+  it('sends time-based collections to the server instead of fetching 500 rows', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+      ({ archiveViewMode: 'log', archiveCollection: 'this-week' } as Record<string, string>)[key] ?? null,
+    );
+    useArchives();
+    const requests: URLSearchParams[] = [];
+    server.use(
+      http.get('/api/v1/print-log/', ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return HttpResponse.json({ items: [entry(11)], total: 600 });
+      }),
+    );
+    render(<ArchivesPage />);
+
+    await screen.findByText('Run 11');
+    expect(requests[0].get('date_from')).toBeTruthy();
+    expect(requests[0].get('limit')).toBe('25');
+    expect(screen.queryByText(/Filtering the newest/)).not.toBeInTheDocument();
+  });
+
+  it('steps back a page when the last row on it disappears', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+      ({ archiveViewMode: 'log', logPageSize: '10' } as Record<string, string>)[key] ?? null,
+    );
+    useArchives();
+    let rows = Array.from({ length: 11 }, (_, i) => entry(i + 1, { archive_id: null, print_name: `Run ${String(i + 1).padStart(2, '0')}` }));
+    server.use(
+      http.get('/api/v1/print-log/', ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        const offset = Number(params.get('offset') ?? 0);
+        const limit = Number(params.get('limit') ?? 25);
+        return HttpResponse.json({ items: rows.slice(offset, offset + limit), total: rows.length });
+      }),
+      http.delete('/api/v1/print-log/:id', ({ params }) => {
+        rows = rows.filter((r) => r.id !== Number(params.id));
+        return HttpResponse.json({ status: 'deleted', id: Number(params.id) });
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findByText('Run 01');
+    const pager = screen.getByText(/^Page 1/).parentElement as HTMLElement;
+    const buttons = within(pager).getAllByRole('button');
+    await user.click(buttons[buttons.length - 1]);
+    expect(await screen.findByText('Run 11')).toBeInTheDocument();
+
+    // Delete the only row on page 2: the page must step back rather than show an empty table.
+    await user.click(screen.getAllByTitle(/Delete/i).filter((el) => el.closest('tr'))[0]);
+    const confirm = await screen.findAllByRole('button', { name: /^Delete$/ });
+    await user.click(confirm[confirm.length - 1]);
+
+    expect(await screen.findByText('Run 01')).toBeInTheDocument();
+    expect(screen.queryByText('No print log entries found')).not.toBeInTheDocument();
+  });
+
+  it('disables the favourite button on a row for someone who cannot update archives', async () => {
+    setView('log');
+    setAuthToken('test-token', 'session');
+    try {
+      server.use(
+        http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+        http.get('/api/v1/auth/me', () =>
+          HttpResponse.json({ id: 7, username: 'reader', groups: [], permissions: ['archives:read_all'] }),
+        ),
+      );
+      useArchives([archive(1, 'Benchy', { created_by_id: 8 })]);
+      server.use(http.get('/api/v1/print-log/', () => HttpResponse.json({ items: [entry(11)], total: 1 })));
+      render(<ArchivesPage />);
+
+      await screen.findByText('Run 11');
+      const favourite = await screen.findByRole('button', { name: 'Add to Favorites' });
+      await waitFor(() => expect(favourite).toBeDisabled());
+      expect(favourite).toHaveAttribute('title', expect.stringMatching(/permission/i));
+    } finally {
+      setAuthToken(null);
+    }
+  });
+
+  it('says in the Export menu that the log exports models, not individual prints', async () => {
+    setView('log');
+    useArchives();
+    server.use(http.get('/api/v1/print-log/', () => HttpResponse.json({ items: [entry(11)], total: 1 })));
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findByText('Run 11');
+    await user.click(screen.getByRole('button', { name: /^Export$/ }));
+    expect(screen.getByText(/one row per model/i)).toBeInTheDocument();
   });
 });
 

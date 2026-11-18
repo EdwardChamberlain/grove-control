@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertCircle, CalendarDays, ClipboardList, Copy, LayoutGrid, Search, Settings, SlidersHorizontal, Star, X,
@@ -8,7 +8,7 @@ import { ToolbarDropdown } from './ToolbarControls';
 import { useIsMobile } from '../hooks/useIsMobile';
 import type { HistoryFilters } from '../hooks/useHistoryFilters';
 import {
-  COLLECTION_IDS, panelBadgeCount as countPanelFilters,
+  COLLECTION_IDS, colorLabel, panelBadgeCount as countPanelFilters,
   type ActiveFilterChip, type Collection, type SortOption, type ViewMode,
 } from '../utils/historyFilters';
 
@@ -53,21 +53,50 @@ export function HistoryFilterBar({
     setHideDuplicates, setFilterTag, setFilterFileType, setFilterStatus, setFilterUser, setFilterDateFrom,
     setFilterDateTo, setCollection, setSortBy, toggleColor, clearFilter, clearAll,
   } = filters;
-  const setViewMode = onViewModeChange;
   const panelBadgeCount = countPanelFilters(chips, isMobile);
 
-  // Escape closes the panel. It listens in the capture phase and stops the event so the
-  // page's own Escape handling (clear selection) doesn't also fire.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+
+  // Move focus into the panel when it opens and back to its button when it closes.
   useEffect(() => {
-    if (!showFilters) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      setShowFilters(false);
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
+    if (showFilters) {
+      panelRef.current?.focus();
+      wasOpen.current = true;
+    } else if (wasOpen.current) {
+      toggleRef.current?.focus();
+      wasOpen.current = false;
+    }
   }, [showFilters]);
+
+  const onPanelKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      // Keep the page's own Escape handling (clear selection) from also firing. A dropdown
+      // inside the panel that used the key to close its menu has already marked it handled,
+      // in which case the panel stays open.
+      e.stopPropagation();
+      if (!e.defaultPrevented) setShowFilters(false);
+      return;
+    }
+    if (e.key === 'Tab' && isMobile && panelRef.current) {
+      // A bottom sheet is modal: keep Tab inside it.
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panelRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
 
   const primaryControls = (inPanel: boolean) => (
     <>
@@ -140,11 +169,12 @@ export function HistoryFilterBar({
         {!isMobile && primaryControls(false)}
         <div className="relative">
           <button
+            ref={toggleRef}
             type="button"
             onClick={() => setShowFilters((open) => !open)}
             aria-expanded={showFilters}
             aria-haspopup="dialog"
-            aria-label={t('archives.filters.filters')}
+            aria-label={panelBadgeCount > 0 ? t('archives.filters.filtersWithCount', { count: panelBadgeCount }) : t('archives.filters.filters')}
             title={t('archives.filters.filters')}
             className={`h-8 flex items-center gap-2 px-2 md:px-3 rounded-lg border text-sm font-medium transition-colors ${
               panelBadgeCount > 0 || showFilters
@@ -164,9 +194,13 @@ export function HistoryFilterBar({
             <>
               <div className="fixed inset-0 z-10 bg-black/50 md:bg-transparent" onClick={() => setShowFilters(false)} />
               <div
+                ref={panelRef}
                 role="dialog"
+                aria-modal={isMobile}
                 aria-label={t('archives.filters.filters')}
-                className="fixed inset-x-0 bottom-0 z-20 max-h-[82vh] overflow-y-auto rounded-t-2xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-4 shadow-2xl md:absolute md:inset-x-auto md:bottom-auto md:left-auto md:right-0 md:top-full md:mt-1 md:w-[440px] md:rounded-xl"
+                tabIndex={-1}
+                onKeyDown={onPanelKeyDown}
+                className="outline-none fixed inset-x-0 bottom-0 z-20 max-h-[82vh] overflow-y-auto rounded-t-2xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-4 shadow-2xl md:absolute md:inset-x-auto md:bottom-auto md:left-auto md:right-0 md:top-full md:mt-1 md:w-[440px] md:rounded-xl"
               >
                 <div className="mb-2 flex items-center justify-between md:hidden">
                   <span className="text-base font-semibold text-white">{t('archives.filters.filters')}</span>
@@ -243,7 +277,7 @@ export function HistoryFilterBar({
                       />
                       <button
                         type="button"
-                        onClick={onManageTags}
+                        onClick={() => { setShowFilters(false); onManageTags(); }}
                         className="h-8 w-8 flex items-center justify-center rounded-lg bg-bambu-dark border border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-green transition-colors"
                         title={t('archives.manageTags')}
                         aria-label={t('archives.manageTags')}
@@ -311,9 +345,9 @@ export function HistoryFilterBar({
                               ? 'bg-bambu-green text-white'
                               : 'bg-bambu-dark-tertiary text-bambu-gray hover:text-white'
                           }`}
-                          title={colorFilterMode === 'or' ? 'Match ANY selected color' : 'Match ALL selected colors'}
+                          title={colorFilterMode === 'or' ? t('archives.filters.matchAny') : t('archives.filters.matchAll')}
                         >
-                          {colorFilterMode.toUpperCase()}
+                          {colorFilterMode === 'or' ? t('archives.filters.colorModeOr') : t('archives.filters.colorModeAnd')}
                         </button>
                       )}
                     </div>
@@ -331,6 +365,7 @@ export function HistoryFilterBar({
                           }`}
                           style={{ backgroundColor: color }}
                           title={color}
+                          aria-label={colorLabel(color)}
                         />
                       ))}
                     </div>
@@ -360,7 +395,7 @@ export function HistoryFilterBar({
           <button
             type="button"
             className={`h-8 w-8 flex items-center justify-center ${viewMode === 'grid' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-            onClick={() => setViewMode('grid')}
+            onClick={() => onViewModeChange('grid')}
             title={t('archives.gridView')}
             aria-label={t('archives.gridView')}
           >
@@ -369,7 +404,7 @@ export function HistoryFilterBar({
           <button
             type="button"
             className={`h-8 w-8 flex items-center justify-center ${viewMode === 'calendar' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-            onClick={() => setViewMode('calendar')}
+            onClick={() => onViewModeChange('calendar')}
             title={t('archives.calendarView')}
             aria-label={t('archives.calendarView')}
           >
@@ -378,7 +413,7 @@ export function HistoryFilterBar({
           <button
             type="button"
             className={`h-8 w-8 flex items-center justify-center ${viewMode === 'log' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-            onClick={() => setViewMode('log')}
+            onClick={() => onViewModeChange('log')}
             title={t('archives.logView')}
             aria-label={t('archives.logView')}
           >

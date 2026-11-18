@@ -767,6 +767,12 @@ export default {
     resetFilters: 'Redefinir filtros',
     createdAutomatically: 'As impressões são registradas automaticamente ao terminar',
     filters: {
+      filtersWithCount: 'Filtros ({{count}} ativos)',
+      exportLogNote: 'Exporta uma linha por modelo (proprietário, última impressora e última impressão), não cada impressão.',
+      matchAny: 'Qualquer uma das cores escolhidas',
+      matchAll: 'Todas as cores escolhidas',
+      colorModeOr: 'OU',
+      colorModeAnd: 'E',
       exportNote: 'Não aplicado à exportação: {{filters}}',
       filters: 'Filtros',
       whoWhen: 'Quem e quando',

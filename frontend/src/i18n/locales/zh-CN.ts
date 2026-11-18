@@ -767,6 +767,12 @@ export default {
     resetFilters: '重置筛选',
     createdAutomatically: '打印完成后会自动记录',
     filters: {
+      filtersWithCount: '筛选（{{count}} 项生效）',
+      exportLogNote: '每个模型导出一行（所有者、最近的打印机和最后一次打印），而不是每次打印。',
+      matchAny: '匹配任一所选颜色',
+      matchAll: '匹配所有所选颜色',
+      colorModeOr: '或',
+      colorModeAnd: '且',
       exportNote: '导出时不适用：{{filters}}',
       filters: '筛选',
       whoWhen: '用户和时间',

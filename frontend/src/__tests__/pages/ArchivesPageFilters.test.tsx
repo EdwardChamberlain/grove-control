@@ -83,7 +83,7 @@ async function pickOption(user: ReturnType<typeof userEvent.setup>, trigger: str
 }
 
 async function openFilters(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Filters' }));
+  await user.click(screen.getByRole('button', { name: /^Filters/ }));
   return within(await screen.findByRole('dialog', { name: 'Filters' }));
 }
 
@@ -376,12 +376,81 @@ describe('ArchivesPage filters panel', () => {
     await openFilters(user);
     await pickOption(user, 'All Materials', 'PETG');
     expect(await screen.findByRole('button', { name: 'Remove filter: PETG' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Filters' })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: 'Filters (1 active)' })).toHaveTextContent('1');
     expect(screen.getByRole('button', { name: 'Show 1' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Remove filter: PETG' }));
     expect(await screen.findByText('2 of 2 prints')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
+  });
+
+  it('puts focus in the panel when it opens and returns it to the button when it closes', async () => {
+    useArchives([archive(1, 'Benchy')]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    await openFilters(user);
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: /^Filters/ })).toHaveFocus();
+  });
+
+  it('lets Escape close an open dropdown inside the panel before it closes the panel', async () => {
+    useArchives([archive(1, 'Benchy', { filament_type: 'PLA' })]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    await openFilters(user);
+    await user.click(screen.getByRole('button', { name: 'All Materials' }));
+    expect(await screen.findByRole('button', { name: 'PLA' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'PLA' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument();
+  });
+
+  it('closes the panel when Manage Tags opens, so Escape reaches the dialog', async () => {
+    server.use(http.get('/api/v1/archives/tags', () => HttpResponse.json([{ name: 'calibration', count: 1 }])));
+    useArchives([archive(1, 'Tagged', { tags: 'calibration' })]);
+    server.use(http.get('/api/v1/archives/tags', () => HttpResponse.json([{ name: 'calibration', count: 1 }])));
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Tagged');
+
+    const panel = await openFilters(user);
+    await user.click(panel.getByTitle('Manage Tags'));
+
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Manage Tags' })).toBeInTheDocument();
+  });
+
+  it('names colour swatches by colour and keeps Tab inside the sheet on a phone', async () => {
+    const spy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: true, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }));
+    try {
+      useArchives([archive(1, 'Red Cube', { filament_color: '#FF0000' })]);
+      const user = userEvent.setup();
+      render(<ArchivesPage />);
+      await screen.findAllByText('Red Cube');
+
+      const panel = await openFilters(user);
+      expect(screen.getByRole('dialog', { name: 'Filters' })).toHaveAttribute('aria-modal', 'true');
+      expect(panel.getByRole('button', { name: 'Red' })).toBeInTheDocument();
+
+      // Tab from the last control wraps to the first instead of leaving the sheet.
+      panel.getByRole('button', { name: /^Show/ }).focus();
+      await user.tab();
+      expect(panel.getByRole('button', { name: 'All Printers' })).toHaveFocus();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('closes the panel with Escape', async () => {
