@@ -106,6 +106,68 @@ describe('ArchivesPage export', () => {
     vi.mocked(HTMLAnchorElement.prototype.click).mockRestore();
   });
 
+  it('sends the filters it can apply and lists the ones it cannot', async () => {
+    setStorage({
+      archiveViewMode: 'grid',
+      archiveFilterPrinter: '1',
+      logFilterStatus: 'completed',
+      logFilterUser: 'ada',
+      logFilterDateFrom: '2026-01-01',
+      logFilterDateTo: '2026-12-31',
+      archiveFilterTag: 'calibration',
+    });
+    const requests: URLSearchParams[] = [];
+    useBaseHandlers([
+      http.get('/api/v1/archives/export', ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return new HttpResponse('name\nBenchy\n', { headers: { 'Content-Type': 'text/csv' } });
+      }),
+    ]);
+    // Registered after the base handlers so it takes precedence.
+    server.use(http.get('/api/v1/archives/', () => HttpResponse.json(archives.map((a) => ({ ...a, created_by_username: 'ada' })))));
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByRole('button', { name: /^Export$/ }));
+    // The tag filter depends on archive details, so the menu says it is not applied.
+    expect(screen.getByText('Not applied to export: calibration')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Export as CSV' }));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].get('printer_id')).toBe('1');
+    expect(requests[0].get('status')).toBe('completed');
+    expect(requests[0].get('created_by_username')).toBe('ada');
+    expect(requests[0].get('printed_from')).toBe(new Date('2026-01-01T00:00:00').toISOString());
+    expect(requests[0].get('printed_to')).toBe(new Date('2026-12-31T23:59:59.999').toISOString());
+  });
+
+  it('treats aborted as stopped in the grid and in the export', async () => {
+    setStorage({ archiveViewMode: 'grid', logFilterStatus: 'stopped' });
+    const requests: URLSearchParams[] = [];
+    useBaseHandlers([
+      http.get('/api/v1/archives/export', ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return new HttpResponse('name\n', { headers: { 'Content-Type': 'text/csv' } });
+      }),
+    ]);
+    server.use(
+      http.get('/api/v1/archives/', () =>
+        HttpResponse.json([{ ...archives[0], status: 'aborted' }, { ...archives[1], status: 'completed' }]),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    expect(await screen.findByText('Benchy')).toBeInTheDocument();
+    expect(screen.queryByText('Bracket')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^Export$/ }));
+    await user.click(screen.getByRole('button', { name: 'Export as CSV' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].get('status')).toBe('stopped,aborted');
+  });
+
   it('downloads a CSV export of the current view', async () => {
     const requests: URLSearchParams[] = [];
     useBaseHandlers([
@@ -308,7 +370,7 @@ describe('ArchivesPage print log filters and paging', () => {
     await user.click(screen.getByRole('button', { name: 'Filters' }));
     const dateFrom = await screen.findByLabelText('From');
     fireEvent.change(dateFrom, { target: { value: '2026-01-01' } });
-    await waitFor(() => expect(requests.at(-1)?.get('date_from')).toBe('2026-01-01'));
+    await waitFor(() => expect(requests.at(-1)?.get('date_from')).toBe(new Date('2026-01-01T00:00:00').toISOString()));
     expect(localStorage.setItem).toHaveBeenCalledWith('logFilterDateFrom', '2026-01-01');
   });
 

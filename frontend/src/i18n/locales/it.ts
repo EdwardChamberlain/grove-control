@@ -767,6 +767,7 @@ export default {
     resetFilters: 'Reimposta filtri',
     createdAutomatically: 'Le stampe vengono registrate automaticamente al termine',
     filters: {
+      exportNote: 'Non applicato all\'esportazione: {{filters}}',
       filters: 'Filtri',
       whoWhen: 'Chi e quando',
       what: 'Cosa',
@@ -1065,6 +1066,7 @@ export default {
       hasTimelapse: 'Ha timelapse',
     },
     log: {
+      truncatedNote: 'Vengono filtrate le {{limit}} stampe più recenti su {{total}}. Restringi le date o la ricerca per raggiungere le più vecchie.',
       cost: 'Costo',
       openInGrid: 'Mostra nella griglia',
       selectRow: 'Seleziona stampa',

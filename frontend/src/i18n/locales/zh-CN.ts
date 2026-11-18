@@ -767,6 +767,7 @@ export default {
     resetFilters: '重置筛选',
     createdAutomatically: '打印完成后会自动记录',
     filters: {
+      exportNote: '导出时不适用：{{filters}}',
       filters: '筛选',
       whoWhen: '用户和时间',
       what: '内容',
@@ -1065,6 +1066,7 @@ export default {
       hasTimelapse: '有延时摄影',
     },
     log: {
+      truncatedNote: '正在筛选 {{total}} 次打印中最新的 {{limit}} 次。缩小日期或搜索范围以查看更早的记录。',
       cost: '费用',
       openInGrid: '在网格中显示',
       selectRow: '选择打印',

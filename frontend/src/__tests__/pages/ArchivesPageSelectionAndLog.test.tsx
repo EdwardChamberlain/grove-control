@@ -197,7 +197,7 @@ describe('ArchivesPage print log view', () => {
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Filters' }));
     fireEvent.change(await screen.findByLabelText('To'), { target: { value: '2026-01-31' } });
-    await waitFor(() => expect(requests.some((r) => r.get('date_to') === '2026-01-31T23:59:59')).toBe(true));
+    await waitFor(() => expect(requests.some((r) => r.get('date_to') === new Date('2026-01-31T23:59:59.999').toISOString())).toBe(true));
     // Same panel as the grid view, not a log-only set.
     expect(screen.getByRole('button', { name: 'All Materials' })).toBeInTheDocument();
   });
@@ -235,6 +235,95 @@ describe('ArchivesPage print log view', () => {
     await user.click(screen.getByTitle('Show in grid'));
     expect(await screen.findAllByText('Benchy')).not.toHaveLength(0);
     expect(screen.queryByText('Log Benchy')).not.toBeInTheDocument();
+  });
+});
+
+describe('ArchivesPage selection and the Filters panel', () => {
+  it('Escape closes the Filters panel without dropping the selection', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByRole('button', { name: 'Select All' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(await screen.findByRole('dialog', { name: 'Filters' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument();
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    // With the panel closed, Escape clears the selection as before.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByText('2 selected')).not.toBeInTheDocument());
+  });
+
+  it('switching to the log drops a selection made in the grid', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByRole('button', { name: 'Select All' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByTitle('Print Log'));
+    await waitFor(() => expect(screen.queryByText('2 selected')).not.toBeInTheDocument());
+  });
+});
+
+describe('ArchivesPage print log selection and limits', () => {
+  const logEntries = [
+    { id: 11, archive_id: 1, print_name: 'Log Benchy', printer_name: 'X1 Carbon', created_by_username: 'ada', status: 'completed', duration_seconds: 3600, started_at: '2026-01-01T10:00:00Z', created_at: '2026-01-01T10:00:00Z' },
+    { id: 12, archive_id: null, print_name: 'Orphan', printer_name: 'X1 Carbon', created_by_username: 'ada', status: 'completed', duration_seconds: 60, started_at: '2026-01-02T10:00:00Z', created_at: '2026-01-02T10:00:00Z' },
+  ];
+
+  it('Select All in the log selects only the archives behind the rows on screen', async () => {
+    setView('log');
+    useArchives();
+    server.use(http.get('/api/v1/print-log/', () => HttpResponse.json({ items: logEntries, total: 2 })));
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findByText('Log Benchy');
+    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByRole('button', { name: 'Select All' }));
+
+    // Archive 2 (Bracket) has no row in the log and the orphan has no archive: only archive 1 counts.
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+  });
+
+  it('says so when archive-level filters only cover the newest 500 prints', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+      ({ archiveViewMode: 'log', archiveFilterFavorites: 'true' } as Record<string, string>)[key] ?? null,
+    );
+    useArchives([archive(1, 'Benchy', { is_favorite: true })]);
+    const requests: URLSearchParams[] = [];
+    server.use(
+      http.get('/api/v1/print-log/', ({ request }) => {
+        requests.push(new URL(request.url).searchParams);
+        return HttpResponse.json({ items: [logEntries[0]], total: 600 });
+      }),
+    );
+    render(<ArchivesPage />);
+
+    expect(await screen.findByText(/Filtering the newest 500 of 600 prints/)).toBeInTheDocument();
+    expect(requests[0].get('limit')).toBe('500');
+  });
+
+  it('shows no note when the server did the filtering', async () => {
+    setView('log');
+    useArchives();
+    server.use(http.get('/api/v1/print-log/', () => HttpResponse.json({ items: logEntries, total: 600 })));
+    render(<ArchivesPage />);
+
+    await screen.findByText('Log Benchy');
+    expect(screen.queryByText(/Filtering the newest/)).not.toBeInTheDocument();
   });
 });
 

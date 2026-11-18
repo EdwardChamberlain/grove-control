@@ -135,3 +135,62 @@ class TestStatsExport:
     async def test_bad_format(self, async_client: AsyncClient, archives):
         response = await async_client.get("/api/v1/archives/stats/export", params={"format": "pdf"})
         assert response.status_code == 400
+
+
+class TestArchiveExportMatchesHistoryFilters:
+    """The History page filters (status groups, print dates) apply to the export."""
+
+    async def test_status_accepts_a_comma_separated_list(self, async_client: AsyncClient, archives):
+        response = await async_client.get("/api/v1/archives/export", params={"status": "failed,aborted"})
+
+        _, *rows = _csv(response)
+        assert {row[1] for row in rows} == {"Clip"}
+
+    async def test_printed_range_uses_the_latest_run_not_the_upload_date(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        from backend.app.models.print_log import PrintLogEntry
+
+        printer = await printer_factory()
+        uploaded_long_ago = datetime(2025, 1, 1, 9, 0)
+        reprinted = await archive_factory(printer.id, print_name="Reprinted", created_at=uploaded_long_ago)
+        await archive_factory(printer.id, print_name="Untouched", created_at=uploaded_long_ago)
+        db_session.add(
+            PrintLogEntry(
+                archive_id=reprinted.id,
+                print_name="Reprinted",
+                status="completed",
+                started_at=datetime(2026, 3, 5, 18, 0),
+            )
+        )
+        await db_session.commit()
+
+        response = await async_client.get(
+            "/api/v1/archives/export",
+            params={"printed_from": "2026-03-05T00:00:00+00:00", "printed_to": "2026-03-05T23:59:59+00:00"},
+        )
+
+        _, *rows = _csv(response)
+        assert {row[1] for row in rows} == {"Reprinted"}
+
+    async def test_printed_range_honours_timezone_offsets(
+        self, async_client: AsyncClient, printer_factory, archive_factory
+    ):
+        printer = await printer_factory()
+        printed = datetime(2026, 6, 2, 1, 0)  # naive UTC, as stored
+        await archive_factory(printer.id, print_name="Early", started_at=printed, created_at=printed, with_run=False)
+
+        # 11:00 at UTC+10 is exactly 01:00 UTC, so the print is inside; ignoring the offset would drop it.
+        inside = await async_client.get("/api/v1/archives/export", params={"printed_from": "2026-06-02T11:00:00+10:00"})
+        # 12:00 at UTC+10 is 02:00 UTC, after the print.
+        outside = await async_client.get(
+            "/api/v1/archives/export", params={"printed_from": "2026-06-02T12:00:00+10:00"}
+        )
+
+        assert {row[1] for row in _csv(inside)[1:]} == {"Early"}
+        assert _csv(outside)[1:] == []
+
+    async def test_rejects_a_malformed_printed_bound(self, async_client: AsyncClient):
+        response = await async_client.get("/api/v1/archives/export", params={"printed_from": "yesterday"})
+
+        assert response.status_code == 400

@@ -767,6 +767,7 @@ export default {
     resetFilters: '重設篩選',
     createdAutomatically: '列印完成後會自動記錄',
     filters: {
+      exportNote: '匯出時不適用：{{filters}}',
       filters: '篩選',
       whoWhen: '使用者與時間',
       what: '內容',
@@ -1065,6 +1066,7 @@ export default {
       hasTimelapse: '有縮時攝影',
     },
     log: {
+      truncatedNote: '正在篩選 {{total}} 次列印中最新的 {{limit}} 次。縮小日期或搜尋範圍以查看更早的記錄。',
       cost: '費用',
       openInGrid: '在網格中顯示',
       selectRow: '選擇列印',

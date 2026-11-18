@@ -725,6 +725,7 @@ export default {
     resetFilters: '필터 초기화',
     createdAutomatically: '출력은 완료되면 자동으로 기록됩니다',
     filters: {
+      exportNote: '내보내기에 적용되지 않음: {{filters}}',
       filters: '필터',
       whoWhen: '사용자 및 기간',
       what: '내용',
@@ -1002,6 +1003,7 @@ export default {
       hasTimelapse: '타임랩스 있음'
     },
     log: {
+      truncatedNote: '전체 {{total}}건 중 최신 {{limit}}건을 필터링 중입니다. 더 오래된 항목은 날짜나 검색으로 좁혀 보세요.',
       cost: '비용',
       openInGrid: '그리드에서 보기',
       selectRow: '출력 선택',
