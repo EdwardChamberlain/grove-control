@@ -1159,7 +1159,6 @@ export default {
     itemCount: '{{count}} Element',
     itemCount_plural: '{{count}} Elemente',
     dragToReorder: 'Ziehen zum Neuordnen (nur Sofort)',
-    reorderHint: 'Position betrifft nur Sofort-Elemente. Geplante Elemente werden zur festgelegten Zeit ausgeführt.',
     sjf: {
       label: 'SJF',
       tooltip: 'Kürzester Auftrag zuerst — Scheduler bevorzugt kürzere Drucke',

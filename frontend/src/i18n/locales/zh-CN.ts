@@ -1159,7 +1159,6 @@ export default {
     itemCount: '{{count}} 个项目',
     itemCount_plural: '{{count}} 个项目',
     dragToReorder: '拖动以重新排序（仅限尽快）',
-    reorderHint: '位置仅影响"尽快"项目。排程项目按设定时间运行。',
     sjf: {
       label: 'SJF',
       tooltip: '最短任务优先 — 调度器优先处理较短的打印任务',

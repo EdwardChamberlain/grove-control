@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Queue: tidied the page chrome around the job cards (#347). The Printing and
+  Queued section headings are gone, so printing and queued jobs form one list.
+  Filters, the List / By Printer toggle, sort, SJF and Select All now share a
+  single toolbar line, and the layout toggle uses the same segmented control as
+  the Inventory page. The empty state sits on the page background instead of in
+  a dashed card.
 - Queue: redesigned the job card. A full-height status gutter (Waiting,
   Printing, Pending, Scheduled and so on) replaces the status pill and doubles
   as the drag handle for pending jobs, where the icon swaps for a grip on hover.

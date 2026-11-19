@@ -1159,7 +1159,6 @@ export default {
     itemCount: '{{count}} elemento',
     itemCount_plural: '{{count}} elementi',
     dragToReorder: 'Trascina per riordinare (solo ASAP)',
-    reorderHint: 'La posizione influisce solo sugli elementi ASAP. Quelli programmati partono all\'orario.',
     sjf: {
       label: 'SJF',
       tooltip: 'Lavoro più breve prima — lo scheduler dà priorità alle stampe più brevi',

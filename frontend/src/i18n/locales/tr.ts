@@ -1159,7 +1159,6 @@ export default {
     itemCount: '{{count}} öğe',
     itemCount_plural: '{{count}} öğe',
     dragToReorder: 'Yeniden sıralamak için sürükleyin (yalnızca ASAP)',
-    reorderHint: 'Konum yalnızca ASAP öğelerini etkiler. Zamanlanmış öğeler belirlenen zamanlarında çalışır.',
     sjf: {
       label: 'SJF',
       tooltip: 'En Kısa İş İlk — planlayıcı daha kısa baskılara öncelik verir',
