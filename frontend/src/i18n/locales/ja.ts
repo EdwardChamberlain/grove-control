@@ -1158,7 +1158,6 @@ export default {
     itemCount: '{{count}}件',
     itemCount_plural: '{{count}}件のアイテム',
     dragToReorder: 'ドラッグして並べ替え（ASAPのみ）',
-    reorderHint: '順番はASAPアイテムのみに影響します。スケジュール済みアイテムは設定時刻に実行されます。',
     sjf: {
       label: 'SJF',
       tooltip: '短いジョブ優先 — スケジューラーが短い印刷を優先します',

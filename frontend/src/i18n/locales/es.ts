@@ -1159,7 +1159,6 @@ export default {
     itemCount: '{{count}} elemento',
     itemCount_plural: '{{count}} elementos',
     dragToReorder: 'Arrastre para reordenar (solo elementos «lo antes posible»)',
-    reorderHint: 'La posición solo afecta a los elementos «lo antes posible». Los elementos programados se ejecutan a su hora establecida.',
     sjf: {
       label: 'SJF',
       tooltip: 'Trabajo más corto primero — el planificador prioriza las impresiones más cortas',

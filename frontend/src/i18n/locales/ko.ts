@@ -1105,7 +1105,6 @@ export default {
     itemCount: '{{count}}개 항목',
     itemCount_plural: '{{count}}개 항목',
     dragToReorder: '드래그하여 순서 변경 (즉시만)',
-    reorderHint: '위치는 즉시 항목에만 영향을 줍니다. 예약된 항목은 설정된 시간에 실행됩니다.',
     sjf: {
       label: 'SJF',
       tooltip: '최단 작업 우선 — 스케줄러가 짧은 인쇄를 우선합니다'

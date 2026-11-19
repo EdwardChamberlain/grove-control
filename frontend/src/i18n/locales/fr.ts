@@ -1159,7 +1159,6 @@ export default {
     itemCount: '{{count}} élément',
     itemCount_plural: '{{count}} éléments',
     dragToReorder: 'Glisser pour réordonner (ASAP uniquement)',
-    reorderHint: 'La position n\'affecte que les éléments ASAP.',
     sjf: {
       label: 'SJF',
       tooltip: 'Travail le plus court en premier — le planificateur priorise les impressions plus courtes',

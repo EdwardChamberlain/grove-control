@@ -1159,7 +1159,6 @@ export default {
     itemCount: '{{count}} item',
     itemCount_plural: '{{count}} itens',
     dragToReorder: 'Arraste para reordenar (apenas ASAP)',
-    reorderHint: 'A posição afeta apenas itens ASAP. Itens agendados são executados no horário definido.',
     sjf: {
       label: 'SJF',
       tooltip: 'Trabalho mais curto primeiro — o agendador prioriza impressões mais curtas',
