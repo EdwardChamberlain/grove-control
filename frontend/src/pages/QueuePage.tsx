@@ -2085,16 +2085,16 @@ export function QueuePage() {
           </>
         )}
 
-        <div className="hidden sm:block flex-1" />
-
         {activeTab === 'queue' && pendingItems.length > 0 && (
-          <>
-            <span
-              className="hidden lg:inline text-xs text-bambu-gray mr-1"
-              title={t('queue.reorderHint')}
-            >
-              {t('queue.dragToReorder')}
-            </span>
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            {selectedItems.length === 0 && (
+              <span
+                className="hidden lg:inline text-xs text-bambu-gray mr-1"
+                title={t('queue.reorderHint')}
+              >
+                {t('queue.dragToReorder')}
+              </span>
+            )}
             {selectedItems.length > 0 && (
               <>
                 <span className="text-xs sm:text-sm text-bambu-gray">
@@ -2109,7 +2109,7 @@ export function QueuePage() {
                   title={!hasAnyPermission('queue:update_own', 'queue:update_all') ? t('queue.permissions.noEditItems') : t('queue.bulkEdit.editSelected')}
                 >
                   <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">{t('queue.bulkEdit.editSelected')}</span>
+                  <span className="hidden 2xl:inline">{t('queue.bulkEdit.editSelected')}</span>
                 </Button>
                 <Button
                   variant="ghost"
@@ -2120,7 +2120,7 @@ export function QueuePage() {
                   title={!hasAnyPermission('queue:delete_own', 'queue:delete_all') ? t('queue.permissions.noCancelItems') : t('queue.bulkEdit.cancelSelected')}
                 >
                   <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">{t('queue.bulkEdit.cancelSelected')}</span>
+                  <span className="hidden 2xl:inline">{t('queue.bulkEdit.cancelSelected')}</span>
                 </Button>
               </>
             )}
@@ -2136,12 +2136,12 @@ export function QueuePage() {
               )}
               {selectedItems.length === pendingItems.length ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
             </button>
-          </>
+          </div>
         )}
 
         {activeTab === 'history' && historyItems.length > 0 && (
           <Button
-            className="w-full sm:w-auto"
+            className="w-full sm:w-auto sm:ml-auto"
             variant="secondary"
             size="sm"
             onClick={() => setShowClearHistoryConfirm(true)}
