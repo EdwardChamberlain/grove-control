@@ -2087,14 +2087,6 @@ export function QueuePage() {
 
         {activeTab === 'queue' && pendingItems.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 ml-auto">
-            {selectedItems.length === 0 && (
-              <span
-                className="hidden lg:inline text-xs text-bambu-gray mr-1"
-                title={t('queue.reorderHint')}
-              >
-                {t('queue.dragToReorder')}
-              </span>
-            )}
             {selectedItems.length > 0 && (
               <>
                 <span className="text-xs sm:text-sm text-bambu-gray">
