@@ -26,8 +26,6 @@ import {
   Trash2,
   Play,
   X,
-  CheckCircle,
-  XCircle,
   AlertCircle,
   Calendar,
   Printer,
@@ -36,7 +34,6 @@ import {
   ExternalLink,
   Power,
   Pencil,
-  RefreshCw,
   Timer,
   ListOrdered,
   Layers,
@@ -60,7 +57,7 @@ import {
   Plus,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { type TimeFormat, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
+import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
 import { Card } from '../components/Card';
@@ -101,82 +98,55 @@ type QueueTone = {
   ring: string;
 };
 
+// Coloured text uses a dark shade in the light theme and a light shade in the
+// dark theme; neutral text uses theme tokens so it follows the active theme.
 const QUEUE_TONES = {
   waiting: {
-    text: 'text-purple-300',
+    text: 'text-purple-700 dark:text-purple-300',
     gutter: 'bg-purple-400/20 border-purple-400/40',
     border: 'border-purple-400/45',
     wash: 'bg-purple-400/[0.07]',
-    footer: 'bg-purple-400/10 border-purple-400/25 text-purple-300',
+    footer: 'bg-purple-400/10 border-purple-400/25 text-purple-700 dark:text-purple-300',
     ring: 'ring-1 ring-purple-400',
   },
   active: {
-    text: 'text-green-400',
+    text: 'text-green-700 dark:text-green-400',
     gutter: 'bg-bambu-green/20 border-bambu-green/45',
     border: 'border-bambu-green/50',
     wash: 'bg-bambu-green/[0.07]',
-    footer: 'bg-bambu-green/10 border-bambu-green/30',
+    footer: 'bg-bambu-green/10 border-bambu-green/30 text-bambu-gray-light',
     ring: 'ring-1 ring-bambu-green',
   },
   neutral: {
-    text: 'text-gray-200',
+    text: 'text-white',
     gutter: 'bg-bambu-gray-light/15 border-bambu-gray-dark',
     border: 'border-bambu-gray-dark',
     wash: '',
-    footer: 'bg-bambu-dark/40 border-bambu-dark-tertiary text-bambu-gray-light',
-    ring: 'ring-1 ring-gray-300',
+    footer: 'bg-bambu-dark/40 border-bambu-dark-tertiary',
+    ring: 'ring-1 ring-bambu-gray-light',
   },
   scheduled: {
-    text: 'text-yellow-300',
+    text: 'text-yellow-700 dark:text-yellow-300',
     gutter: 'bg-yellow-400/15 border-yellow-400/40',
     border: 'border-yellow-400/40',
     wash: 'bg-yellow-400/[0.06]',
-    footer: 'bg-yellow-400/10 border-yellow-400/25 text-yellow-300',
+    footer: 'bg-yellow-400/10 border-yellow-400/25 text-yellow-700 dark:text-yellow-300',
     ring: 'ring-1 ring-yellow-400',
   },
   preheating: {
-    text: 'text-amber-300',
+    text: 'text-amber-700 dark:text-amber-300',
     gutter: 'bg-amber-400/15 border-amber-400/40',
     border: 'border-amber-400/40',
     wash: 'bg-amber-400/[0.06]',
-    footer: 'bg-amber-400/10 border-amber-400/25 text-amber-300',
+    footer: 'bg-amber-400/10 border-amber-400/25 text-amber-700 dark:text-amber-300',
     ring: 'ring-1 ring-amber-400',
-  },
-  completed: {
-    text: 'text-emerald-300',
-    gutter: 'bg-emerald-400/15 border-emerald-400/35',
-    border: 'border-emerald-400/35',
-    wash: '',
-    footer: 'bg-emerald-400/10 border-emerald-400/25 text-emerald-300',
-    ring: 'ring-1 ring-emerald-400',
-  },
-  failed: {
-    text: 'text-red-300',
-    gutter: 'bg-red-400/15 border-red-400/40',
-    border: 'border-red-400/40',
-    wash: 'bg-red-400/[0.05]',
-    footer: 'bg-red-400/10 border-red-400/25 text-red-300',
-    ring: 'ring-1 ring-red-400',
-  },
-  skipped: {
-    text: 'text-orange-300',
-    gutter: 'bg-orange-400/15 border-orange-400/35',
-    border: 'border-orange-400/35',
-    wash: '',
-    footer: 'bg-orange-400/10 border-orange-400/25 text-orange-300',
-    ring: 'ring-1 ring-orange-400',
-  },
-  cancelled: {
-    text: 'text-gray-300',
-    gutter: 'bg-gray-400/15 border-gray-400/30',
-    border: 'border-gray-400/30',
-    wash: '',
-    footer: 'bg-gray-400/10 border-gray-400/25 text-gray-300',
-    ring: 'ring-1 ring-gray-400',
   },
 } satisfies Record<string, QueueTone>;
 
-/** Status colour, icon and label for a queue card's gutter. */
+/**
+ * Status colour, icon and label for a queue card's gutter. Only statuses that
+ * render as a SortableQueueItem are handled; finished jobs use CompactHistoryRow.
+ */
 function resolveQueueTone(
   item: PrintQueueItem,
   printerState: string | null | undefined,
@@ -195,32 +165,21 @@ function resolveQueueTone(
     return { tone: QUEUE_TONES.scheduled, Icon: Pause, label: t('queue.status.paused') };
   }
   switch (status) {
-    case 'pending': return { tone: QUEUE_TONES.neutral, Icon: List, label: t('queue.status.pending') };
     case 'preheating': return { tone: QUEUE_TONES.preheating, Icon: Timer, label: t('heatSoak.status') };
     case 'dispatching': return { tone: QUEUE_TONES.waiting, Icon: Timer, label: t('queue.status.dispatching') };
     case 'printing': return { tone: QUEUE_TONES.active, Icon: Printer, label: t('queue.status.printing') };
-    case 'completed': return { tone: QUEUE_TONES.completed, Icon: CheckCircle, label: t('queue.status.completed') };
-    case 'failed': return { tone: QUEUE_TONES.failed, Icon: XCircle, label: t('queue.status.failed') };
-    case 'skipped': return { tone: QUEUE_TONES.skipped, Icon: SkipForward, label: t('queue.status.skipped') };
-    default: return { tone: QUEUE_TONES.cancelled, Icon: X, label: t('queue.status.cancelled') };
+    default: return { tone: QUEUE_TONES.neutral, Icon: List, label: t('queue.status.pending') };
   }
 }
 
-const ACTION_VARIANTS = {
-  danger: 'border-red-400/25 bg-red-400/10 text-red-400 hover:border-red-400/50 hover:bg-red-400/20',
-  success: 'border-bambu-green/30 bg-bambu-green/10 text-bambu-green hover:border-bambu-green/60 hover:bg-bambu-green/20',
-} as const;
-
-/** The single square action button at the right of a queue card. */
+/** The square cancel/stop button at the right of a queue card. */
 function QueueActionButton({
-  variant,
   onClick,
   disabled,
   title,
   label,
   children,
 }: {
-  variant: keyof typeof ACTION_VARIANTS;
   onClick: () => void;
   disabled?: boolean;
   title: string;
@@ -234,7 +193,7 @@ function QueueActionButton({
       disabled={disabled}
       title={title}
       aria-label={label}
-      className={`flex h-11 w-11 items-center justify-center rounded-[10px] border transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${ACTION_VARIANTS[variant]}`}
+      className="flex h-11 w-11 items-center justify-center rounded-[10px] border border-red-400/25 bg-red-400/10 text-red-600 transition-colors hover:border-red-400/50 hover:bg-red-400/20 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-400"
     >
       {children}
     </button>
@@ -462,11 +421,9 @@ function SortableQueueItem({
   item,
   onEdit,
   onCancel,
-  onRemove,
   onStop,
   onSkipHeatSoak,
   isSkippingHeatSoak = false,
-  onRequeue,
   onStart,
   timeFormat = 'system',
   isSelected = false,
@@ -482,11 +439,9 @@ function SortableQueueItem({
   item: PrintQueueItem;
   onEdit: () => void;
   onCancel: () => void;
-  onRemove: () => void;
   onStop: () => void;
   onSkipHeatSoak?: () => void;
   isSkippingHeatSoak?: boolean;
-  onRequeue: () => void;
   onStart: () => void;
   timeFormat?: TimeFormat;
   isSelected?: boolean;
@@ -550,7 +505,6 @@ function SortableQueueItem({
   const isPrinting = item.status === 'printing' || item.status === 'preheating';
   const isDispatching = item.status === 'dispatching';
   const isPending = item.status === 'pending';
-  const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
 
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
   useEffect(() => {
@@ -589,7 +543,7 @@ function SortableQueueItem({
           role="img"
           aria-label={t('queue.badges.requiresPrevious')}
           title={t('queue.badges.requiresPrevious')}
-          className="inline-flex shrink-0 text-orange-400"
+          className="inline-flex shrink-0 text-orange-600 dark:text-orange-400"
         >
           <Check className="w-3.5 h-3.5" />
         </span>
@@ -599,7 +553,7 @@ function SortableQueueItem({
           role="img"
           aria-label={t('queue.badges.autoPowerOff')}
           title={t('queue.badges.autoPowerOff')}
-          className="inline-flex shrink-0 text-blue-400"
+          className="inline-flex shrink-0 text-blue-600 dark:text-blue-400"
         >
           <Power className="w-3.5 h-3.5" />
         </span>
@@ -609,7 +563,7 @@ function SortableQueueItem({
           role="img"
           aria-label={t('queue.badges.gcodeInjection')}
           title={t('queue.badges.gcodeInjection')}
-          className="inline-flex shrink-0 text-emerald-400"
+          className="inline-flex shrink-0 text-emerald-600 dark:text-emerald-400"
         >
           <Code className="w-3.5 h-3.5" />
         </span>
@@ -629,17 +583,20 @@ function SortableQueueItem({
           ? t('queue.filter.unassigned')
           : (item.printer_name || `${t('common.printer')} #${item.printer_id}`);
   const printerTone =
-    item.printer_id === null && !item.target_model ? 'text-orange-400'
-    : item.target_model && !item.printer_id ? 'text-blue-400'
+    item.printer_id === null && !item.target_model ? 'text-orange-600 dark:text-orange-400'
+    : item.target_model && !item.printer_id ? 'text-blue-600 dark:text-blue-400'
     : isPrinting ? 'text-bambu-green-light'
     : 'text-bambu-gray-light';
 
+  const isFutureSchedule = !!item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
   const scheduleText = isPending && !item.manual_start
     ? (item.scheduled_time
         ? ((parseUTCDate(item.scheduled_time)?.getTime() ?? 0) - Date.now() < -60000
-            ? t?.('queue.time.overdue') ?? 'Overdue'
-            : formatRelativeTime(item.scheduled_time, timeFormat, t))
-        : t?.('queue.time.asap') ?? 'ASAP')
+            ? t('queue.time.overdue')
+            : isFutureSchedule
+              ? formatDate(item.scheduled_time)
+              : formatRelativeTime(item.scheduled_time, timeFormat, t))
+        : t('queue.time.asap'))
     : null;
 
   const heatSoakText = item.status === 'preheating'
@@ -693,23 +650,23 @@ function SortableQueueItem({
           <div
             {...attributes}
             {...listeners}
-            aria-label={t('queue.dragToReorder')}
+            aria-label={`${statusLabel}, ${t('queue.dragToReorder')}`}
             title={t('queue.dragToReorder')}
-            className="group/grip hidden sm:flex h-full w-full cursor-grab flex-col items-center justify-center gap-1.5 px-1 transition-colors hover:bg-white/10 active:cursor-grabbing touch-manipulation"
+            className="group/grip hidden sm:flex h-full w-full cursor-grab flex-col items-center justify-center gap-1.5 px-1 transition-colors hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bambu-green active:cursor-grabbing touch-manipulation dark:hover:bg-white/10"
           >
-            <StatusIcon className="h-6 w-6 group-hover/grip:hidden" />
-            <GripVertical className="hidden h-6 w-6 group-hover/grip:block" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.04em]">{statusLabel}</span>
+            <StatusIcon className="h-6 w-6 group-hover/grip:hidden group-focus-visible/grip:hidden" />
+            <GripVertical className="hidden h-6 w-6 group-hover/grip:block group-focus-visible/grip:block" />
+            <span className="break-words text-center text-[10px] font-bold uppercase tracking-[0.04em]">{statusLabel}</span>
           </div>
         ) : (
           <div className="hidden sm:flex flex-col items-center justify-center gap-1.5 px-1">
             <StatusIcon className="h-6 w-6" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.04em]">{statusLabel}</span>
+            <span className="break-words text-center text-[10px] font-bold uppercase tracking-[0.04em]">{statusLabel}</span>
           </div>
         )}
         {/* Mobile: compact gutter with the status icon and up/down reorder buttons */}
-        <div className="sm:hidden flex flex-col items-center gap-1" title={statusLabel}>
-          <StatusIcon className="h-5 w-5" aria-label={statusLabel} />
+        <div className="sm:hidden flex flex-col items-center gap-1">
+          <StatusIcon className="h-5 w-5" aria-hidden="true" />
           {isPending && (onMoveUp || onMoveDown) && (
             <>
               <button
@@ -720,7 +677,7 @@ function SortableQueueItem({
                   e.stopPropagation();
                   onMoveUp?.();
                 }}
-                className="flex h-5 w-6 items-center justify-center rounded hover:bg-white/10 disabled:opacity-25"
+                className="flex h-5 w-6 items-center justify-center rounded hover:bg-black/5 disabled:opacity-25 dark:hover:bg-white/10"
               >
                 <ChevronUp className="h-3.5 w-3.5" />
               </button>
@@ -732,7 +689,7 @@ function SortableQueueItem({
                   e.stopPropagation();
                   onMoveDown?.();
                 }}
-                className="flex h-5 w-6 items-center justify-center rounded hover:bg-white/10 disabled:opacity-25"
+                className="flex h-5 w-6 items-center justify-center rounded hover:bg-black/5 disabled:opacity-25 dark:hover:bg-white/10"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
@@ -779,7 +736,7 @@ function SortableQueueItem({
                 } ${
                   checkboxAlwaysVisible
                     ? 'opacity-100'
-                    : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100'
+                    : 'can-hover:opacity-0 group-hover:opacity-100 focus-within:opacity-100'
                 }`}
               >
                 <input
@@ -829,6 +786,7 @@ function SortableQueueItem({
             </div>
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-bambu-gray-light sm:text-[13px]">
+              <span className={`text-[10px] font-bold uppercase tracking-[0.04em] sm:hidden ${tone.text}`}>{statusLabel}</span>
               <span className={`flex items-center gap-1.5 ${printerTone}`}>
                 <Printer className="h-3.5 w-3.5" />
                 <span className="max-w-[160px] truncate sm:max-w-none">{printerLabel}</span>
@@ -883,7 +841,6 @@ function SortableQueueItem({
           <div className="flex flex-none items-center gap-2" data-no-card-click>
             {(isDispatching || isPrinting) && (
               <QueueActionButton
-                variant="danger"
                 onClick={onStop}
                 disabled={!canUpdate}
                 title={stopTitle}
@@ -894,7 +851,6 @@ function SortableQueueItem({
             )}
             {isPending && (
               <QueueActionButton
-                variant="danger"
                 onClick={onCancel}
                 disabled={!canDelete}
                 title={!canDelete ? t('queue.permissions.noCancel') : t('common.cancel')}
@@ -902,28 +858,6 @@ function SortableQueueItem({
               >
                 <X className="h-[18px] w-[18px]" />
               </QueueActionButton>
-            )}
-            {isHistory && (
-              <>
-                <QueueActionButton
-                  variant="success"
-                  onClick={onRequeue}
-                  disabled={!hasPermission('queue:create')}
-                  title={!hasPermission('queue:create') ? t('queue.permissions.noRequeue') : t('queue.actions.requeue')}
-                  label={t('queue.actions.requeue')}
-                >
-                  <RefreshCw className="h-[18px] w-[18px]" />
-                </QueueActionButton>
-                <QueueActionButton
-                  variant="danger"
-                  onClick={onRemove}
-                  disabled={!canDelete}
-                  title={!canDelete ? t('queue.permissions.noRemove') : t('common.remove')}
-                  label={t('common.remove')}
-                >
-                  <Trash2 className="h-[18px] w-[18px]" />
-                </QueueActionButton>
-              </>
             )}
           </div>
         </div>
@@ -951,7 +885,7 @@ function SortableQueueItem({
                 onClick={onStart}
                 disabled={!canUpdate}
                 title={!canUpdate ? t('queue.permissions.noStartPrint') : t('queue.actions.startPrint')}
-                className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-bambu-green bg-bambu-green/15 px-3 text-xs font-semibold text-green-400 transition-colors hover:bg-bambu-green/25 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-bambu-green bg-bambu-green/15 px-3 text-xs font-semibold text-green-700 dark:text-green-400 transition-colors hover:bg-bambu-green/25 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Play className="h-3 w-3 fill-current" />
                 {t('queue.startNow')}
@@ -963,7 +897,7 @@ function SortableQueueItem({
         {/* Filament-short flag from the dispatch pre-flight (#1496). */}
         {item.filament_short && item.status === 'pending' && (
           <div
-            className="flex items-start gap-2 border-t border-yellow-400/25 bg-yellow-400/10 px-4 py-1.5 text-xs text-yellow-300"
+            className="flex items-start gap-2 border-t border-yellow-400/25 bg-yellow-400/10 px-4 py-1.5 text-xs text-yellow-700 dark:text-yellow-300"
             title={t('queue.filamentShort.rowTooltip')}
           >
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
@@ -973,7 +907,7 @@ function SortableQueueItem({
 
         {/* Progress for printing items */}
         {printingProgress && (
-          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2 text-xs text-bambu-gray-light ${tone.footer}`}>
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2 text-xs ${tone.footer}`}>
             <div className="h-1.5 min-w-[120px] flex-1 rounded-full bg-bambu-dark-tertiary">
               <div
                 className="h-1.5 rounded-full bg-bambu-green-light transition-all"
@@ -984,7 +918,7 @@ function SortableQueueItem({
             {printingProgress.remaining != null && printingProgress.remaining > 0 && (
               <>
                 <span>{formatDuration(printingProgress.remaining * 60)}</span>
-                <span className="font-medium text-green-400" title={t('printers.estimatedCompletion')}>
+                <span className="font-medium text-green-700 dark:text-green-400" title={t('printers.estimatedCompletion')}>
                   ETA {formatETA(printingProgress.remaining, timeFormat, t)}
                 </span>
               </>
@@ -1009,7 +943,7 @@ function SortableQueueItem({
                 disabled={isSkippingHeatSoak || !canUpdate}
                 aria-label={t('heatSoak.skip')}
                 title={!canUpdate ? t('queue.permissions.noStopPrint') : t('heatSoak.skip')}
-                className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-400/15 px-2.5 text-amber-200 transition-colors hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-400/15 px-2.5 text-amber-800 dark:text-amber-200 transition-colors hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <SkipForward className="h-3.5 w-3.5" />
               </button>
@@ -1019,7 +953,7 @@ function SortableQueueItem({
 
         {/* Error message */}
         {item.error_message && (
-          <div className="flex items-center gap-2 border-t border-red-400/25 bg-red-400/10 px-4 py-1.5 text-xs text-red-400">
+          <div className="flex items-center gap-2 border-t border-red-400/25 bg-red-400/10 px-4 py-1.5 text-xs text-red-600 dark:text-red-400">
             <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
             {item.error_message}
           </div>
@@ -1067,9 +1001,7 @@ function QueueRowRender({
       item={row.item}
       onEdit={() => setEditItem(row.item)}
       onCancel={() => setConfirmAction({ type: 'cancel', item: row.item })}
-      onRemove={() => {}}
       onStop={() => {}}
-      onRequeue={() => {}}
       onStart={() => startMutation.mutate({ id: row.item.id })}
       timeFormat={timeFormat}
       isSelected={selectedItems.includes(row.item.id)}
@@ -2197,11 +2129,9 @@ export function QueuePage() {
                     item={item}
                     onEdit={() => {}}
                     onCancel={() => {}}
-                    onRemove={() => {}}
                     onStop={() => setConfirmAction({ type: 'stop', item })}
                     onSkipHeatSoak={() => skipHeatSoakMutation.mutate(item.id)}
                     isSkippingHeatSoak={skipHeatSoakMutation.isPending}
-                    onRequeue={() => {}}
                     onStart={() => {}}
                     timeFormat={timeFormat}
                     hasPermission={hasPermission}

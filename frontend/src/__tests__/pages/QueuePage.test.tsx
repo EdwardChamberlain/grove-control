@@ -10,6 +10,7 @@ import { QueuePage } from '../../pages/QueuePage';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { setAuthToken } from '../../api/client';
+import { formatDate } from '../../utils/date';
 
 // Mock queue data
 const mockQueueItems = [
@@ -237,7 +238,7 @@ describe('QueuePage', () => {
       await waitFor(() => {
         expect(screen.getByText('Active jobs')).toBeInTheDocument();
         expect(screen.getByText('Awaiting printer acknowledgement')).toBeInTheDocument();
-        expect(screen.getByText('Dispatching')).toBeInTheDocument();
+        expect(screen.getAllByText('Dispatching').length).toBeGreaterThan(0);
         expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/1\s*Printing/);
         expect(screen.getByTestId('queue-stat-queued')).toHaveTextContent(/2\s*Queued/);
         expect(screen.getAllByTitle('Stop Print')).toHaveLength(2);
@@ -268,7 +269,7 @@ describe('QueuePage', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Warming chamber')).toBeInTheDocument();
-        expect(screen.getByText('Preheating')).toBeInTheDocument();
+        expect(screen.getAllByText('Preheating').length).toBeGreaterThan(0);
         expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/2\s*Printing/);
         expect(screen.getByTestId('queue-stat-queued')).toHaveTextContent(/1\s*Queued/);
         expect(screen.getAllByTitle('Stop Print')).toHaveLength(2);
@@ -359,7 +360,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Scheduled')).toBeInTheDocument();
+        expect(screen.getAllByText('Scheduled').length).toBeGreaterThan(0);
         expect(screen.getByText(/^Jan 1, 2099/)).toBeInTheDocument();
       });
     });
@@ -495,7 +496,8 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       const card = (await screen.findByRole('button', { name: 'Test Print 1' })).closest('.group') as HTMLElement;
-      expect(within(card).getByLabelText('Drag to reorder (ASAP only)')).toBeInTheDocument();
+      // The accessible name keeps the job's status as well as the drag hint.
+      expect(within(card).getByLabelText('Pending, Drag to reorder (ASAP only)')).toBeInTheDocument();
     });
 
     it('does not give printing jobs a drag handle or checkbox', async () => {
@@ -863,6 +865,223 @@ describe('QueuePage', () => {
     });
   });
 
+  describe('card states and details', () => {
+    it('shows a paused print as Paused', async () => {
+      server.use(
+        http.get('/api/v1/printers/1/status', () => HttpResponse.json({
+          id: 1, name: 'Test Printer', connected: true, state: 'PAUSE', progress: 40,
+          layer_num: 10, total_layers: 100, remaining_time: 30,
+        })),
+      );
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Paused').length).toBeGreaterThan(0);
+      });
+    });
+
+    it('names the plate of a multi-plate job', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], plate_id: 2, archive_name: 'Multi-plate Print' },
+        ])),
+        http.get('/api/v1/archives/:id/plates', () => HttpResponse.json({
+          archive_id: 1, filename: 'multi.3mf', is_multi_plate: true,
+          plates: [{ index: 2, name: 'Plate Two' }],
+        })),
+      );
+      render(<QueuePage />);
+
+      expect(await screen.findByText(/Multi-plate Print • Plate Two/)).toBeInTheDocument();
+    });
+
+    it('lists every candidate model for a cross-model job', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          {
+            ...mockQueueItems[0],
+            printer_id: null,
+            printer_name: null,
+            target_model: 'X1C',
+            variants: [{ target_model: 'X1C' }, { target_model: 'P1S' }],
+          },
+        ])),
+      );
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Any X1C / P1S')).toBeInTheDocument();
+    });
+
+    it('shows the exact start time for a job scheduled within the next day', async () => {
+      const soon = new Date(Date.now() + 5 * 3600_000).toISOString();
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], scheduled_time: soon },
+        ])),
+      );
+      render(<QueuePage />);
+
+      expect(await screen.findByText(formatDate(soon))).toBeInTheDocument();
+      expect(screen.queryByText(/^in \d+h/)).not.toBeInTheDocument();
+    });
+
+    it('shows the status as visible text on small screens', async () => {
+      render(<QueuePage />);
+
+      const card = (await screen.findByRole('button', { name: 'Test Print 1' })).closest('.group') as HTMLElement;
+      const labels = within(card).getAllByText('Pending');
+      expect(labels.some((el) => el.className.includes('sm:hidden'))).toBe(true);
+    });
+
+    it('does not open the editor when the status gutter or the archive link is clicked', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      const card = (await screen.findByRole('button', { name: 'Test Print 1' })).closest('.group') as HTMLElement;
+      await user.click(within(card).getByLabelText(/Drag to reorder/));
+      await user.click(within(card).getByTitle('View archive'));
+
+      expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('card details (branch coverage)', () => {
+    const only = (item: Record<string, unknown>) =>
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([{ ...mockQueueItems[0], ...item }])));
+
+    it('describes a model-targeted job with its location and filament types', async () => {
+      only({ printer_id: null, printer_name: null, target_model: 'X1C', target_location: 'Shelf A', required_filament_types: ['PLA', 'PETG'] });
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Any X1C @ Shelf A (PLA, PETG)')).toBeInTheDocument();
+    });
+
+    it('describes a cross-model job with its location', async () => {
+      only({ printer_id: null, printer_name: null, target_location: 'Shelf B', variants: [{ target_model: 'X1C' }, { target_model: 'P1S' }] });
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Any X1C / P1S @ Shelf B')).toBeInTheDocument();
+    });
+
+    it('falls back to the printer id when the printer has no name', async () => {
+      only({ printer_name: null });
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Printer #1')).toBeInTheDocument();
+    });
+
+    it('marks a pending job whose start time has passed as overdue', async () => {
+      only({ scheduled_time: new Date(Date.now() - 10 * 60_000).toISOString() });
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Overdue')).toBeInTheDocument();
+    });
+
+    it('shows a relative time for a job that was due a moment ago', async () => {
+      only({ scheduled_time: new Date(Date.now() - 20_000).toISOString() });
+      render(<QueuePage />);
+
+      await screen.findByRole('button', { name: 'Test Print 1' });
+      expect(screen.queryByText('Overdue')).not.toBeInTheDocument();
+      expect(screen.queryByText('ASAP')).not.toBeInTheDocument();
+    });
+
+    it('says ASAP for a pending job with no scheduled time', async () => {
+      render(<QueuePage />);
+
+      expect(await screen.findByText('ASAP')).toBeInTheDocument();
+    });
+
+    it('waits for heater confirmation when the heat soak has not started', async () => {
+      only({ status: 'preheating', chamber_heat_soak: true, heat_soak_minutes: 10, preheat_started_at: null });
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Waiting for heater confirmation')).toBeInTheDocument();
+    });
+
+    it('shows 0% for a running print that has not progressed', async () => {
+      server.use(
+        http.get('/api/v1/printers/1/status', () => HttpResponse.json({
+          id: 1, name: 'Test Printer', connected: true, state: 'RUNNING', progress: 0,
+          layer_num: 0, total_layers: 0, remaining_time: 0,
+        })),
+      );
+      render(<QueuePage />);
+
+      expect(await screen.findByText('0%')).toBeInTheDocument();
+    });
+
+    it('uses the library file thumbnail, plate thumbnail and link for library jobs', async () => {
+      server.use(
+        http.get('/api/v1/library/files/:id/plates', () => HttpResponse.json({ plates: [], is_multi_plate: false })),
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], id: 11, archive_id: null, archive_thumbnail: null, library_file_id: 7, library_file_thumbnail: 'x', plate_id: null, archive_name: 'Library Job' },
+          { ...mockQueueItems[0], id: 12, archive_id: null, archive_thumbnail: null, library_file_id: 8, library_file_thumbnail: 'x', plate_id: 2, archive_name: 'Library Plate Job' },
+        ])),
+      );
+      const { container } = render(<QueuePage />);
+
+      await screen.findByText('Library Job');
+      const sources = Array.from(container.querySelectorAll('img')).map((img) => img.getAttribute('src') ?? '');
+      expect(sources.some((src) => src.includes('/library/files/7/thumbnail'))).toBe(true);
+      expect(sources.some((src) => src.includes('/library/files/8/') && src.includes('plate'))).toBe(true);
+      const links = screen.getAllByTitle('View in File Manager');
+      expect(links[0]).toHaveAttribute('href', expect.stringContaining('/library?highlight=7'));
+    });
+
+    it('shows no file link and a placeholder thumbnail for a job with neither archive nor library file', async () => {
+      only({ archive_id: null, archive_thumbnail: null, library_file_id: null, library_file_thumbnail: null, archive_name: 'Detached Job' });
+      render(<QueuePage />);
+
+      await screen.findByText('Detached Job');
+      expect(screen.queryByTitle('View archive')).not.toBeInTheDocument();
+      expect(screen.queryByTitle('View in File Manager')).not.toBeInTheDocument();
+    });
+
+    it('shows who added the job', async () => {
+      only({ created_by_username: 'Ed' });
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Ed')).toBeInTheDocument();
+    });
+
+    it('shows an error message on the card', async () => {
+      only({ error_message: 'Printer went offline' });
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Printer went offline')).toBeInTheDocument();
+    });
+
+    it('disables skipping a heat soak without update permission', async () => {
+      setAuthToken('read-only-token');
+      server.use(
+        http.get('*/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({ id: 9, username: 'viewer', is_admin: false, permissions: ['queue:read'] }),
+        ),
+      );
+      only({ status: 'preheating', chamber_heat_soak: true, heat_soak_minutes: 10, preheat_started_at: new Date().toISOString() });
+      render(<QueuePage />);
+
+      const skip = await screen.findByRole('button', { name: 'Skip heat soak' });
+      expect(skip).toBeDisabled();
+      expect(skip).toHaveAttribute('title', 'You do not have permission to stop prints');
+    });
+
+    it('dims a card while it is being dragged with the keyboard', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      const card = (await screen.findByRole('button', { name: 'Test Print 1' })).closest('.group') as HTMLElement;
+      const handle = within(card).getByLabelText(/Drag to reorder/);
+      handle.focus();
+      await user.keyboard(' ');
+
+      await waitFor(() => expect(card.className).toContain('opacity-50'));
+      await user.keyboard('{Escape}');
+    });
+  });
+
   describe('selection checkbox on the thumbnail', () => {
     it('renders an accessible checkbox for pending jobs that reveals on hover', async () => {
       render(<QueuePage />);
@@ -870,8 +1089,10 @@ describe('QueuePage', () => {
       const checkbox = await screen.findByRole('checkbox', { name: 'Select Test Print 1' });
       expect(checkbox).not.toBeChecked();
       const label = checkbox.closest('label') as HTMLElement;
-      expect(label.className).toContain('sm:opacity-0');
-      expect(label.className).toContain('sm:group-hover:opacity-100');
+      // Keyed on hover capability, so touch screens of any width keep it visible.
+      expect(label.className).toContain('can-hover:opacity-0');
+      expect(label.className).toContain('group-hover:opacity-100');
+      expect(label.className).not.toContain('sm:opacity-0');
     });
 
     it('selects a job from the checkbox and keeps every checkbox visible while something is selected', async () => {
@@ -889,7 +1110,7 @@ describe('QueuePage', () => {
       expect(screen.getByRole('checkbox', { name: 'Select Test Print 1' })).toBeChecked();
       expect(screen.getByText('1 selected')).toBeInTheDocument();
       const other = screen.getByRole('checkbox', { name: 'Select Second Pending' });
-      expect((other.closest('label') as HTMLElement).className).not.toContain('sm:opacity-0');
+      expect((other.closest('label') as HTMLElement).className).not.toContain('can-hover:opacity-0');
       expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
     });
   });
@@ -912,6 +1133,12 @@ describe('QueuePage', () => {
       expect(name.closest('button')).toBeNull();
       await user.click(name);
       expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
+
+      // Without queue:reorder there is no drag handle, and without
+      // queue:delete the cancel button is disabled.
+      const card = name.closest('.group') as HTMLElement;
+      expect(within(card).queryByLabelText(/Drag to reorder/)).not.toBeInTheDocument();
+      expect(within(card).getByRole('button', { name: 'Cancel' })).toBeDisabled();
     });
   });
 });
