@@ -110,4 +110,34 @@ describe('useHistoryFilters', () => {
     expect(result.current.hasActive).toBe(false);
     expect(result.current.values.filterColors.size).toBe(0);
   });
+
+  it('drops saved dates that are not real, so a stale value cannot break the page', () => {
+    stored({ logFilterDateFrom: '20255-01-01', logFilterDateTo: '2026-13-45' });
+    const { result } = renderHook(() => useHistoryFilters());
+    expect(result.current.values.filterDateFrom).toBe('');
+    expect(result.current.values.filterDateTo).toBe('');
+    expect(result.current.hasActive).toBe(false);
+  });
+
+  it('keeps saved dates that are real', () => {
+    stored({ logFilterDateFrom: '2026-01-01', logFilterDateTo: '2026-01-31' });
+    const { result } = renderHook(() => useHistoryFilters());
+    expect(result.current.values.filterDateFrom).toBe('2026-01-01');
+    expect(result.current.values.filterDateTo).toBe('2026-01-31');
+  });
+
+  it('ignores a typed date that is not real, but accepts a real one or a cleared field', () => {
+    const { result } = renderHook(() => useHistoryFilters());
+    act(() => result.current.setFilterDateFrom('2026-03-01'));
+    act(() => result.current.setFilterDateTo('2026-03-31'));
+
+    // A fifth digit in the year (Chrome allows it) must not replace a good value.
+    act(() => result.current.setFilterDateFrom('20265-03-01'));
+    act(() => result.current.setFilterDateTo('2026-02-31x'));
+    expect(result.current.values.filterDateFrom).toBe('2026-03-01');
+    expect(result.current.values.filterDateTo).toBe('2026-03-31');
+
+    act(() => result.current.setFilterDateFrom(''));
+    expect(result.current.values.filterDateFrom).toBe('');
+  });
 });

@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next';
 import type { Archive, PrintLogEntry } from '../api/client';
 import { getColorName } from './colors';
-import { getLastPrintedAt, localDayBoundISO, parseUTCDate } from './date';
+import { getLastPrintedAt, localDayBound, parseUTCDate } from './date';
 
 export type ViewMode = 'grid' | 'calendar' | 'log';
 export type SortOption = 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc';
@@ -144,11 +144,11 @@ export function getServerFilterBounds(f: HistoryFilterValues, now: Date = new Da
     : f.collection === 'this-week' ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
     : f.collection === 'this-month' ? new Date(now.getFullYear(), now.getMonth(), 1)
     : null;
-  const dateFrom = f.filterDateFrom ? new Date(localDayBoundISO(f.filterDateFrom, 'start')) : null;
+  const dateFrom = localDayBound(f.filterDateFrom, 'start');
   const from = [collectionFrom, dateFrom]
     .filter((d): d is Date => d !== null)
     .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
-  const to = f.filterDateTo ? new Date(localDayBoundISO(f.filterDateTo, 'end')) : null;
+  const to = localDayBound(f.filterDateTo, 'end');
   return { statuses, from, to };
 }
 
@@ -168,8 +168,8 @@ export function getExportParams(f: HistoryFilterValues, now: Date = new Date()) 
 /** Grid/calendar rows: filter, then sort. Print dates are parsed once per archive, not per comparison. */
 export function filterAndSortArchives(archives: Archive[], f: HistoryFilterValues, sortBy: SortOption): Archive[] {
   const query = f.search.toLowerCase();
-  const from = f.filterDateFrom ? new Date(`${f.filterDateFrom}T00:00:00`).getTime() : null;
-  const to = f.filterDateTo ? new Date(`${f.filterDateTo}T23:59:59.999`).getTime() : null;
+  const from = localDayBound(f.filterDateFrom, 'start')?.getTime() ?? null;
+  const to = localDayBound(f.filterDateTo, 'end')?.getTime() ?? null;
 
   const kept: { archive: Archive; printedAt: number }[] = [];
   for (const a of archives) {

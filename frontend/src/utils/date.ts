@@ -488,10 +488,14 @@ export function getLastPrintedAt(a: {
 }
 
 /**
- * Start or end of a local calendar day (`YYYY-MM-DD` from a date input) as a UTC
- * ISO instant, so the server compares against stored UTC timestamps the same
- * way the browser does for rows it already holds.
+ * Start or end of a local calendar day (`YYYY-MM-DD`, as a date input or saved
+ * filter gives it), or null when the text is not a real date. Date inputs accept
+ * years far beyond 9999, and a saved value can be stale or hand-edited, so callers
+ * must treat "no valid date" as "no bound" rather than let an invalid Date throw
+ * later (`toISOString` throws on one).
  */
-export function localDayBoundISO(ymd: string, edge: 'start' | 'end'): string {
-  return new Date(edge === 'start' ? `${ymd}T00:00:00` : `${ymd}T23:59:59.999`).toISOString();
+export function localDayBound(ymd: string, edge: 'start' | 'end'): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const date = new Date(edge === 'start' ? `${ymd}T00:00:00` : `${ymd}T23:59:59.999`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }

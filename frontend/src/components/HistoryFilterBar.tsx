@@ -227,6 +227,7 @@ export function HistoryFilterBar({
                   <input
                     id="history-date-from"
                     type="date"
+                    max="9999-12-31"
                     title={t('archives.log.dateFrom')}
                     className="h-8 min-w-[9rem] flex-1 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
                     value={filterDateFrom}
@@ -236,6 +237,7 @@ export function HistoryFilterBar({
                   <input
                     id="history-date-to"
                     type="date"
+                    max="9999-12-31"
                     title={t('archives.log.dateTo')}
                     className="h-8 min-w-[9rem] flex-1 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
                     value={filterDateTo}
