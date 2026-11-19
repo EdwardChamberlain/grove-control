@@ -462,6 +462,10 @@ describe('QueuePage', () => {
       await user.click(byPrinter);
       expect(byPrinter).toHaveAttribute('aria-pressed', 'true');
       expect(list).toHaveAttribute('aria-pressed', 'false');
+
+      await user.click(list);
+      expect(list).toHaveAttribute('aria-pressed', 'true');
+      expect(byPrinter).toHaveAttribute('aria-pressed', 'false');
     });
   });
 
@@ -1192,6 +1196,29 @@ describe('QueuePage', () => {
       const card = name.closest('.group') as HTMLElement;
       expect(within(card).queryByLabelText(/Drag to reorder/)).not.toBeInTheDocument();
       expect(within(card).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    });
+
+    it('disables the toolbar bulk actions without update and delete permission', async () => {
+      setAuthToken('read-only-token');
+      server.use(
+        http.get('*/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({ id: 9, username: 'viewer', is_admin: false, permissions: ['queue:read'] }),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
+
+      const edit = screen.getByRole('button', { name: 'Edit Selected' });
+      const cancel = screen.getByRole('button', { name: 'Cancel Selected' });
+      expect(edit).toBeDisabled();
+      expect(edit).toHaveAttribute('title', expect.stringMatching(/permission/i));
+      expect(cancel).toBeDisabled();
+      expect(cancel).toHaveAttribute('title', expect.stringMatching(/permission/i));
     });
   });
 });
