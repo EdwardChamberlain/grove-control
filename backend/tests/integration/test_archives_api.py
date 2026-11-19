@@ -755,6 +755,83 @@ class TestPrintLogEntryDelete:
         assert set(survivors) == {a.id, c.id}
 
 
+class TestPrintLogDateFilter:
+    """``GET /print-log/`` filters and orders by print start, not row creation."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_date_filter_and_order_use_started_at(self, async_client: AsyncClient, db_session):
+        from datetime import datetime
+
+        from backend.app.models.print_log import PrintLogEntry
+
+        old = PrintLogEntry(print_name="old", status="completed", started_at=datetime(2026, 1, 1, 10, 0))
+        new = PrintLogEntry(print_name="new", status="completed", started_at=datetime(2026, 3, 5, 18, 30))
+        db_session.add_all([old, new])
+        await db_session.commit()
+
+        body = (await async_client.get("/api/v1/print-log/")).json()
+        names = [i["print_name"] for i in body["items"]]
+        assert names.index("new") < names.index("old")
+
+        body = (
+            await async_client.get(
+                "/api/v1/print-log/",
+                params={"date_from": "2026-03-01T00:00:00", "date_to": "2026-03-05T23:59:59"},
+            )
+        ).json()
+        assert [i["print_name"] for i in body["items"]] == ["new"]
+
+
+class TestPrintLogStatusAndTimezone:
+    """Status accepts a list, and bounds may carry a timezone."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_status_list_and_timezone_aware_bounds(self, async_client: AsyncClient, db_session):
+        from datetime import datetime
+
+        from backend.app.models.print_log import PrintLogEntry
+
+        db_session.add_all(
+            [
+                PrintLogEntry(print_name="stop", status="stopped", started_at=datetime(2026, 6, 2, 1, 0)),
+                PrintLogEntry(print_name="abort", status="aborted", started_at=datetime(2026, 6, 2, 2, 0)),
+                PrintLogEntry(print_name="done", status="completed", started_at=datetime(2026, 6, 2, 3, 0)),
+            ]
+        )
+        await db_session.commit()
+
+        body = (await async_client.get("/api/v1/print-log/", params={"status": "stopped,aborted"})).json()
+        assert {i["print_name"] for i in body["items"]} == {"stop", "abort"}
+
+        # 00:00 at UTC+10 on 2 June is 14:00 UTC on 1 June: all three prints are inside.
+        body = (await async_client.get("/api/v1/print-log/", params={"date_from": "2026-06-02T00:00:00+10:00"})).json()
+        assert {i["print_name"] for i in body["items"]} == {"stop", "abort", "done"}
+        # The same wall-clock time in UTC starts at 00:00 UTC: still all three; 02:30 UTC drops two.
+        body = (await async_client.get("/api/v1/print-log/", params={"date_from": "2026-06-02T02:30:00+00:00"})).json()
+        assert {i["print_name"] for i in body["items"]} == {"done"}
+
+
+class TestPrintLogCostFields:
+    """``GET /print-log/`` returns the per-run cost and energy figures."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_get_surfaces_cost_and_energy(self, async_client: AsyncClient, db_session):
+        from backend.app.models.print_log import PrintLogEntry
+
+        db_session.add(
+            PrintLogEntry(print_name="costed", status="completed", cost=1.25, energy_kwh=0.4, energy_cost=0.1)
+        )
+        await db_session.commit()
+
+        item = next(
+            i for i in (await async_client.get("/api/v1/print-log/")).json()["items"] if i["print_name"] == "costed"
+        )
+        assert (item["cost"], item["energy_kwh"], item["energy_cost"]) == (1.25, 0.4, 0.1)
+
+
 class TestPrintLogEntryUpdate:
     """Tests for ``PATCH /print-log/{entry_id}`` (#1687 part 4).
 

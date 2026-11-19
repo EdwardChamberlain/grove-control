@@ -1,6 +1,6 @@
 /**
  * ArchivesPage: attaching a source 3MF, an F3D file or a timelapse to an
- * archive from its actions menu, in both grid and list layouts.
+ * archive from its actions menu, in the grid layout.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -68,7 +68,7 @@ function useUploads(options: { fail?: string } = {}) {
   return uploads;
 }
 
-const layouts = ['grid', 'list'] as const;
+const layouts = ['grid'] as const;
 
 describe.each(layouts)('archive file uploads (%s layout)', (layout) => {
   beforeEach(() => {

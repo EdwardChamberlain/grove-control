@@ -17,6 +17,7 @@ from backend.app.core.permissions import Permission
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.user import User
 from backend.app.schemas.print_log import PrintLogEntrySchema, PrintLogEntryUpdate, PrintLogResponse
+from backend.app.utils.local_time import to_naive_utc
 
 logger = logging.getLogger(__name__)
 
@@ -55,25 +56,33 @@ async def get_print_log(
     if created_by_username:
         query = query.where(PrintLogEntry.created_by_username == created_by_username)
         count_query = count_query.where(PrintLogEntry.created_by_username == created_by_username)
-    if status:
-        query = query.where(PrintLogEntry.status == status)
-        count_query = count_query.where(PrintLogEntry.status == status)
+    # ``status`` may be a comma-separated list (e.g. "stopped,aborted").
+    statuses = [part.strip() for part in status.split(",") if part.strip()] if status else []
+    if statuses:
+        query = query.where(PrintLogEntry.status.in_(statuses))
+        count_query = count_query.where(PrintLogEntry.status.in_(statuses))
     if search:
         query = query.where(PrintLogEntry.print_name.ilike(f"%{search}%"))
         count_query = count_query.where(PrintLogEntry.print_name.ilike(f"%{search}%"))
+    # Filter and order by when the print happened (the date shown in the UI),
+    # falling back to when the entry was written for rows without a start time.
+    print_date = func.coalesce(PrintLogEntry.started_at, PrintLogEntry.created_at)
+    # Timestamps are stored as naive UTC; accept timezone-aware bounds too.
+    date_from = to_naive_utc(date_from)
+    date_to = to_naive_utc(date_to)
     if date_from:
-        query = query.where(PrintLogEntry.created_at >= date_from)
-        count_query = count_query.where(PrintLogEntry.created_at >= date_from)
+        query = query.where(print_date >= date_from)
+        count_query = count_query.where(print_date >= date_from)
     if date_to:
-        query = query.where(PrintLogEntry.created_at <= date_to)
-        count_query = count_query.where(PrintLogEntry.created_at <= date_to)
+        query = query.where(print_date <= date_to)
+        count_query = count_query.where(print_date <= date_to)
 
     # Get total count
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
     # Get paginated results
-    query = query.order_by(PrintLogEntry.created_at.desc()).offset(offset).limit(limit)
+    query = query.order_by(print_date.desc(), PrintLogEntry.id.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     entries = result.scalars().all()
 
@@ -92,6 +101,9 @@ async def get_print_log(
                 filament_type=e.filament_type,
                 filament_color=e.filament_color,
                 filament_used_grams=e.filament_used_grams,
+                cost=e.cost,
+                energy_kwh=e.energy_kwh,
+                energy_cost=e.energy_cost,
                 # failure_reason was silently dropped by the GET serialiser
                 # before #1687 part 4 — without it the Print Log table couldn't
                 # surface what the Failure Analysis widget already groups by.

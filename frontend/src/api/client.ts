@@ -4389,6 +4389,10 @@ export const api = {
     dateFrom?: string;
     dateTo?: string;
     search?: string;
+    username?: string;
+    /** Last-printed bounds as ISO instants (may carry a timezone offset). */
+    printedFrom?: string;
+    printedTo?: string;
   }): Promise<{ blob: Blob; filename: string }> => {
     const params = new URLSearchParams();
     if (options?.format) params.set('format', options.format);
@@ -4399,6 +4403,9 @@ export const api = {
     if (options?.dateFrom) params.set('date_from', options.dateFrom);
     if (options?.dateTo) params.set('date_to', options.dateTo);
     if (options?.search) params.set('search', options.search);
+    if (options?.username) params.set('created_by_username', options.username);
+    if (options?.printedFrom) params.set('printed_from', options.printedFrom);
+    if (options?.printedTo) params.set('printed_to', options.printedTo);
 
     const headers: Record<string, string> = {};
     if (authToken) {

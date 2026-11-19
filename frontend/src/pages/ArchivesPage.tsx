@@ -1,5 +1,12 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useHistoryFilters } from '../hooks/useHistoryFilters';
+import { HistoryFilterBar } from '../components/HistoryFilterBar';
+import { HistoryLogTable } from '../components/HistoryLogTable';
+import {
+  exportIgnoredFilters, filterAndSortArchives, filterLogEntries, getActiveFilterChips, getExportParams,
+  getServerFilterBounds, isSlicedFile, needsClientLogFilter, type ViewMode,
+} from '../utils/historyFilters';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -9,8 +16,6 @@ import {
   Package,
   Coins,
   Layers,
-  Search,
-  Filter,
   Image,
   Box,
   Printer,
@@ -21,17 +26,12 @@ import {
   X,
   Globe,
   Pencil,
-  LayoutGrid,
-  List,
-  CalendarDays,
-  ArrowUpDown,
   Star,
   Tag,
   StickyNote,
   FolderInput,
   Save,
   FolderOpen,
-  Calendar,
   AlertCircle,
   Copy,
   Film,
@@ -50,10 +50,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Settings,
   User,
-  Play,
-  ClipboardList,
   Zap,
   Cog,
   History,
@@ -62,13 +59,13 @@ import { api } from '../api/client';
 import { SliceModal } from '../components/SliceModal';
 import { SaveArchiveToFilesModal } from '../components/SaveArchiveToFilesModal';
 import { openInSlicer, type SlicerType } from '../utils/slicer';
-import { formatDateTime, formatDateOnly, parseUTCDate, type TimeFormat, formatDuration } from '../utils/date';
+import { formatDateTime, getLastPrintedAt, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
-import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
+import { ReactSelect } from '../components/ToolbarControls';
 import { PrintModal } from '../components/PrintModal';
 import { PurgeArchivesModal } from '../components/PurgeArchivesModal';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -92,23 +89,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatFileSize } from '../utils/file';
 
 type TFunction = (key: string, options?: Record<string, unknown>) => string;
-
-/**
- * Check if an archive represents a sliced/printable file.
- * Uses filename (.gcode, .gcode.3mf) as primary check, then falls back to
- * metadata — a .3mf with total_layers or print_time is sliced (contains gcode),
- * while a raw source .3mf (CAD export) has neither.
- */
-function isSlicedFile(archive: { filename?: string | null; total_layers?: number | null; print_time_seconds?: number | null }): boolean {
-  const filename = archive.filename;
-  if (filename) {
-    const lower = filename.toLowerCase();
-    if (lower.endsWith('.gcode') || lower.includes('.gcode.')) return true;
-  }
-  // .3mf can be either sliced or source — check for gcode metadata
-  if (archive.total_layers || archive.print_time_seconds) return true;
-  return false;
-}
 
 // formatDate imported from '../utils/date' - handles UTC conversion
 
@@ -1100,7 +1080,9 @@ function ArchiveCard({
 
         {/* Date, Size & Creator */}
         <div className="flex items-center justify-between text-xs text-bambu-gray border-t border-bambu-dark-tertiary pt-3">
-          <span>{formatDateTime(archive.created_at, timeFormat)}</span>
+          <span title={`${t('archives.uploaded')}: ${formatDateTime(archive.created_at, timeFormat)}`}>
+            {archive.last_run_at || archive.started_at || archive.status !== 'archived' ? formatDateTime(getLastPrintedAt(archive), timeFormat) : t('archives.notYetPrinted')}
+          </span>
           <div className="flex items-center gap-2">
             {archive.created_by_username && (
               <span className="flex items-center gap-1" title={t('archives.card.uploadedBy', { name: archive.created_by_username })}>
@@ -1483,1048 +1465,15 @@ function ArchiveCard({
   );
 }
 
-function ArchiveListRow({
-  archive,
-  printerName,
-  isSelected,
-  onSelect,
-  selectionMode,
-  projects,
-  isHighlighted,
-  preferredSlicer = 'bambu_studio',
-  useSlicerApi = false,
-  t,
-  onNavigateToArchive,
-}: {
-  archive: Archive;
-  printerName: string;
-  isSelected: boolean;
-  onSelect: (id: number) => void;
-  selectionMode: boolean;
-  projects: ProjectListItem[] | undefined;
-  isHighlighted?: boolean;
-  preferredSlicer?: SlicerType;
-  useSlicerApi?: boolean;
-  t: TFunction;
-  onNavigateToArchive?: (archiveId: number) => void;
-}) {
-  const queryClient = useQueryClient();
-  const { showToast } = useToast();
-  const { hasPermission, canModify, user } = useAuth();
-  const canDownload = hasPermission('archives:read_all')
-    || (hasPermission('archives:read_own') && user != null && archive.created_by_id === user.id);
-  const [showEdit, setShowEdit] = useState(false);
-  const [showPrintLog, setShowPrintLog] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  // #1343: opt-in "Also remove from statistics" checkbox state. Default off
-  // — soft delete keeps the archive's contribution to Quick Stats.
-  const [deletePurgeStats, setDeletePurgeStats] = useState(false);
-  // #1734: pre-flight count of related queue items for the delete modal.
-  // Same shape as the card-view sibling above.
-  const deleteImpactQuery = useQuery({
-    queryKey: ['archive', archive.id, 'delete-impact'],
-    queryFn: () => api.getArchiveDeleteImpact(archive.id),
-    enabled: showDeleteConfirm,
-    staleTime: 0,
-  });
-  const navigate = useNavigate();
-  const [showReprint, setShowReprint] = useState(false);
-  const [showSliceModal, setShowSliceModal] = useState(false);
-  const [showSaveToFiles, setShowSaveToFiles] = useState(false);
-  const [showTimelapse, setShowTimelapse] = useState(false);
-  const [showTimelapseSelect, setShowTimelapseSelect] = useState(false);
-  const [availableTimelapses, setAvailableTimelapses] = useState<Array<{ name: string; path: string; size: number; mtime: string | null }>>([]);
-  const [showQRCode, setShowQRCode] = useState(false);
-  const [showPhotos, setShowPhotos] = useState(false);
-  const [showProjectPage, setShowProjectPage] = useState(false);
-  const [showDeleteSource3mfConfirm, setShowDeleteSource3mfConfirm] = useState(false);
-  const [showDeleteF3dConfirm, setShowDeleteF3dConfirm] = useState(false);
-  const [showDeleteTimelapseConfirm, setShowDeleteTimelapseConfirm] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const source3mfInputRef = useRef<HTMLInputElement>(null);
-  const f3dInputRef = useRef<HTMLInputElement>(null);
-  const timelapseInputRef = useRef<HTMLInputElement>(null);
-  const [platePickerPlates, setPlatePickerPlates] = useState<PlateMetadata[] | null>(null);
-
-  // Use pre-computed duplicate sequence and original archive ID from list response
-  const duplicateSequence = archive.duplicate_sequence ?? 0;
-  const originalArchiveId = archive.original_archive_id ?? null;
-
-  // 3D Preview click handler. Multi-plate archives show the plate picker
-  // first; single-plate archives navigate straight into the viewer.
-  const openGcodeViewer = async () => {
-    try {
-      const resp = await api.getArchivePlates(archive.id);
-      if (resp.is_multi_plate && resp.plates.length > 1) {
-        setPlatePickerPlates(resp.plates);
-        return;
-      }
-    } catch {
-      // Swallow — fall through to navigate on the first-plate default.
-    }
-    navigate(`/gcode-viewer?archive=${archive.id}`);
-  };
-
-  const timelapseDeleteMutation = useMutation({
-    mutationFn: () => api.deleteArchiveTimelapse(archive.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.timelapseRemoved'));
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedRemoveTimelapse'), 'error');
-    },
-  });
-
-  const timelapseUploadMutation = useMutation({
-    mutationFn: (file: File) => api.uploadArchiveTimelapse(archive.id, file),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.timelapseUploaded', { filename: data.filename }));
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedUploadTimelapse'), 'error');
-    },
-  });
-
-  const source3mfUploadMutation = useMutation({
-    mutationFn: (file: File) => api.uploadSource3mf(archive.id, file),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.source3mfAttached', { filename: data.filename }));
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedUploadSource3mf'), 'error');
-    },
-  });
-
-  const source3mfDeleteMutation = useMutation({
-    mutationFn: () => api.deleteSource3mf(archive.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.source3mfRemoved'));
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedRemoveSource3mf'), 'error');
-    },
-  });
-
-  const f3dUploadMutation = useMutation({
-    mutationFn: (file: File) => api.uploadF3d(archive.id, file),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.f3dAttached', { filename: data.filename }));
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedUploadF3d'), 'error');
-    },
-  });
-
-  const f3dDeleteMutation = useMutation({
-    mutationFn: () => api.deleteF3d(archive.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.f3dRemoved'));
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedRemoveF3d'), 'error');
-    },
-  });
-
-  const timelapseScanMutation = useMutation({
-    mutationFn: () => api.scanArchiveTimelapse(archive.id),
-    onSuccess: (data) => {
-      if (data.status === 'attached') {
-        queryClient.invalidateQueries({ queryKey: ['archives'] });
-        showToast(t('archives.toast.timelapseAttached', { filename: data.filename }));
-      } else if (data.status === 'exists') {
-        showToast(t('archives.toast.timelapseAlreadyAttached'));
-      } else if (data.status === 'not_found' && data.available_files && data.available_files.length > 0) {
-        setAvailableTimelapses(data.available_files);
-        setShowTimelapseSelect(true);
-      } else {
-        showToast(data.message || t('archives.toast.noMatchingTimelapse'), 'warning');
-      }
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedScanTimelapse'), 'error');
-    },
-  });
-
-  const timelapseSelectMutation = useMutation({
-    mutationFn: (filename: string) => api.selectArchiveTimelapse(archive.id, filename),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.timelapseAttached', { filename: data.filename }));
-      setShowTimelapseSelect(false);
-      setAvailableTimelapses([]);
-    },
-    onError: (error: Error) => {
-      showToast(error.message || t('archives.toast.failedAttachTimelapse'), 'error');
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (purgeStats: boolean) => api.deleteArchive(archive.id, purgeStats),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(t('archives.toast.archiveDeleted'));
-    },
-    onError: () => {
-      showToast(t('archives.toast.failedDeleteArchive'), 'error');
-    },
-  });
-
-  const favoriteMutation = useMutation({
-    mutationFn: () => api.toggleFavorite(archive.id),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(data.is_favorite ? t('archives.toast.addedToFavorites') : t('archives.toast.removedFromFavorites'));
-    },
-  });
-
-  // Query for linked folders
-  const { data: linkedFolders } = useQuery({
-    queryKey: ['archive-folders', archive.id],
-    queryFn: () => api.getLibraryFoldersByArchive(archive.id),
-  });
-
-  const assignProjectMutation = useMutation({
-    mutationFn: (projectId: number | null) => api.updateArchive(archive.id, { project_id: projectId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      showToast(t('archives.toast.projectUpdated'));
-    },
-    onError: () => {
-      showToast(t('archives.toast.failedUpdateProject'), 'error');
-    },
-  });
-
-  const isGcodeFile = isSlicedFile(archive);
-
-  const contextMenuItems: ContextMenuItem[] = [
-    ...(isGcodeFile ? [
-      {
-        label: t('archives.menu.print'),
-        icon: <Printer className="w-4 h-4" />,
-        onClick: () => setShowReprint(true),
-        disabled: !archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id),
-        title: !archive.file_path
-          ? t('archives.card.noFileForReprint')
-          : !hasPermission('queue:create')
-            ? t('archives.permission.noAddToQueue')
-            : !canModify('archives', 'reprint', archive.created_by_id)
-              ? t('archives.permission.noReprint')
-              : undefined,
-      },
-    ] : [
-      {
-        label: t('archives.menu.slice'),
-        icon: useSlicerApi ? <Cog className="w-4 h-4" /> : <ExternalLink className="w-4 h-4" />,
-        onClick: () => {
-          if (useSlicerApi) {
-            setShowSliceModal(true);
-          } else {
-            const filename = archive.print_name || archive.filename || 'model';
-            openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-          }
-        },
-      },
-    ]),
-    ...(isGcodeFile || useSlicerApi ? [
-      {
-        label: t('archives.menu.openInBambuStudio'),
-        icon: <ExternalLink className="w-4 h-4" />,
-        onClick: () => {
-          const filename = archive.print_name || archive.filename || 'model';
-          openInSlicerWithToken(archive.id, filename, 'file', preferredSlicer);
-        },
-        disabled: !archive.file_path,
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : undefined,
-      },
-    ] : []),
-    {
-      label: archive.external_url ? t('archives.menu.externalLink') : t('archives.menu.viewOnMakerWorld'),
-      icon: <Globe className="w-4 h-4" />,
-      onClick: () => {
-        const url = archive.external_url || archive.makerworld_url;
-        if (url) window.open(url, '_blank');
-      },
-      disabled: !archive.external_url && !archive.makerworld_url,
-    },
-    { label: '', divider: true, onClick: () => {} },
-    {
-      label: t('archives.menu.preview3d'),
-      icon: <Box className="w-4 h-4" />,
-      onClick: () => { openGcodeViewer(); },
-    },
-    {
-      label: t('archives.menu.viewTimelapse'),
-      icon: <Film className="w-4 h-4" />,
-      onClick: () => setShowTimelapse(true),
-      disabled: !archive.timelapse_path,
-    },
-    {
-      label: t('archives.menu.scanForTimelapse'),
-      icon: <ScanSearch className="w-4 h-4" />,
-      onClick: () => timelapseScanMutation.mutate(),
-      disabled: !archive.printer_id || !!archive.timelapse_path || timelapseScanMutation.isPending || !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
-      label: t('archives.menu.uploadTimelapse'),
-      icon: <Upload className="w-4 h-4" />,
-      onClick: () => timelapseInputRef.current?.click(),
-      disabled: !!archive.timelapse_path || !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    ...(archive.timelapse_path ? [{
-      label: t('archives.menu.removeTimelapse'),
-      icon: <Trash2 className="w-4 h-4" />,
-      onClick: () => setShowDeleteTimelapseConfirm(true),
-      danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    }] : []),
-    { label: '', divider: true, onClick: () => {} },
-    ...(archive.source_3mf_path ? [{
-      label: t('archives.card.openSource3mf'),
-      icon: <FileCode className="w-4 h-4" />,
-      onClick: () => {
-        const sourceName = (archive.print_name || archive.filename || 'source').replace(/\.gcode\.3mf$/i, '') + '_source';
-        openInSlicerWithToken(archive.id, sourceName, 'source', preferredSlicer);
-      },
-    }] : []),
-    {
-      label: archive.source_3mf_path ? t('archives.menu.downloadSource3mf') : t('archives.menu.uploadSource3mf'),
-      icon: <FileCode className="w-4 h-4" />,
-      onClick: () => {
-        if (archive.source_3mf_path) {
-          api.downloadSource3mf(archive.id).catch((err) => {
-            console.error('Source 3MF download failed:', err);
-          });
-        } else {
-          source3mfInputRef.current?.click();
-        }
-      },
-      disabled: !archive.source_3mf_path && !canModify('archives', 'update', archive.created_by_id),
-      title: !archive.source_3mf_path && !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUploadFiles') : undefined,
-    },
-    ...(archive.source_3mf_path ? [{
-      label: t('archives.menu.replaceSource3mf'),
-      icon: <Upload className="w-4 h-4" />,
-      onClick: () => source3mfInputRef.current?.click(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
-      label: t('archives.menu.removeSource3mf'),
-      icon: <Trash2 className="w-4 h-4" />,
-      onClick: () => setShowDeleteSource3mfConfirm(true),
-      danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    }] : []),
-    {
-      label: archive.f3d_path ? t('archives.menu.replaceF3d') : t('archives.menu.uploadF3d'),
-      icon: <Box className="w-4 h-4" />,
-      onClick: () => f3dInputRef.current?.click(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    ...(archive.f3d_path ? [{
-      label: t('archives.menu.downloadF3d'),
-      icon: <Download className="w-4 h-4" />,
-      onClick: () => {
-        api.downloadF3d(archive.id).catch((err) => {
-          console.error('F3D download failed:', err);
-        });
-      },
-    },
-    {
-      label: t('archives.menu.removeF3d'),
-      icon: <Trash2 className="w-4 h-4" />,
-      onClick: () => setShowDeleteF3dConfirm(true),
-      danger: true,
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    }] : []),
-    { label: '', divider: true, onClick: () => {} },
-    // Entries without a 3MF (fallback rows for prints started outside Grove) have nothing to copy.
-    ...(archive.file_path ? [{
-      label: t('archives.menu.saveToFiles'),
-      icon: <FolderInput className="w-4 h-4" />,
-      onClick: () => setShowSaveToFiles(true),
-      disabled: !hasPermission('library:upload'),
-      title: !hasPermission('library:upload') ? t('archives.permission.noSaveToFiles') : undefined,
-    }] : []),
-    {
-      label: t('archives.menu.download'),
-      icon: <Download className="w-4 h-4" />,
-      onClick: () => {
-        api.downloadArchive(archive.id, `${archive.print_name || archive.filename}.3mf`).catch((err) => {
-          console.error('Archive download failed:', err);
-        });
-      },
-      disabled: !canDownload,
-      title: !canDownload ? t('archives.permission.noDownload') : undefined,
-    },
-    {
-      label: t('archives.menu.copyDownloadLink'),
-      icon: <Copy className="w-4 h-4" />,
-      onClick: () => {
-        const url = `${window.location.origin}${api.getArchiveDownload(archive.id)}`;
-        navigator.clipboard.writeText(url).then(() => {
-          showToast(t('archives.toast.linkCopied'));
-        }).catch(() => {
-          showToast(t('archives.toast.failedCopyLink'), 'error');
-        });
-      },
-      disabled: !canDownload,
-      title: !canDownload ? t('archives.permission.noCopyLink') : undefined,
-    },
-    {
-      label: t('archives.menu.qrCode'),
-      icon: <QrCode className="w-4 h-4" />,
-      onClick: () => setShowQRCode(true),
-    },
-    {
-      label: archive.photos?.length ? t('archives.menu.viewPhotosCount', { count: archive.photos.length }) : t('archives.menu.viewPhotos'),
-      icon: <Camera className="w-4 h-4" />,
-      onClick: () => setShowPhotos(true),
-      disabled: !archive.photos?.length,
-    },
-    {
-      label: t('archives.menu.projectPage'),
-      icon: <FileText className="w-4 h-4" />,
-      onClick: () => setShowProjectPage(true),
-    },
-    { label: '', divider: true, onClick: () => {} },
-    {
-      label: archive.is_favorite ? t('archives.menu.removeFromFavorites') : t('archives.menu.addToFavorites'),
-      icon: <Star className={`w-4 h-4 ${archive.is_favorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />,
-      onClick: () => favoriteMutation.mutate(),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
-      label: t('archives.menu.edit'),
-      icon: <Pencil className="w-4 h-4" />,
-      onClick: () => setShowEdit(true),
-      disabled: !canModify('archives', 'update', archive.created_by_id),
-      title: !canModify('archives', 'update', archive.created_by_id) ? t('archives.permission.noUpdateArchives') : undefined,
-    },
-    {
-      label: t('archives.menu.printLog'),
-      icon: <History className="w-4 h-4" />,
-      onClick: () => setShowPrintLog(true),
-    },
-    ...(archive.project_id && archive.project_name ? [{
-      label: t('archives.menu.goToProject', { name: archive.project_name }),
-      icon: <FolderKanban className="w-4 h-4 text-bambu-green" />,
-      onClick: () => window.location.href = '/projects',
-    }] : []),
-    {
-      label: t('archives.menu.addToProject'),
-      icon: <FolderKanban className="w-4 h-4" />,
-      onClick: () => {},
-      submenuSearchPlaceholder: (projects?.filter(p => p.status === 'active').length ?? 0) > 5
-        ? t('archives.menu.searchProjects')
-        : undefined,
-      submenu: (() => {
-        const items: ContextMenuItem[] = [];
-        if (archive.project_id) {
-          items.push({
-            label: t('archives.menu.removeFromProject'),
-            icon: <X className="w-4 h-4" />,
-            onClick: () => assignProjectMutation.mutate(null),
-          });
-        }
-        if (!projects) {
-          items.push({
-            label: t('archives.menu.loading'),
-            icon: <Loader2 className="w-4 h-4 animate-spin" />,
-            onClick: () => {},
-            disabled: true,
-          });
-        } else {
-          const activeProjects = projects
-            .filter(p => p.status === 'active')
-            .sort((a, b) => a.name.localeCompare(b.name));
-          if (activeProjects.length === 0) {
-            items.push({
-              label: t('archives.menu.noProjectsAvailable'),
-              icon: <FolderKanban className="w-4 h-4 opacity-50" />,
-              onClick: () => {},
-              disabled: true,
-            });
-          } else {
-            activeProjects.forEach(p => {
-              items.push({
-                label: p.name,
-                icon: <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: p.color || '#888' }} />,
-                onClick: () => assignProjectMutation.mutate(p.id),
-                disabled: archive.project_id === p.id,
-              });
-            });
-          }
-        }
-        return items;
-      })(),
-    },
-    {
-      label: isSelected ? t('archives.menu.deselect') : t('archives.menu.select'),
-      icon: isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />,
-      onClick: () => onSelect(archive.id),
-    },
-    { label: '', divider: true, onClick: () => {} },
-    {
-      label: t('archives.menu.delete'),
-      icon: <Trash2 className="w-4 h-4" />,
-      onClick: () => setShowDeleteConfirm(true),
-      danger: true,
-      disabled: !canModify('archives', 'delete', archive.created_by_id),
-      title: !canModify('archives', 'delete', archive.created_by_id) ? t('archives.permission.noDelete') : undefined,
-    },
-  ];
-
-  return (
-    <>
-      <div
-        data-archive-id={archive.id}
-        className={`grid grid-cols-12 gap-4 px-4 py-3 items-center hover:bg-bambu-dark-tertiary/30 ${
-          isSelected ? 'bg-bambu-green/10' : ''
-        }`}
-        style={isHighlighted ? { outline: '4px solid #facc15', outlineOffset: '-4px' } : undefined}
-      >
-        <div className="col-span-1 flex items-center gap-2">
-          {selectionMode && (
-            <button onClick={() => onSelect(archive.id)}>
-              {isSelected ? (
-                <CheckSquare className="w-4 h-4 text-bambu-green" />
-              ) : (
-                <Square className="w-4 h-4 text-bambu-gray" />
-              )}
-            </button>
-          )}
-          {archive.thumbnail_path ? (
-            <img
-              src={api.getArchiveThumbnail(archive.id)}
-              alt=""
-              className="w-10 h-10 object-cover rounded"
-            />
-          ) : (
-            <div className="w-10 h-10 bg-bambu-dark rounded flex items-center justify-center">
-              <Image className="w-5 h-5 text-bambu-dark-tertiary" />
-            </div>
-          )}
-        </div>
-        <div className="col-span-4">
-          <div className="flex items-center gap-2">
-            <p className="text-white text-sm truncate">{archive.print_name || archive.filename}</p>
-            {(archive.status === 'failed' || archive.status === 'aborted') && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] leading-tight bg-status-error/80 text-white flex-shrink-0">
-                {archive.status === 'aborted' ? t('archives.card.cancelled') : t('archives.card.failed')}
-              </span>
-            )}
-            {archive.duplicate_count > 0 && duplicateSequence > 0 && originalArchiveId && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNavigateToArchive?.(originalArchiveId);
-                }}
-                className="px-1.5 py-0.5 rounded text-[10px] leading-tight bg-purple-500/80 hover:bg-purple-600/90 text-white flex-shrink-0 transition-colors flex items-center gap-1"
-                title={t('archives.viewOriginalPrint', { id: originalArchiveId })}
-              >
-                <Copy className="w-3 h-3" />
-                #{duplicateSequence}
-              </button>
-            )}
-            {archive.duplicate_count > 0 && duplicateSequence === 0 && (
-              <span
-                className="px-1.5 py-0.5 rounded text-[10px] leading-tight bg-purple-500/80 text-white flex-shrink-0 flex items-center gap-1"
-                title={`${archive.duplicate_count} reprint${archive.duplicate_count === 1 ? '' : 's'}`}
-              >
-                <GitBranch className="w-3 h-3" />
-                +{archive.duplicate_count}
-              </span>
-            )}
-            {archive.timelapse_path && (
-              <span title={t('archives.list.hasTimelapse')}>
-                <Film className="w-3.5 h-3.5 text-bambu-green flex-shrink-0" />
-              </span>
-            )}
-            {linkedFolders && linkedFolders.length > 0 && (
-              <Link
-                to={`/files?folder=${linkedFolders[0].id}`}
-                className="flex-shrink-0"
-                title={t('archives.card.openFolder', { name: linkedFolders[0].name })}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <FolderOpen className="w-3.5 h-3.5 text-yellow-400" />
-              </Link>
-            )}
-          </div>
-          {(archive.filament_type || archive.sliced_for_model) && (
-            <div className="flex items-center gap-1.5 mt-0.5">
-              {archive.sliced_for_model && (
-                <span className="text-xs text-bambu-gray flex items-center gap-1" title={t('archives.card.slicedFor', { model: archive.sliced_for_model })}>
-                  <Printer className="w-2.5 h-2.5" />
-                  {archive.sliced_for_model}
-                </span>
-              )}
-              {(() => {
-                const bed = getBedTypeInfo(archive.bed_type);
-                return bed ? (
-                  <img src={bed.icon} alt={bed.label} title={bed.label} className="w-3.5 h-3.5 flex-shrink-0" />
-                ) : null;
-              })()}
-              {archive.sliced_for_model && archive.filament_type && (
-                <span className="text-bambu-gray/50">·</span>
-              )}
-              {archive.filament_type && (
-                <span className="text-xs text-bambu-gray">{archive.filament_type}</span>
-              )}
-              {archive.filament_color && (
-                <div className="flex items-center gap-0.5 flex-wrap">
-                  {archive.filament_color.split(',').map((color, i) => (
-                    <div
-                      key={i}
-                      className="w-2.5 h-2.5 rounded-full border border-black/20"
-                      style={{ backgroundColor: color }}
-                      title={color}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="col-span-2 text-sm text-bambu-gray truncate">
-          {printerName}
-        </div>
-        <div className="col-span-2 text-sm text-bambu-gray">
-          <div>{formatDateOnly(archive.created_at)}</div>
-          {archive.created_by_username && (
-            <div className="flex items-center gap-1 text-xs opacity-75" title={t('archives.card.uploadedBy', { name: archive.created_by_username })}>
-              <User className="w-3 h-3" />
-              {archive.created_by_username}
-            </div>
-          )}
-        </div>
-        <div className="col-span-1 text-sm text-bambu-gray">
-          {formatFileSize(archive.file_size)}
-        </div>
-        <div className="col-span-2 flex justify-end gap-1">
-          {isSlicedFile(archive) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowReprint(true)}
-              aria-label={t('archives.menu.print')}
-              disabled={!archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id)}
-              title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : t('archives.menu.print')}
-              className="text-bambu-green hover:text-bambu-green-light hover:bg-bambu-green/10"
-            >
-              <Play className="w-4 h-4" />
-            </Button>
-          )}
-          {archive.file_path && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowSaveToFiles(true)}
-              disabled={!hasPermission('library:upload')}
-              title={!hasPermission('library:upload') ? t('archives.permission.noSaveToFiles') : t('archives.menu.saveToFiles')}
-              aria-label={t('archives.menu.saveToFiles')}
-            >
-              <Save className="w-4 h-4" />
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowEdit(true)}
-            disabled={!canModify('archives', 'update', archive.created_by_id)}
-            title={!canModify('archives', 'update', archive.created_by_id) ? t('archives.card.noPermissionEdit') : t('archives.card.edit')}
-          >
-            <Pencil className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={(e) => {
-              menuTriggerRef.current = e.currentTarget;
-              const rect = e.currentTarget.getBoundingClientRect();
-              setContextMenu({ x: rect.left, y: rect.bottom + 4 });
-            }}
-            aria-label={t('archives.card.moreOptions')}
-            aria-haspopup="menu"
-            aria-expanded={contextMenu !== null}
-            title={t('archives.card.moreOptions')}
-          >
-            <MoreVertical className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Edit Modal */}
-      {showEdit && (
-        <EditArchiveModal
-          archive={archive}
-          onClose={() => setShowEdit(false)}
-        />
-      )}
-
-      {/* Print Log Modal — opened from the "N prints" badge or context menu (#1378) */}
-      {showPrintLog && (
-        <PrintLogModal
-          archiveId={archive.id}
-          archiveName={archive.print_name || archive.filename}
-          onClose={() => setShowPrintLog(false)}
-        />
-      )}
-
-      {/* Plate picker — shown only for multi-plate archives on 3D Preview click */}
-      {platePickerPlates && (
-        <PlatePickerModal
-          plates={platePickerPlates}
-          onSelect={(plateIndex) => {
-            setPlatePickerPlates(null);
-            navigate(`/gcode-viewer?archive=${archive.id}&plate=${plateIndex}`);
-          }}
-          onClose={() => setPlatePickerPlates(null)}
-        />
-      )}
-
-      {/* Reprint Modal */}
-      {showReprint && (
-        <PrintModal
-          mode="create"
-          archiveId={archive.id}
-          archiveName={archive.print_name || archive.filename}
-          onClose={() => setShowReprint(false)}
-        />
-      )}
-
-      {/* Save to Files */}
-      {showSaveToFiles && (
-        <SaveArchiveToFilesModal archive={archive} onClose={() => setShowSaveToFiles(false)} />
-      )}
-
-      {/* Slice Modal */}
-      {showSliceModal && (
-        <SliceModal
-          source={{ kind: 'archive', id: archive.id, filename: archive.print_name || archive.filename || 'model' }}
-          onClose={() => setShowSliceModal(false)}
-        />
-      )}
-
-      {/* Delete Confirmation */}
-      {showDeleteConfirm && (
-        <ConfirmModal
-          title={t('archives.modal.deleteArchive')}
-          message={t('archives.modal.deleteConfirm', { name: archive.print_name || archive.filename })}
-          confirmText={t('archives.modal.deleteButton')}
-          variant="danger"
-          confirmDisabled={(deleteImpactQuery.data?.currently_printing ?? 0) > 0}
-          onConfirm={() => {
-            deleteMutation.mutate(deletePurgeStats);
-            setShowDeleteConfirm(false);
-            setDeletePurgeStats(false);
-          }}
-          onCancel={() => {
-            setShowDeleteConfirm(false);
-            setDeletePurgeStats(false);
-          }}
-        >
-          {/* #1734: warn the user when related queue items will also be removed,
-              and block the action entirely if any are currently printing. */}
-          {(deleteImpactQuery.data?.related_queue_items ?? 0) > 0 && (
-            <div
-              className={
-                (deleteImpactQuery.data?.currently_printing ?? 0) > 0
-                  ? 'text-sm text-red-400 mb-2'
-                  : 'text-sm text-amber-400 mb-2'
-              }
-            >
-              {(deleteImpactQuery.data?.currently_printing ?? 0) > 0
-                ? t('archives.modal.deleteBlockedByPrinting', {
-                    count: deleteImpactQuery.data!.currently_printing,
-                  })
-                : t('archives.modal.deleteQueueItemsWarning', {
-                    count: deleteImpactQuery.data!.related_queue_items,
-                  })}
-            </div>
-          )}
-          {/* #1343: opt-in checkbox — by default the archive is soft-deleted,
-              so its filament / time / cost contribution stays in Quick Stats. */}
-          <label className="flex items-start gap-2 cursor-pointer text-sm text-bambu-gray">
-            <input
-              type="checkbox"
-              className="mt-0.5 accent-red-500"
-              checked={deletePurgeStats}
-              onChange={(e) => setDeletePurgeStats(e.target.checked)}
-            />
-            <span>{t('archives.modal.deletePurgeStats')}</span>
-          </label>
-        </ConfirmModal>
-      )}
-
-      {/* Delete Source 3MF Confirmation */}
-      {showDeleteSource3mfConfirm && (
-        <ConfirmModal
-          title={t('archives.modal.removeSource3mf')}
-          message={t('archives.modal.removeSource3mfConfirm', { name: archive.print_name || archive.filename })}
-          confirmText={t('archives.modal.removeButton')}
-          variant="danger"
-          onConfirm={() => {
-            source3mfDeleteMutation.mutate();
-            setShowDeleteSource3mfConfirm(false);
-          }}
-          onCancel={() => setShowDeleteSource3mfConfirm(false)}
-        />
-      )}
-
-      {/* Delete F3D Confirmation */}
-      {showDeleteF3dConfirm && (
-        <ConfirmModal
-          title={t('archives.modal.removeF3d')}
-          message={t('archives.modal.removeF3dConfirm', { name: archive.print_name || archive.filename })}
-          confirmText={t('archives.modal.removeButton')}
-          variant="danger"
-          onConfirm={() => {
-            f3dDeleteMutation.mutate();
-            setShowDeleteF3dConfirm(false);
-          }}
-          onCancel={() => setShowDeleteF3dConfirm(false)}
-        />
-      )}
-
-      {/* Delete Timelapse Confirmation */}
-      {showDeleteTimelapseConfirm && (
-        <ConfirmModal
-          title={t('archives.modal.removeTimelapse')}
-          message={t('archives.modal.removeTimelapseConfirm', { name: archive.print_name || archive.filename })}
-          confirmText={t('archives.modal.removeButton')}
-          variant="danger"
-          onConfirm={() => {
-            timelapseDeleteMutation.mutate();
-            setShowDeleteTimelapseConfirm(false);
-          }}
-          onCancel={() => setShowDeleteTimelapseConfirm(false)}
-        />
-      )}
-
-      {/* Context Menu */}
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          items={contextMenuItems}
-          onClose={() => { setContextMenu(null); menuTriggerRef.current?.focus(); }}
-        />
-      )}
-
-      {/* Timelapse Viewer Modal */}
-      {showTimelapse && archive.timelapse_path && (
-        <TimelapseViewer
-          src={api.getArchiveTimelapse(archive.id)}
-          title={t('archives.modal.timelapse', { name: archive.print_name || archive.filename })}
-          downloadFilename={`${archive.print_name || archive.filename}_timelapse.mp4`}
-          archiveId={archive.id}
-          onClose={() => setShowTimelapse(false)}
-          onEdit={() => {
-            queryClient.invalidateQueries({ queryKey: ['archives'] });
-            setShowTimelapse(false);
-          }}
-        />
-      )}
-
-      {/* Timelapse Selection Modal */}
-      {showTimelapseSelect && availableTimelapses.length > 0 && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-card-dark rounded-lg max-w-lg w-full max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-700">
-              <div>
-                <h3 className="text-lg font-semibold text-white">{t('archives.modal.selectTimelapse')}</h3>
-                <p className="text-sm text-gray-400 mt-1">
-                  {t('archives.modal.selectTimelapseDesc')}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowTimelapseSelect(false);
-                  setAvailableTimelapses([]);
-                }}
-                className="text-gray-400 hover:text-white p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1 p-2">
-              {availableTimelapses.map((file) => (
-                <button
-                  key={file.name}
-                  onClick={() => timelapseSelectMutation.mutate(file.name)}
-                  disabled={timelapseSelectMutation.isPending}
-                  className="w-full text-left p-3 rounded-lg hover:bg-gray-700 transition-colors mb-1"
-                >
-                  <div className="font-medium text-white">{file.name}</div>
-                  <div className="text-sm text-gray-400 flex gap-3">
-                    <span>{formatFileSize(file.size)}</span>
-                    {file.mtime && (
-                      <span>{formatDateOnly(file.mtime)}</span>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* QR Code Modal */}
-      {showQRCode && (
-        <QRCodeModal
-          archiveId={archive.id}
-          archiveName={archive.print_name || archive.filename}
-          onClose={() => setShowQRCode(false)}
-        />
-      )}
-
-      {/* Photo Gallery Modal */}
-      {showPhotos && archive.photos && (
-        <PhotoGalleryModal
-          archiveId={archive.id}
-          archiveName={archive.print_name || archive.filename}
-          photos={archive.photos}
-          onClose={() => setShowPhotos(false)}
-          onDelete={async (filename) => {
-            try {
-              await api.deleteArchivePhoto(archive.id, filename);
-              queryClient.invalidateQueries({ queryKey: ['archives'] });
-              showToast(t('archives.toast.photoDeleted'));
-            } catch {
-              showToast(t('archives.toast.failedDeletePhoto'), 'error');
-            }
-          }}
-        />
-      )}
-
-      {/* Project Page Modal */}
-      {showProjectPage && (
-        <ProjectPageModal
-          archiveId={archive.id}
-          archiveName={archive.print_name || archive.filename}
-          onClose={() => setShowProjectPage(false)}
-        />
-      )}
-
-      {/* Hidden file input for source 3MF upload */}
-      <input
-        ref={source3mfInputRef}
-        type="file"
-        accept=".3mf"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            source3mfUploadMutation.mutate(file);
-          }
-          e.target.value = '';
-        }}
-      />
-      {/* Hidden file input for F3D upload */}
-      <input
-        ref={f3dInputRef}
-        type="file"
-        accept=".f3d"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            f3dUploadMutation.mutate(file);
-          }
-          e.target.value = '';
-        }}
-      />
-      {/* Hidden file input for timelapse upload */}
-      <input
-        ref={timelapseInputRef}
-        type="file"
-        accept=".mp4,.avi,.mkv"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            timelapseUploadMutation.mutate(file);
-          }
-          e.target.value = '';
-        }}
-      />
-    </>
-  );
-}
-
-type SortOption = 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc';
-type ViewMode = 'grid' | 'list' | 'calendar' | 'log';
-type Collection = 'all' | 'recent' | 'this-week' | 'this-month' | 'favorites' | 'not-printed' | 'printed' | 'failed' | 'duplicates';
-
-// status values that indicate a print attempt has finished (regardless of outcome).
-// `archived` is the only status that means "uploaded but never sent to a printer."
-const PRINTED_STATUSES = ['completed', 'failed', 'aborted', 'cancelled', 'stopped'] as const;
-
-const collections: { id: Collection; label: string; icon: React.ReactNode }[] = [
-  { id: 'all', label: 'All Archives', icon: <FolderOpen className="w-4 h-4" /> },
-  { id: 'recent', label: 'Last 24 Hours', icon: <Clock className="w-4 h-4" /> },
-  { id: 'this-week', label: 'This Week', icon: <Calendar className="w-4 h-4" /> },
-  { id: 'this-month', label: 'This Month', icon: <Calendar className="w-4 h-4" /> },
-  { id: 'favorites', label: 'Favorites', icon: <Star className="w-4 h-4" /> },
-  { id: 'not-printed', label: 'Not Printed', icon: <Upload className="w-4 h-4" /> },
-  { id: 'printed', label: 'Printed', icon: <Printer className="w-4 h-4" /> },
-  { id: 'failed', label: 'Failed Prints', icon: <AlertCircle className="w-4 h-4" /> },
-  { id: 'duplicates', label: 'Duplicates', icon: <Copy className="w-4 h-4" /> },
-];
-
 export function ArchivesPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission } = useAuth();
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [search, setSearch] = useState('');
-  const [filterPrinter, setFilterPrinter] = useState<number | null>(() => {
-    const saved = localStorage.getItem('archiveFilterPrinter');
-    return saved ? Number(saved) : null;
-  });
-  const [filterMaterial, setFilterMaterial] = useState<string | null>(() =>
-    localStorage.getItem('archiveFilterMaterial')
-  );
-  const [filterColors, setFilterColors] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('archiveFilterColors');
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
-  const [colorFilterMode, setColorFilterMode] = useState<'or' | 'and'>(() =>
-    (localStorage.getItem('archiveColorFilterMode') as 'or' | 'and') || 'or'
-  );
-  const [filterFavorites, setFilterFavorites] = useState(() =>
-    localStorage.getItem('archiveFilterFavorites') === 'true'
-  );
-  const [hideFailed, setHideFailed] = useState(() =>
-    localStorage.getItem('archiveHideFailed') === 'true'
-  );
-  const [hideDuplicates, setHideDuplicates] = useState(() =>
-    localStorage.getItem('archiveHideDuplicates') === 'true'
-  );
-  const [filterTag, setFilterTag] = useState<string | null>(() =>
-    localStorage.getItem('archiveFilterTag')
-  );
-  const [filterFileType, setFilterFileType] = useState<'all' | 'gcode' | 'source'>(() =>
-    (localStorage.getItem('archiveFilterFileType') as 'all' | 'gcode' | 'source') || 'all'
-  );
+  const filters = useHistoryFilters();
+  const { values, sortBy, setSearch } = filters;
+  const { search, filterPrinter, filterUser, collection } = values;
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Install-step-4 nudge — covers the slicer-side variant of "Store sent files
   // on external storage" that the connection diagnostic can't detect (printer
@@ -2547,15 +1496,12 @@ export function ArchivesPage() {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [showBatchTag, setShowBatchTag] = useState(false);
   const [showBatchProject, setShowBatchProject] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    (localStorage.getItem('archiveViewMode') as ViewMode) || 'grid'
-  );
-  const [sortBy, setSortBy] = useState<SortOption>(() =>
-    (localStorage.getItem('archiveSortBy') as SortOption) || 'date-desc'
-  );
-  const [collection, setCollection] = useState<Collection>(() =>
-    (localStorage.getItem('archiveCollection') as Collection) || 'all'
-  );
+  // The old per-file list view was folded into the print log (one row per print).
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('archiveViewMode');
+    if (saved === 'list') return 'log';
+    return saved === 'calendar' || saved === 'log' ? saved : 'grid';
+  });
   // Pagination state
   const [pageIndex, setPageIndex] = useState(0);
   const [pageSize, setPageSize] = useState<number>(() => {
@@ -2574,22 +1520,7 @@ export function ArchivesPage() {
   const [pendingNavigationArchiveId, setPendingNavigationArchiveId] = useState<number | null>(null);
 
   // Log view state
-  const [logFilterUser, setLogFilterUser] = useState<string | null>(() =>
-    localStorage.getItem('logFilterUser') || null
-  );
-  const [logFilterStatus, setLogFilterStatus] = useState<string | null>(() =>
-    localStorage.getItem('logFilterStatus')
-  );
-  const [logFilterDateFrom, setLogFilterDateFrom] = useState(() =>
-    localStorage.getItem('logFilterDateFrom') || ''
-  );
-  const [logFilterDateTo, setLogFilterDateTo] = useState(() =>
-    localStorage.getItem('logFilterDateTo') || ''
-  );
-  const [logOffset, setLogOffset] = useState(() => {
-    const saved = localStorage.getItem('logOffset');
-    return saved ? Number(saved) : 0;
-  });
+  const [logOffset, setLogOffset] = useState(0);
   const [showClearLogConfirm, setShowClearLogConfirm] = useState(false);
   const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<number | null>(null);
   // Per-row classification editor for Print Log entries (#1687 part 4).
@@ -2607,34 +1538,30 @@ export function ArchivesPage() {
     setHighlightedArchiveId(archiveId);
   }, []);
 
-  // Clear highlight after 5 seconds and scroll to highlighted element
+  // Deep links from other pages: /archives?search=<text> and /archives?highlight=<id>.
+  const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
-    if (highlightedArchiveId) {
-      // Scroll to highlighted element after a short delay (to let the view render)
-      const scrollTimer = setTimeout(() => {
-        const element = document.querySelector(`[data-archive-id="${highlightedArchiveId}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else if (pendingNavigationArchiveId === highlightedArchiveId) {
-          showToast(t('archives.originalPrintNotVisible'), 'warning');
-        }
-        if (pendingNavigationArchiveId === highlightedArchiveId) {
-          setPendingNavigationArchiveId(null);
-        }
-      }, 100);
-
-      // Clear highlight after 5 seconds
-      const clearTimer = setTimeout(() => setHighlightedArchiveId(null), 5000);
-      return () => {
-        clearTimeout(scrollTimer);
-        clearTimeout(clearTimer);
-      };
+    const linkedSearch = searchParams.get('search');
+    const linkedHighlight = Number(searchParams.get('highlight'));
+    if (!linkedSearch && !linkedHighlight) return;
+    if (linkedSearch) setSearch(linkedSearch);
+    if (linkedHighlight) {
+      setSearch('');
+      setViewMode('grid');
+      handleNavigateToArchive(linkedHighlight);
     }
-  }, [highlightedArchiveId, pendingNavigationArchiveId, showToast, t]);
+    setSearchParams({}, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+
+  // The print log filters by the printer each run used, but an archive only remembers its
+  // latest printer. So in the log the archive lookup must not be narrowed by the printer
+  // filter, or reprinted models would lose their row actions.
+  const archivePrinter = viewMode === 'log' ? undefined : filterPrinter || undefined;
   const { data: archives, isLoading } = useQuery({
-    queryKey: ['archives', filterPrinter],
-    queryFn: () => api.getArchives(filterPrinter || undefined),
+    queryKey: ['archives', archivePrinter],
+    queryFn: () => api.getArchives(archivePrinter),
   });
 
   const { data: printers } = useQuery({
@@ -2655,22 +1582,41 @@ export function ArchivesPage() {
   const { data: users } = useQuery({
     queryKey: ['users'],
     queryFn: api.getUsers,
-    enabled: viewMode === 'log',
   });
 
+  // Filters the print log can't apply on the server (they depend on the linked
+  // archive, or on fields the log API doesn't expose) switch it to a larger
+  // fetch that is filtered and paged here.
+  const logNeedsClientFilter = needsClientLogFilter(values);
+  const LOG_CLIENT_FETCH_LIMIT = 500;
+  // Status filter and collection that exclude each other can't match anything.
+  const logCanMatch = useMemo(() => {
+    const { statuses } = getServerFilterBounds(values);
+    return !statuses || statuses.length > 0;
+  }, [values]);
+
+  // The key names the filters (not the instants they resolve to) and the bounds are worked out at
+  // fetch time, so a refetch of "Last 24 hours" slides the window instead of reusing the one that
+  // was computed when the filter was chosen.
   const { data: printLogData, isLoading: isLogLoading } = useQuery({
-    queryKey: ['print-log', filterPrinter, logFilterUser, logFilterStatus, logFilterDateFrom, logFilterDateTo, search, logOffset, logPageSize],
-    queryFn: () => api.getPrintLog({
-      search: search || undefined,
-      printerId: filterPrinter || undefined,
-      username: logFilterUser || undefined,
-      status: logFilterStatus || undefined,
-      dateFrom: logFilterDateFrom || undefined,
-      dateTo: logFilterDateTo || undefined,
-      limit: logPageSize,
-      offset: logOffset,
-    }),
-    enabled: viewMode === 'log',
+    queryKey: [
+      'print-log', filterPrinter, filterUser, values.filterStatus, values.collection, values.filterDateFrom,
+      values.filterDateTo, search, logNeedsClientFilter ? 'all' : logOffset, logNeedsClientFilter ? 'all' : logPageSize,
+    ],
+    queryFn: () => {
+      const bounds = getServerFilterBounds(values);
+      return api.getPrintLog({
+        search: search || undefined,
+        printerId: filterPrinter || undefined,
+        username: filterUser || undefined,
+        status: bounds.statuses?.join(',') || undefined,
+        dateFrom: bounds.from?.toISOString(),
+        dateTo: bounds.to?.toISOString(),
+        limit: logNeedsClientFilter ? LOG_CLIENT_FETCH_LIMIT : logPageSize,
+        offset: logNeedsClientFilter ? 0 : logOffset,
+      });
+    },
+    enabled: viewMode === 'log' && logCanMatch,
   });
 
   const timeFormat: TimeFormat = settings?.time_format || 'system';
@@ -2721,6 +1667,48 @@ export function ArchivesPage() {
     },
   });
 
+  // Log rows act on the archive they were printed from.
+  const [logReprintArchive, setLogReprintArchive] = useState<Archive | null>(null);
+  const logFavouriteMutation = useMutation({
+    mutationFn: (id: number) => api.toggleFavorite(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['archives'] }),
+    onError: () => showToast(t('archives.toast.failedUpdateFavorites'), 'error'),
+  });
+  const downloadLogArchive = async (archive: Archive) => {
+    try {
+      await api.downloadArchive(archive.id, archive.filename);
+    } catch {
+      showToast(t('archives.log.downloadFailed'), 'error');
+    }
+  };
+  // Export honours the filters the server understands: printer, status, user, search
+  // and the last-printed range (including the time-based collections). Filters that
+  // depend on archive details (material, tags, colours...) are listed in the menu
+  // instead of being silently ignored.
+  const runExport = async (format: 'csv' | 'xlsx') => {
+    setShowExportMenu(false);
+    setIsExporting(true);
+    try {
+      const { blob, filename } = await api.exportArchives({ format, ...getExportParams(values) });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(t('archives.toast.exportDownloaded'));
+    } catch {
+      showToast(t('archives.toast.exportFailed'), 'error');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  const openArchiveInGrid = (archiveId: number) => {
+    setSearch('');
+    setViewMode('grid');
+    handleNavigateToArchive(archiveId);
+  };
+
   const updateLogEntryMutation = useMutation({
     mutationFn: ({ id, body }: { id: number; body: { failure_reason?: string | null; status?: string } }) =>
       api.updatePrintLogEntry(id, body),
@@ -2738,59 +1726,14 @@ export function ArchivesPage() {
     },
   });
 
-  // Persist all filters to localStorage
+  // Back to the first page whenever a filter or the sort changes (`values` only changes identity then).
   useEffect(() => {
-    if (filterPrinter !== null) {
-      localStorage.setItem('archiveFilterPrinter', filterPrinter.toString());
-    } else {
-      localStorage.removeItem('archiveFilterPrinter');
-    }
-  }, [filterPrinter]);
+    setLogOffset(0);
+  }, [values]);
 
-  useEffect(() => {
-    if (filterMaterial) {
-      localStorage.setItem('archiveFilterMaterial', filterMaterial);
-    } else {
-      localStorage.removeItem('archiveFilterMaterial');
-    }
-  }, [filterMaterial]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveFilterColors', JSON.stringify([...filterColors]));
-  }, [filterColors]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveColorFilterMode', colorFilterMode);
-  }, [colorFilterMode]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveFilterFavorites', filterFavorites.toString());
-  }, [filterFavorites]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveHideFailed', hideFailed.toString());
-  }, [hideFailed]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveHideDuplicates', hideDuplicates.toString());
-  }, [hideDuplicates]);
-
-  useEffect(() => {
-    if (filterTag) {
-      localStorage.setItem('archiveFilterTag', filterTag);
-    } else {
-      localStorage.removeItem('archiveFilterTag');
-    }
-  }, [filterTag]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveFilterFileType', filterFileType);
-  }, [filterFileType]);
-
-  // Reset page when filters/search/sort/collection change
   useEffect(() => {
     setPageIndex(0);
-  }, [search, filterPrinter, filterMaterial, filterColors, colorFilterMode, filterFavorites, hideFailed, hideDuplicates, filterTag, filterFileType, sortBy, collection]);
+  }, [values, sortBy]);
 
   useEffect(() => {
     try { localStorage.setItem('archivePageSize', String(pageSize)); } catch { /* ignore */ }
@@ -2801,166 +1744,54 @@ export function ArchivesPage() {
   }, [viewMode]);
 
   useEffect(() => {
-    localStorage.setItem('archiveSortBy', sortBy);
-  }, [sortBy]);
-
-  useEffect(() => {
-    localStorage.setItem('archiveCollection', collection);
-  }, [collection]);
-
-  // Persist log view filters
-  useEffect(() => {
-    if (logFilterUser) {
-      localStorage.setItem('logFilterUser', logFilterUser);
-    } else {
-      localStorage.removeItem('logFilterUser');
-    }
-  }, [logFilterUser]);
-
-  useEffect(() => {
-    if (logFilterStatus) {
-      localStorage.setItem('logFilterStatus', logFilterStatus);
-    } else {
-      localStorage.removeItem('logFilterStatus');
-    }
-  }, [logFilterStatus]);
-
-  useEffect(() => {
-    if (logFilterDateFrom) {
-      localStorage.setItem('logFilterDateFrom', logFilterDateFrom);
-    } else {
-      localStorage.removeItem('logFilterDateFrom');
-    }
-  }, [logFilterDateFrom]);
-
-  useEffect(() => {
-    if (logFilterDateTo) {
-      localStorage.setItem('logFilterDateTo', logFilterDateTo);
-    } else {
-      localStorage.removeItem('logFilterDateTo');
-    }
-  }, [logFilterDateTo]);
-
-  useEffect(() => {
-    localStorage.setItem('logOffset', logOffset.toString());
-  }, [logOffset]);
-
-  useEffect(() => {
     localStorage.setItem('logPageSize', logPageSize.toString());
   }, [logPageSize]);
 
-  const printerMap = new Map(printers?.map((p) => [p.id, p.name]) || []);
+  const printerMap = useMemo(() => new Map(printers?.map((p) => [p.id, p.name]) || []), [printers]);
 
-  // Extract unique materials and colors from archives
-  const uniqueMaterials = [...new Set(
-    archives?.flatMap(a => a.filament_type?.split(', ') || []).filter(Boolean) || []
-  )].sort();
+  // Options for the filter menus, from the archives on hand.
+  const { uniqueMaterials, uniqueColors, uniqueTags } = useMemo(() => ({
+    uniqueMaterials: [...new Set(archives?.flatMap((a) => a.filament_type?.split(', ') || []).filter(Boolean) || [])].sort(),
+    uniqueColors: [...new Set(archives?.flatMap((a) => a.filament_color?.split(',') || []).filter(Boolean) || [])],
+    uniqueTags: [...new Set(archives?.flatMap((a) => a.tags?.split(',').map((t) => t.trim()) || []).filter(Boolean) || [])].sort(),
+  }), [archives]);
 
-  const uniqueColors = [...new Set(
-    archives?.flatMap(a => a.filament_color?.split(',') || []).filter(Boolean) || []
-  )];
-
-  const uniqueTags = [...new Set(
-    archives?.flatMap(a => a.tags?.split(',').map(t => t.trim()) || []).filter(Boolean) || []
-  )].sort();
-
-  const filteredArchives = archives
-    ?.filter((a) => {
-      // Collection filter
-      const now = new Date();
-      const archiveDate = parseUTCDate(a.created_at) || new Date(0);
-      let matchesCollection = true;
-
-      switch (collection) {
-        case 'recent':
-          matchesCollection = (now.getTime() - archiveDate.getTime()) < 24 * 60 * 60 * 1000;
-          break;
-        case 'this-week':
-          matchesCollection = (now.getTime() - archiveDate.getTime()) < 7 * 24 * 60 * 60 * 1000;
-          break;
-        case 'this-month':
-          matchesCollection = archiveDate.getMonth() === now.getMonth() && archiveDate.getFullYear() === now.getFullYear();
-          break;
-        case 'favorites':
-          matchesCollection = a.is_favorite === true;
-          break;
-        case 'not-printed':
-          matchesCollection = a.status === 'archived';
-          break;
-        case 'printed':
-          matchesCollection = (PRINTED_STATUSES as readonly string[]).includes(a.status);
-          break;
-        case 'failed':
-          matchesCollection = a.status === 'failed' || a.status === 'aborted';
-          break;
-        case 'duplicates':
-          matchesCollection = a.duplicate_count > 0;
-          break;
-      }
-
-      // Search filter
-      const matchesSearch = (a.print_name || a.filename).toLowerCase().includes(search.toLowerCase());
-
-      // Material filter
-      const matchesMaterial = !filterMaterial ||
-        (a.filament_type?.split(', ').includes(filterMaterial));
-
-      // Color filter (AND: must have all selected colors, OR: must have any selected color)
-      const archiveColors = a.filament_color?.split(',') || [];
-      const matchesColor = filterColors.size === 0 ||
-        (colorFilterMode === 'or'
-          ? archiveColors.some(c => filterColors.has(c))
-          : [...filterColors].every(c => archiveColors.includes(c)));
-
-      // Favorites filter (only apply if not using favorites collection)
-      const matchesFavorites = collection === 'favorites' || !filterFavorites || a.is_favorite;
-
-      // Hide failed filter (don't apply when viewing failed collection)
-      const matchesHideFailed = collection === 'failed' || !hideFailed || (a.status !== 'failed' && a.status !== 'aborted');
-
-      // Hide duplicates filter (don't apply when viewing duplicates collection)
-      const matchesHideDuplicates =
-        collection === 'duplicates' || !hideDuplicates || a.duplicate_count === 0 || a.duplicate_sequence === 0;
-
-      // Tag filter
-      const archiveTags = a.tags?.split(',').map(t => t.trim()) || [];
-      const matchesTag = !filterTag || archiveTags.includes(filterTag);
-
-      // File type filter (gcode = sliced, source = project file only)
-      const isGcodeFile = isSlicedFile(a);
-      const matchesFileType = filterFileType === 'all' ||
-        (filterFileType === 'gcode' && isGcodeFile) ||
-        (filterFileType === 'source' && !isGcodeFile);
-
-      return matchesCollection && matchesSearch && matchesMaterial && matchesColor && matchesFavorites && matchesHideFailed && matchesHideDuplicates && matchesTag && matchesFileType;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case 'date-desc':
-          return (parseUTCDate(b.created_at)?.getTime() || 0) - (parseUTCDate(a.created_at)?.getTime() || 0);
-        case 'date-asc':
-          return (parseUTCDate(a.created_at)?.getTime() || 0) - (parseUTCDate(b.created_at)?.getTime() || 0);
-        case 'name-asc':
-          return (a.print_name || a.filename).localeCompare(b.print_name || b.filename);
-        case 'name-desc':
-          return (b.print_name || b.filename).localeCompare(a.print_name || a.filename);
-        case 'size-desc':
-          return b.file_size - a.file_size;
-        case 'size-asc':
-          return a.file_size - b.file_size;
-        default:
-          return 0;
-      }
-    });
+  const filteredArchives = useMemo(
+    () => (archives ? filterAndSortArchives(archives, values, sortBy) : undefined),
+    [archives, values, sortBy],
+  );
 
   // Pagination
   const totalFiltered = filteredArchives?.length || 0;
   const showAll = pageSize === -1;
   const effectivePageSize = showAll ? totalFiltered || 1 : pageSize;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / effectivePageSize));
+  useEffect(() => {
+    if (pageIndex >= totalPages) setPageIndex(Math.max(0, totalPages - 1));
+  }, [pageIndex, totalPages]);
   const paginatedArchives = showAll
     ? filteredArchives
     : filteredArchives?.slice(pageIndex * effectivePageSize, (pageIndex + 1) * effectivePageSize);
+
+  // Print log rows: one per print. Archive-level filters are applied through the linked archive.
+  const archiveById = useMemo(() => new Map((archives ?? []).map((a) => [a.id, a])), [archives]);
+  const logEntriesFiltered = useMemo(
+    () => (logNeedsClientFilter ? filterLogEntries(printLogData?.items ?? [], archiveById, values) : printLogData?.items ?? []),
+    [logNeedsClientFilter, printLogData, archiveById, values],
+  );
+  const logTotal = logNeedsClientFilter ? logEntriesFiltered.length : printLogData?.total ?? 0;
+  const logRows = logNeedsClientFilter
+    ? logEntriesFiltered.slice(logOffset, logOffset + logPageSize)
+    : logEntriesFiltered;
+  // If rows disappear from under the current page (e.g. un-favouriting the last one under a
+  // favourites filter), step back to the last page that still has rows.
+  useEffect(() => {
+    if (printLogData && logOffset > 0 && logOffset >= logTotal) {
+      setLogOffset(Math.max(0, Math.floor((logTotal - 1) / logPageSize) * logPageSize));
+    }
+  }, [printLogData, logOffset, logTotal, logPageSize]);
+  // Client-side filters only see the newest LOG_CLIENT_FETCH_LIMIT entries.
+  const logTruncated = logNeedsClientFilter && (printLogData?.total ?? 0) > LOG_CLIENT_FETCH_LIMIT;
 
   // Jump to the page containing the highlighted archive
   useEffect(() => {
@@ -2971,8 +1802,42 @@ export function ArchivesPage() {
         if (targetPage !== pageIndex) setPageIndex(targetPage);
       }
     }
+  // Re-run once the archives arrive so a deep link on a cold load still finds its page.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightedArchiveId]);
+  }, [highlightedArchiveId, isLoading]);
+
+  // Clear highlight after 5 seconds and scroll to highlighted element
+  useEffect(() => {
+    // Wait for the archives to load: a deep link opened on a cold page would
+    // otherwise look for an element that does not exist yet.
+    if (highlightedArchiveId && !isLoading) {
+      // Scroll to highlighted element after a short delay (to let the view render)
+      const scrollTimer = setTimeout(() => {
+        const element = document.querySelector(`[data-archive-id="${highlightedArchiveId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (pendingNavigationArchiveId === highlightedArchiveId) {
+          showToast(t('archives.originalPrintNotVisible'), 'warning');
+        }
+        if (pendingNavigationArchiveId === highlightedArchiveId) {
+          setPendingNavigationArchiveId(null);
+        }
+      }, 100);
+
+      // Clear highlight after 5 seconds
+      const clearTimer = setTimeout(() => setHighlightedArchiveId(null), 5000);
+      return () => {
+        clearTimeout(scrollTimer);
+        clearTimeout(clearTimer);
+      };
+    }
+  }, [highlightedArchiveId, pendingNavigationArchiveId, isLoading, showToast, t]);
+
+  // The log and the grid list different things, so a selection made in one means nothing in the other.
+  const inLogView = viewMode === 'log';
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [inLogView]);
 
   const selectionMode = isSelectionMode || selectedIds.size > 0;
 
@@ -2989,6 +1854,11 @@ export function ArchivesPage() {
   };
 
   const selectAll = () => {
+    if (viewMode === 'log') {
+      // Only the archives behind the rows on screen, never ones the log doesn't show.
+      setSelectedIds(new Set(logRows.flatMap((e) => (e.archive_id != null && archiveById.has(e.archive_id) ? [e.archive_id] : []))));
+      return;
+    }
     if (filteredArchives) {
       setSelectedIds(new Set(filteredArchives.map((a) => a.id)));
     }
@@ -2999,34 +1869,12 @@ export function ArchivesPage() {
     setIsSelectionMode(false);
   };
 
-  const toggleColor = (color: string) => {
-    setFilterColors((prev) => {
-      const next = new Set(prev);
-      if (next.has(color)) {
-        next.delete(color);
-      } else {
-        next.add(color);
-      }
-      return next;
-    });
-  };
-
-  const clearColorFilter = () => {
-    setFilterColors(new Set());
-  };
-
-  const clearTopFilters = () => {
-    setSearch('');
-    setFilterPrinter(null);
-    setFilterMaterial(null);
-    setFilterFavorites(false);
-    setHideFailed(false);
-    setHideDuplicates(false);
-    setFilterTag(null);
-    setFilterFileType('all');
-  };
-
-  const hasTopFilters = search || filterPrinter || filterMaterial || filterFavorites || hideFailed || hideDuplicates || filterTag || filterFileType !== 'all';
+  const activeChips = useMemo(
+    () => getActiveFilterChips(values, t, filterPrinter ? printerMap.get(filterPrinter) : undefined),
+    [values, t, filterPrinter, printerMap],
+  );
+  const exportIgnored = exportIgnoredFilters(activeChips, collection);
+  const shownCount = viewMode === 'log' ? logTotal : filteredArchives?.length || 0;
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -3159,16 +2007,8 @@ export function ArchivesPage() {
                 {t('nav.archives')}
               </h1>
               <p className="text-bambu-gray mt-1">
-                {filteredArchives?.length || 0} of {archives?.length || 0} prints
+                {viewMode === 'log' ? logTotal : filteredArchives?.length || 0} of {viewMode === 'log' ? (printLogData?.total ?? 0) : archives?.length || 0} prints
               </p>
-            </div>
-            <div className="mt-0.5">
-              <ToolbarDropdown
-                value={collection}
-                onChange={(value) => setCollection(value as Collection)}
-                minWidthClass="min-w-36"
-                options={collections.map((c) => ({ value: c.id, label: c.label }))}
-              />
             </div>
           </div>
         </div>
@@ -3178,75 +2018,41 @@ export function ArchivesPage() {
             <Button
               variant="secondary"
               onClick={() => setShowExportMenu(!showExportMenu)}
-              disabled={isExporting}
+              disabled={isExporting || shownCount === 0}
             >
               {isExporting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <FileSpreadsheet className="w-4 h-4" />
               )}
-              Export
+              {t('archives.filters.export')}
             </Button>
             {showExportMenu && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl z-20">
+              <div className="absolute right-0 top-full mt-1 w-56 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl z-20">
                 <button
                   className="w-full px-4 py-2 text-left text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center gap-2 rounded-t-lg"
-                  onClick={async () => {
-                    setShowExportMenu(false);
-                    setIsExporting(true);
-                    try {
-                      const { blob, filename } = await api.exportArchives({
-                        format: 'csv',
-                        printerId: filterPrinter || undefined,
-                        status: collection === 'failed' ? 'failed' : undefined,
-                        search: search || undefined,
-                      });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = filename;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      showToast(t('archives.toast.exportDownloaded'));
-                    } catch {
-                      showToast(t('archives.toast.exportFailed'), 'error');
-                    } finally {
-                      setIsExporting(false);
-                    }
-                  }}
+                  onClick={() => runExport('csv')}
                 >
                   <FileText className="w-4 h-4" />
-                  Export as CSV
+                  {t('archives.filters.exportCsv')}
                 </button>
                 <button
                   className="w-full px-4 py-2 text-left text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center gap-2 rounded-b-lg"
-                  onClick={async () => {
-                    setShowExportMenu(false);
-                    setIsExporting(true);
-                    try {
-                      const { blob, filename } = await api.exportArchives({
-                        format: 'xlsx',
-                        printerId: filterPrinter || undefined,
-                        status: collection === 'failed' ? 'failed' : undefined,
-                        search: search || undefined,
-                      });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = filename;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                      showToast(t('archives.toast.exportDownloaded'));
-                    } catch {
-                      showToast(t('archives.toast.exportFailed'), 'error');
-                    } finally {
-                      setIsExporting(false);
-                    }
-                  }}
+                  onClick={() => runExport('xlsx')}
                 >
                   <FileSpreadsheet className="w-4 h-4" />
-                  Export as Excel
+                  {t('archives.filters.exportExcel')}
                 </button>
+                {viewMode === 'log' && (
+                  <p className="border-t border-bambu-dark-tertiary px-4 py-2 text-xs text-bambu-gray">
+                    {t('archives.filters.exportLogNote')}
+                  </p>
+                )}
+                {exportIgnored.length > 0 && (
+                  <p className="border-t border-bambu-dark-tertiary px-4 py-2 text-xs text-bambu-gray">
+                    {t('archives.filters.exportNote', { filters: exportIgnored.join(', ') })}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -3257,13 +2063,13 @@ export function ArchivesPage() {
               onClick={() => setShowCompareModal(true)}
             >
               <GitCompare className="w-4 h-4" />
-              Compare ({selectedIds.size})
+              {t('archives.filters.compare')} ({selectedIds.size})
             </Button>
           )}
           {!selectionMode && (
             <Button variant="secondary" onClick={() => setIsSelectionMode(true)}>
               <CheckSquare className="w-4 h-4" />
-              Select
+              {t('archives.filters.select')}
             </Button>
           )}
           {hasPermission('archives:purge') && (
@@ -3279,224 +2085,20 @@ export function ArchivesPage() {
         </div>
       </div>
 
-      {/* View mode toggle — always visible */}
-      <div className="flex h-8 items-center border border-bambu-dark-tertiary rounded-lg overflow-hidden flex-shrink-0 w-fit mb-4">
-        <button
-          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'grid' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-          onClick={() => setViewMode('grid')}
-          title={t('archives.gridView')}
-        >
-          <LayoutGrid className="w-4 h-4" />
-        </button>
-        <button
-          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'list' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-          onClick={() => setViewMode('list')}
-          title={t('archives.listView')}
-        >
-          <List className="w-4 h-4" />
-        </button>
-        <button
-          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'calendar' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-          onClick={() => setViewMode('calendar')}
-          title={t('archives.calendarView')}
-        >
-          <CalendarDays className="w-4 h-4" />
-        </button>
-        <button
-          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'log' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
-          onClick={() => setViewMode('log')}
-          title={t('archives.logView')}
-        >
-          <ClipboardList className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Filters (hidden in log view which has its own filters) */}
-      {viewMode !== 'log' && <Card className="mb-6">
-        <CardContent className="py-4">
-          <div className="flex flex-col md:flex-row gap-3 md:gap-4 md:items-center md:flex-wrap">
-            {/* Search - full width on mobile */}
-            <div className="w-full md:flex-1 relative md:min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder={t('archives.searchPlaceholder')}
-                className="h-8 w-full pl-10 pr-4 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-            {/* Filters - horizontal scroll on mobile */}
-            <div className="flex gap-2 md:gap-4 overflow-x-auto pb-1 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-hide">
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Filter className="w-4 h-4 text-bambu-gray hidden md:block" />
-                <ToolbarDropdown
-                  value={filterPrinter ? String(filterPrinter) : 'all'}
-                  onChange={(value) => setFilterPrinter(value === 'all' ? null : Number(value))}
-                  minWidthClass="min-w-36"
-                  options={[
-                    { value: 'all', label: 'All Printers' },
-                    ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
-                  ]}
-                />
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Package className="w-4 h-4 text-bambu-gray hidden md:block" />
-                <ToolbarDropdown
-                  value={filterMaterial || 'all'}
-                  onChange={(value) => setFilterMaterial(value === 'all' ? null : value)}
-                  minWidthClass="min-w-36"
-                  options={[
-                    { value: 'all', label: 'All Materials' },
-                    ...uniqueMaterials.map((m) => ({ value: m, label: m })),
-                  ]}
-                />
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <FileCode className="w-4 h-4 text-bambu-gray hidden md:block" />
-                <ToolbarDropdown
-                  value={filterFileType}
-                  onChange={(value) => setFilterFileType(value as 'all' | 'gcode' | 'source')}
-                  minWidthClass="min-w-36"
-                  options={[
-                    { value: 'all', label: 'All Files' },
-                    { value: 'gcode', label: 'Sliced (GCODE)' },
-                    { value: 'source', label: 'Source Only' },
-                  ]}
-                />
-              </div>
-              <button
-                onClick={() => setFilterFavorites(!filterFavorites)}
-                className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors flex-shrink-0 ${
-                  filterFavorites
-                    ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
-                    : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                }`}
-                title={filterFavorites ? t('archives.showAll') : t('archives.showFavoritesOnly')}
-              >
-                <Star className={`w-4 h-4 ${filterFavorites ? 'fill-yellow-400' : ''}`} />
-                <span className="text-sm hidden md:inline">Favorites</span>
-              </button>
-              <button
-                onClick={() => setHideFailed(!hideFailed)}
-                className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors flex-shrink-0 ${
-                  hideFailed
-                    ? 'bg-red-500/20 border-red-500 text-red-400'
-                    : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                }`}
-                title={hideFailed ? t('archives.showFailedPrints') : t('archives.hideFailedPrints')}
-              >
-                <AlertCircle className={`w-4 h-4 ${hideFailed ? '' : ''}`} />
-                <span className="text-sm hidden md:inline">Hide Failed</span>
-              </button>
-              <button
-                onClick={() => setHideDuplicates(!hideDuplicates)}
-                className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors flex-shrink-0 ${
-                  hideDuplicates
-                    ? 'bg-purple-500/20 border-purple-500 text-purple-400'
-                    : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                }`}
-                title={t('archives.hideDuplicates')}
-              >
-                <Copy className="w-4 h-4" />
-                <span className="text-sm hidden md:inline">{t('archives.hideDuplicates')}</span>
-              </button>
-              {uniqueTags.length > 0 && (
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <Tag className="w-4 h-4 text-bambu-gray hidden md:block" />
-                  <ToolbarDropdown
-                    value={filterTag || 'all'}
-                    onChange={(value) => setFilterTag(value === 'all' ? null : value)}
-                    minWidthClass="min-w-32"
-                    options={[
-                      { value: 'all', label: 'All Tags' },
-                      ...uniqueTags.map((tag) => ({ value: tag, label: tag })),
-                    ]}
-                  />
-                  <button
-                    onClick={() => setShowTagManagement(true)}
-                    className="h-8 w-8 flex items-center justify-center rounded-lg bg-bambu-dark border border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-green transition-colors"
-                    title={t('archives.manageTags')}
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <ArrowUpDown className="w-4 h-4 text-bambu-gray hidden md:block" />
-                <ToolbarDropdown<SortOption>
-                  value={sortBy}
-                  onChange={setSortBy}
-                  minWidthClass="min-w-36"
-                  options={[
-                    { value: 'date-desc', label: t('archives.sortNewest') },
-                    { value: 'date-asc', label: t('archives.sortOldest') },
-                    { value: 'name-asc', label: `${t('archives.sortName')} A-Z` },
-                    { value: 'name-desc', label: `${t('archives.sortName')} Z-A` },
-                    { value: 'size-desc', label: t('archives.sortLargest') },
-                    { value: 'size-asc', label: t('archives.sortSmallest') },
-                  ]}
-                />
-              </div>
-            </div>
-            {hasTopFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearTopFilters}
-                className="text-bambu-gray hover:text-white"
-              >
-                <X className="w-4 h-4" />
-                Reset
-              </Button>
-            )}
-          </div>
-          {/* Color Filter */}
-          {uniqueColors.length > 0 && (
-            <div className="flex items-center gap-3 mt-4 pt-4 border-t border-bambu-dark-tertiary">
-              <span className="text-xs text-bambu-gray">Colors:</span>
-              {filterColors.size > 1 && (
-                <button
-                  onClick={() => setColorFilterMode(m => m === 'or' ? 'and' : 'or')}
-                  className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                    colorFilterMode === 'and'
-                      ? 'bg-bambu-green text-white'
-                      : 'bg-bambu-dark-tertiary text-bambu-gray hover:text-white'
-                  }`}
-                  title={colorFilterMode === 'or' ? 'Match ANY selected color' : 'Match ALL selected colors'}
-                >
-                  {colorFilterMode.toUpperCase()}
-                </button>
-              )}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {uniqueColors.map((color) => (
-                  <button
-                    key={color}
-                    onClick={() => toggleColor(color)}
-                    className={`w-6 h-6 rounded-full border-2 transition-all ${
-                      filterColors.has(color)
-                        ? 'border-bambu-green scale-110'
-                        : 'border-white/20 hover:border-white/40'
-                    }`}
-                    style={{ backgroundColor: color }}
-                    title={color}
-                  />
-                ))}
-              </div>
-              {filterColors.size > 0 && (
-                <button
-                  onClick={clearColorFilter}
-                  className="text-xs text-bambu-gray hover:text-white flex items-center gap-1"
-                >
-                  <X className="w-3 h-3" />
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>}
+      <HistoryFilterBar
+        filters={filters}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        chips={activeChips}
+        printers={printers}
+        users={users}
+        uniqueMaterials={uniqueMaterials}
+        uniqueColors={uniqueColors}
+        uniqueTags={uniqueTags}
+        shownCount={shownCount}
+        searchInputRef={searchInputRef}
+        onManageTags={() => setShowTagManagement(true)}
+      />
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}
       <PendingUploadsPanel />
@@ -3504,15 +2106,22 @@ export function ArchivesPage() {
       {/* Archives */}
       {isLoading ? (
         <div className="text-center py-12 text-bambu-gray">{t('archives.loadingArchives')}</div>
-      ) : filteredArchives?.length === 0 ? (
+      ) : viewMode !== 'log' && filteredArchives?.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-bambu-gray">
-              {search ? t('archives.noArchivesSearch') : t('archives.noArchivesYet')}
+              {filters.hasActive ? t('archives.noArchivesSearch') : t('archives.noArchivesYet')}
             </p>
-            <p className="text-sm text-bambu-gray mt-2">
-              Archives are created automatically when prints complete
-            </p>
+            {filters.hasActive ? (
+              <Button variant="ghost" size="sm" className="mt-3" onClick={filters.clearAll}>
+                <X className="w-4 h-4" />
+                {t('archives.resetFilters')}
+              </Button>
+            ) : (
+              <p className="text-sm text-bambu-gray mt-2">
+                {t('archives.createdAutomatically')}
+              </p>
+            )}
           </CardContent>
         </Card>
       ) : viewMode === 'calendar' ? (
@@ -3560,314 +2169,53 @@ export function ArchivesPage() {
             t={t}
           />
         </>
-      ) : viewMode === 'list' ? (
-        <>
-          <Card>
-            <div className="divide-y divide-bambu-dark-tertiary">
-              {/* List Header */}
-              <div className="grid grid-cols-12 gap-4 px-4 py-3 text-xs text-bambu-gray font-medium">
-                <div className="col-span-1"></div>
-                <div className="col-span-4">Name</div>
-                <div className="col-span-2">Printer</div>
-                <div className="col-span-2">Date</div>
-                <div className="col-span-1">Size</div>
-                <div className="col-span-2 text-right">Actions</div>
-              </div>
-              {/* List Items */}
-              {paginatedArchives?.map((archive) => (
-                <ArchiveListRow
-                  key={archive.id}
-                  archive={archive}
-                  printerName={archive.printer_id ? printerMap.get(archive.printer_id) || 'Unknown' : (archive.sliced_for_model || 'No Printer')}
-                  isSelected={selectedIds.has(archive.id)}
-                  onSelect={toggleSelect}
-                  selectionMode={selectionMode}
-                  projects={projects}
-                  isHighlighted={archive.id === highlightedArchiveId}
-                  preferredSlicer={preferredSlicer}
-                  useSlicerApi={useSlicerApi}
-                  t={t}
-                  onNavigateToArchive={handleNavigateToArchive}
-                />
-              ))}
-            </div>
-          </Card>
-          <ArchivePaginationBar
-            pageIndex={pageIndex}
-            pageSize={pageSize}
-            totalRows={totalFiltered}
-            totalPages={totalPages}
-            onPageChange={setPageIndex}
-            onPageSizeChange={(size) => { setPageSize(size); setPageIndex(0); }}
-            t={t}
-          />
-        </>
       ) : viewMode === 'log' ? (
         <div className="space-y-4">
-          {/* Log filters */}
-          <Card>
-            <CardContent className="py-3">
-              <div className="flex flex-col md:flex-row gap-3 md:items-center md:flex-wrap">
-                {/* Search */}
-                <div className="flex-1 relative md:min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
-                  <input
-                    type="text"
-                    placeholder={t('archives.searchPlaceholder')}
-                    className="h-8 w-full pl-10 pr-4 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={search}
-                    onChange={(e) => { setSearch(e.target.value); setLogOffset(0); }}
-                  />
-                </div>
-                {/* Printer filter */}
-                <ToolbarDropdown
-                  value={filterPrinter ? String(filterPrinter) : 'all'}
-                  onChange={(value) => {
-                    setFilterPrinter(value === 'all' ? null : Number(value));
-                    setLogOffset(0);
-                  }}
-                  minWidthClass="min-w-36"
-                  options={[
-                    { value: 'all', label: t('archives.log.allPrinters') },
-                    ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
-                  ]}
-                />
-                {/* User filter */}
-                <ToolbarDropdown
-                  value={logFilterUser || 'all'}
-                  onChange={(value) => {
-                    setLogFilterUser(value === 'all' ? null : value);
-                    setLogOffset(0);
-                  }}
-                  minWidthClass="min-w-32"
-                  options={[
-                    { value: 'all', label: t('archives.log.allUsers') },
-                    ...(users?.map((u) => ({ value: u.username, label: u.username })) ?? []),
-                  ]}
-                />
-                {/* Status filter */}
-                <ToolbarDropdown
-                  value={logFilterStatus || 'all'}
-                  onChange={(value) => {
-                    setLogFilterStatus(value === 'all' ? null : value);
-                    setLogOffset(0);
-                  }}
-                  minWidthClass="min-w-32"
-                  options={[
-                    { value: 'all', label: t('archives.log.allStatuses') },
-                    { value: 'completed', label: t('archives.status.completed') },
-                    { value: 'failed', label: t('archives.status.failed') },
-                    { value: 'stopped', label: t('archives.status.stopped') },
-                    { value: 'cancelled', label: t('archives.log.cancelled') },
-                    { value: 'skipped', label: t('archives.log.skipped') },
-                  ]}
-                />
-                {/* Date range */}
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-bambu-gray">{t('archives.log.dateFrom')}</label>
-                  <input
-                    type="date"
-                    className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={logFilterDateFrom}
-                    onChange={(e) => { setLogFilterDateFrom(e.target.value); setLogOffset(0); }}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-bambu-gray">{t('archives.log.dateTo')}</label>
-                  <input
-                    type="date"
-                    className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={logFilterDateTo}
-                    onChange={(e) => { setLogFilterDateTo(e.target.value); setLogOffset(0); }}
-                  />
-                </div>
-                {/* Clear log button */}
-                <div className="ml-auto">
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => setShowClearLogConfirm(true)}
-                    disabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    {t('archives.log.clearLog')}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="flex items-center justify-between gap-3">
+            {logTruncated ? (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                {t('archives.log.truncatedNote', { limit: LOG_CLIENT_FETCH_LIMIT, total: printLogData?.total ?? 0 })}
+              </p>
+            ) : <span />}
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => setShowClearLogConfirm(true)}
+              disabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
+            >
+              <Trash2 className="w-4 h-4" />
+              {t('archives.log.clearLog')}
+            </Button>
+          </div>
 
-          {/* Log table */}
-          <Card>
-            {isLogLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
-              </div>
-            ) : !printLogData?.items.length ? (
-              <div className="text-center py-12 text-bambu-gray">
-                {t('archives.log.noEntries')}
-              </div>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-bambu-dark-tertiary text-bambu-gray text-left">
-                        <th className="px-4 py-3 font-medium">{t('archives.log.date')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.printName')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.printer')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.user')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.status')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.duration')}</th>
-                        <th className="px-4 py-3 font-medium">{t('archives.log.filament')}</th>
-                        <th className="px-4 py-3 font-medium w-10" aria-label={t('common.actions')} />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-bambu-dark-tertiary">
-                      {printLogData.items.map((entry) => (
-                        <tr key={entry.id} className="hover:bg-bambu-dark-secondary/50">
-                          <td className="px-4 py-3 text-white whitespace-nowrap">
-                            {formatDateTime(entry.started_at || entry.created_at, timeFormat)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              {entry.thumbnail_path && (
-                                <img
-                                  src={api.getPrintLogThumbnail(entry.id)}
-                                  alt=""
-                                  className="w-8 h-8 rounded object-cover flex-shrink-0"
-                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                />
-                              )}
-                              <span className="text-white break-words" title={entry.print_name || ''}>
-                                {entry.print_name || '—'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-bambu-gray-light">{entry.printer_name || '—'}</td>
-                          <td className="px-4 py-3 text-bambu-gray-light">{entry.created_by_username || '—'}</td>
-                          <td className="px-4 py-3">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              entry.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                              entry.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                              entry.status === 'stopped' ? 'bg-yellow-500/20 text-yellow-400' :
-                              entry.status === 'cancelled' ? 'bg-orange-500/20 text-orange-400' :
-                              entry.status === 'skipped' ? 'bg-blue-500/20 text-blue-400' :
-                              'bg-gray-500/20 text-gray-400'
-                            }`}>
-                              {entry.status}
-                            </span>
-                            {entry.failure_reason && (
-                              <span className="block text-[10px] text-bambu-gray mt-0.5">
-                                {t(`editArchive.failureReasons.${entry.failure_reason}`, { defaultValue: entry.failure_reason })}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-bambu-gray-light whitespace-nowrap">
-                            {entry.duration_seconds ? formatDuration(entry.duration_seconds) : '—'}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              {entry.filament_color && (
-                                <div className="flex items-center gap-0.5 flex-wrap">
-                                  {entry.filament_color.split(',').map((color, i) => {
-                                    const trimmed = color.trim();
-                                    return (
-                                      <span
-                                        key={i}
-                                        className="w-3 h-3 rounded-full border border-black/20 flex-shrink-0"
-                                        style={{ backgroundColor: trimmed.startsWith('#') ? trimmed : undefined }}
-                                        title={trimmed}
-                                      />
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              <span className="text-bambu-gray-light text-xs">
-                                {entry.filament_type || '—'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingLogEntry(entry);
-                                  setEditingLogFailureReason(entry.failure_reason || '');
-                                  setEditingLogStatus(entry.status);
-                                }}
-                                disabled={
-                                  updateLogEntryMutation.isPending ||
-                                  !(hasPermission('archives:update_all') || hasPermission('archives:update_own'))
-                                }
-                                title={
-                                  hasPermission('archives:update_all') || hasPermission('archives:update_own')
-                                    ? t('archives.log.editEntryTitle')
-                                    : t('archives.permission.noEdit')
-                                }
-                                className="text-bambu-gray hover:text-bambu-blue disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPendingDeleteEntryId(entry.id)}
-                                disabled={
-                                  deleteLogEntryMutation.isPending ||
-                                  !(hasPermission('archives:delete_all') || hasPermission('archives:delete_own'))
-                                }
-                                title={
-                                  hasPermission('archives:delete_all') || hasPermission('archives:delete_own')
-                                    ? t('archives.log.deleteEntryTitle')
-                                    : t('archives.permission.noDelete')
-                                }
-                                className="text-bambu-gray hover:text-red-400 disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Pagination */}
-                <div className="flex items-center justify-between px-4 py-3 border-t border-bambu-dark-tertiary flex-wrap gap-2">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-bambu-gray">
-                      {t('archives.log.showing', { count: Math.min(logOffset + logPageSize, printLogData.total), total: printLogData.total })}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <label className="text-xs text-bambu-gray">{t('archives.log.rowsPerPage')}</label>
-                      <ReactSelect
-                        className="px-2 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-xs focus:border-bambu-green focus:outline-none"
-                        value={logPageSize}
-                        onChange={(e) => { setLogPageSize(Number(e.target.value)); setLogOffset(0); }}
-                      >
-                        <option value={10}>10</option>
-                        <option value={25}>25</option>
-                        <option value={50}>50</option>
-                        <option value={100}>100</option>
-                      </ReactSelect>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-bambu-gray">
-                      {t('archives.log.page')} {Math.floor(logOffset / logPageSize) + 1} / {Math.max(1, Math.ceil(printLogData.total / logPageSize))}
-                    </span>
-                    <Button variant="secondary" size="sm" onClick={() => setLogOffset(Math.max(0, logOffset - logPageSize))} disabled={logOffset === 0}>
-                      <ChevronLeft className="w-4 h-4" />
-                    </Button>
-                    <Button variant="secondary" size="sm" onClick={() => setLogOffset(logOffset + logPageSize)} disabled={logOffset + logPageSize >= printLogData.total}>
-                      <ChevronRight className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </Card>
+          <HistoryLogTable
+            rows={logRows}
+            isLoading={isLogLoading}
+            total={logTotal}
+            offset={logOffset}
+            pageSize={logPageSize}
+            onOffsetChange={setLogOffset}
+            onPageSizeChange={setLogPageSize}
+            archiveById={archiveById}
+            selectionMode={selectionMode}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            timeFormat={timeFormat}
+            currency={currency}
+            hasActiveFilters={filters.hasActive}
+            onResetFilters={filters.clearAll}
+            onReprint={setLogReprintArchive}
+            onToggleFavourite={(id) => logFavouriteMutation.mutate(id)}
+            onDownload={downloadLogArchive}
+            onShowInGrid={openArchiveInGrid}
+            onEdit={(entry) => {
+              setEditingLogEntry(entry);
+              setEditingLogFailureReason(entry.failure_reason || '');
+              setEditingLogStatus(entry.status);
+            }}
+            onDelete={setPendingDeleteEntryId}
+            busy={{ editing: updateLogEntryMutation.isPending, deleting: deleteLogEntryMutation.isPending }}
+          />
 
         </div>
       ) : null}
@@ -3927,6 +2275,15 @@ export function ArchivesPage() {
       )}
 
       {/* Clear Log Confirmation */}
+      {logReprintArchive && (
+        <PrintModal
+          mode="create"
+          archiveId={logReprintArchive.id}
+          archiveName={logReprintArchive.print_name || logReprintArchive.filename}
+          onClose={() => setLogReprintArchive(null)}
+        />
+      )}
+
       {showClearLogConfirm && (
         <ConfirmModal
           title={t('archives.log.clearLogTitle')}

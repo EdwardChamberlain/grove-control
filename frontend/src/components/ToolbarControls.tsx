@@ -113,6 +113,13 @@ export function ToolbarDropdown<T extends string>({
         type="button"
         disabled={disabled}
         onClick={() => setIsOpen(open => !open)}
+        onKeyDown={(event) => {
+          // Escape closes just this menu; marking it handled lets a surrounding panel stay open.
+          if (event.key === 'Escape' && isOpen) {
+            event.preventDefault();
+            setIsOpen(false);
+          }
+        }}
         className={`${toolbarControlClass} flex items-center justify-between gap-2 ${fullWidth ? 'w-full' : minWidthClass} ${disabled ? 'opacity-60 cursor-not-allowed hover:bg-bambu-dark' : ''}`}
       >
         <span className="truncate">{selectedLabel ?? selectedOption?.label}</span>

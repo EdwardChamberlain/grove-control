@@ -3,11 +3,14 @@ import io
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.models.archive import PrintArchive
+from backend.app.models.print_log import PrintLogEntry
+from backend.app.models.user import User
+from backend.app.utils.local_time import to_naive_utc
 
 
 class ExportService:
@@ -81,6 +84,9 @@ class ExportService:
         date_to: datetime | None = None,
         search: str | None = None,
         visible_to_user_id: int | None = None,
+        created_by_username: str | None = None,
+        printed_from: datetime | None = None,
+        printed_to: datetime | None = None,
     ) -> tuple[bytes, str, str]:
         """Export archives to CSV or Excel format.
 
@@ -89,10 +95,13 @@ class ExportService:
             fields: List of fields to include (None = all default fields)
             printer_id: Filter by printer
             project_id: Filter by project
-            status: Filter by status
+            status: Filter by status (comma-separated for several)
             date_from: Filter by start date
             date_to: Filter by end date
             search: Search filter
+            created_by_username: Only archives created by this user
+            printed_from: Only archives last printed at or after this instant
+            printed_to: Only archives last printed at or before this instant
             visible_to_user_id: Scope rows to those owned by this user (used
                 when the caller has ARCHIVES_READ_OWN but not _ALL).
 
@@ -109,8 +118,27 @@ class ExportService:
             query = query.where(PrintArchive.printer_id == printer_id)
         if project_id:
             query = query.where(PrintArchive.project_id == project_id)
-        if status:
-            query = query.where(PrintArchive.status == status)
+        statuses = [part.strip() for part in status.split(",") if part.strip()] if status else []
+        if statuses:
+            query = query.where(PrintArchive.status.in_(statuses))
+        if created_by_username:
+            query = query.where(
+                PrintArchive.created_by_id.in_(select(User.id).where(User.username == created_by_username))
+            )
+        if printed_from or printed_to:
+            # "Last printed" mirrors the History page: the latest logged run, else
+            # the archive's own start time, else when it was uploaded.
+            last_run = (
+                select(func.max(PrintLogEntry.started_at))
+                .where(PrintLogEntry.archive_id == PrintArchive.id)
+                .correlate(PrintArchive)
+                .scalar_subquery()
+            )
+            printed_at = func.coalesce(last_run, PrintArchive.started_at, PrintArchive.created_at)
+            if printed_from:
+                query = query.where(printed_at >= to_naive_utc(printed_from))
+            if printed_to:
+                query = query.where(printed_at <= to_naive_utc(printed_to))
         if date_from:
             query = query.where(PrintArchive.created_at >= date_from)
         if date_to:

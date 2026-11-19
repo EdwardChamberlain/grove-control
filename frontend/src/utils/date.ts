@@ -474,3 +474,28 @@ export function localDateKey(input: string | Date): string {
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+/**
+ * When a model was last printed: the latest print-log run, then the archive's
+ * own start time, falling back to upload time for never-printed files.
+ */
+export function getLastPrintedAt(a: {
+  last_run_at?: string | null;
+  started_at?: string | null;
+  created_at: string;
+}): string {
+  return a.last_run_at || a.started_at || a.created_at;
+}
+
+/**
+ * Start or end of a local calendar day (`YYYY-MM-DD`, as a date input or saved
+ * filter gives it), or null when the text is not a real date. Date inputs accept
+ * years far beyond 9999, and a saved value can be stale or hand-edited, so callers
+ * must treat "no valid date" as "no bound" rather than let an invalid Date throw
+ * later (`toISOString` throws on one).
+ */
+export function localDayBound(ymd: string, edge: 'start' | 'end'): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const date = new Date(edge === 'start' ? `${ymd}T00:00:00` : `${ymd}T23:59:59.999`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}

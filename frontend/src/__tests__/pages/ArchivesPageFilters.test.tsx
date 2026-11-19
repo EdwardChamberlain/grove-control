@@ -82,6 +82,11 @@ async function pickOption(user: ReturnType<typeof userEvent.setup>, trigger: str
   await user.click(await screen.findByRole('button', { name: option }));
 }
 
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /^Filters/ }));
+  return within(await screen.findByRole('dialog', { name: 'Filters' }));
+}
+
 describe('ArchivesPage printer and material filters', () => {
   it('filters by printer on the server and shows the matching count', async () => {
     const items = [
@@ -114,6 +119,7 @@ describe('ArchivesPage printer and material filters', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
+    await openFilters(user);
     await pickOption(user, 'All Materials', 'PETG');
 
     expect(await screen.findByText('Gear')).toBeInTheDocument();
@@ -121,9 +127,9 @@ describe('ArchivesPage printer and material filters', () => {
     expect(screen.queryByText('Vase')).not.toBeInTheDocument();
     expect(screen.getByText('1 of 3 prints')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Reset' }));
+    await user.click(screen.getAllByRole('button', { name: 'Reset' })[0]);
     expect(await screen.findByText('3 of 3 prints')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
   });
 });
 
@@ -138,7 +144,7 @@ describe('ArchivesPage colour filter', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Red Cube');
-    const colours = within(screen.getByText('Colors:').parentElement as HTMLElement);
+    const colours = await openFilters(user);
 
     await user.click(colours.getByTitle('#FF0000'));
     expect(await screen.findByText('2 of 3 prints')).toBeInTheDocument();
@@ -152,7 +158,7 @@ describe('ArchivesPage colour filter', () => {
     expect(screen.getByText('Red Cube')).toBeInTheDocument();
     expect(screen.queryByText('Red Cap')).not.toBeInTheDocument();
 
-    await user.click(colours.getByRole('button', { name: 'Clear' }));
+    await user.click(colours.getByRole('button', { name: 'Reset' }));
     expect(await screen.findByText('3 of 3 prints')).toBeInTheDocument();
   });
 });
@@ -170,6 +176,7 @@ describe('ArchivesPage toggle filters', () => {
 
     await screen.findAllByText('Plain Print');
     expect(screen.getByText('4 of 4 prints')).toBeInTheDocument();
+    await openFilters(user);
 
     await user.click(screen.getByRole('button', { name: 'Hide Failed' }));
     expect(await screen.findByText('3 of 4 prints')).toBeInTheDocument();
@@ -197,6 +204,7 @@ describe('ArchivesPage toggle filters', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Sliced Part');
+    await openFilters(user);
     await pickOption(user, 'All Files', 'Source Only');
     expect(await screen.findByText('Source Part')).toBeInTheDocument();
     expect(screen.queryByText('Sliced Part')).not.toBeInTheDocument();
@@ -215,6 +223,7 @@ describe('ArchivesPage toggle filters', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Untagged');
+    await openFilters(user);
     await pickOption(user, 'All Tags', 'calibration');
 
     expect(await screen.findByText('Tagged')).toBeInTheDocument();
@@ -229,6 +238,18 @@ describe('ArchivesPage sorting', () => {
     archive(2, 'Charlie'),
   ];
 
+  it('puts a reprinted model first by last print date, not upload date', async () => {
+    useArchives([
+      archive(3, 'Alpha'),
+      archive(1, 'Bravo', { last_run_at: new Date(Date.UTC(2026, 5, 1, 12)).toISOString() }),
+      archive(2, 'Charlie'),
+    ]);
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Alpha');
+    expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Bravo', 'Alpha', 'Charlie']);
+  });
+
   it('sorts by name and remembers the choice', async () => {
     useArchives(items);
     const user = userEvent.setup();
@@ -237,7 +258,7 @@ describe('ArchivesPage sorting', () => {
     await screen.findAllByText('Alpha');
     expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Alpha', 'Charlie', 'Bravo']);
 
-    await pickOption(user, 'Newest first', 'Name A-Z');
+    await pickOption(user, 'Recently printed', 'Name A-Z');
     await waitFor(() => expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Alpha', 'Bravo', 'Charlie']));
     expect(localStorage.setItem).toHaveBeenCalledWith('archiveSortBy', 'name-asc');
   });
@@ -248,7 +269,7 @@ describe('ArchivesPage sorting', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Alpha');
-    await pickOption(user, 'Newest first', 'Smallest first');
+    await pickOption(user, 'Recently printed', 'Smallest first');
     await waitFor(() => expect(visibleNames(['Alpha', 'Bravo', 'Charlie'])).toEqual(['Bravo', 'Charlie', 'Alpha']));
 
     await pickOption(user, 'Smallest first', 'Largest first');
@@ -260,15 +281,15 @@ describe('ArchivesPage collections, search and pagination', () => {
   it('narrows to recent prints and to failed prints', async () => {
     const now = new Date().toISOString();
     useArchives([
-      archive(1, 'Fresh Print', { created_at: now }),
-      archive(2, 'Old Failure', { created_at: '2020-01-01T00:00:00Z', status: 'failed' }),
-      archive(3, 'Old Print', { created_at: '2020-01-01T00:00:00Z' }),
+      archive(1, 'Fresh Print', { created_at: now, started_at: now }),
+      archive(2, 'Old Failure', { created_at: '2020-01-01T00:00:00Z', started_at: '2020-01-01T00:00:00Z', status: 'failed' }),
+      archive(3, 'Old Print', { created_at: '2020-01-01T00:00:00Z', started_at: '2020-01-01T00:00:00Z' }),
     ]);
     const user = userEvent.setup();
     render(<ArchivesPage />);
 
     await screen.findAllByText('Old Print');
-    await pickOption(user, 'All Archives', 'Last 24 Hours');
+    await pickOption(user, 'All Prints', 'Last 24 Hours');
     expect(await screen.findByText('Fresh Print')).toBeInTheDocument();
     expect(screen.queryByText('Old Print')).not.toBeInTheDocument();
 
@@ -283,7 +304,7 @@ describe('ArchivesPage collections, search and pagination', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    const search = screen.getByPlaceholderText('Search archives...');
+    const search = screen.getByPlaceholderText('Search prints...');
 
     await user.type(search, 'brack');
     expect(await screen.findByText('1 of 2 prints')).toBeInTheDocument();
@@ -291,8 +312,12 @@ describe('ArchivesPage collections, search and pagination', () => {
 
     await user.clear(search);
     await user.type(search, 'zzz');
-    expect(await screen.findByText('No archives match your search')).toBeInTheDocument();
+    expect(await screen.findByText('No prints match your filters')).toBeInTheDocument();
     expect(screen.getByText('0 of 2 prints')).toBeInTheDocument();
+
+    // The empty state offers a way back instead of leaving the filters stuck on.
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(await screen.findByText('2 of 2 prints')).toBeInTheDocument();
   });
 
   it('pages through a long list with the page size control', async () => {
@@ -331,5 +356,175 @@ describe('ArchivesPage collections, search and pagination', () => {
     expect(await screen.findByText('26 prints')).toBeInTheDocument();
     expect(screen.queryByText('Page 1 of 2')).not.toBeInTheDocument();
     expect(screen.getByText('Print 01')).toBeInTheDocument();
+  });
+});
+
+describe('ArchivesPage filters panel', () => {
+  it('keeps secondary filters behind one button and shows what is active as removable chips', async () => {
+    useArchives([
+      archive(1, 'Benchy', { filament_type: 'PLA' }),
+      archive(2, 'Gear', { filament_type: 'PETG' }),
+    ]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    // Nothing secondary is on the page until the panel is opened, and no chips yet.
+    expect(screen.queryByRole('button', { name: 'All Materials' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
+
+    await openFilters(user);
+    await pickOption(user, 'All Materials', 'PETG');
+    expect(await screen.findByRole('button', { name: 'Remove filter: PETG' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filters (1 active)' })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: 'Show 1' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Remove filter: PETG' }));
+    expect(await screen.findByText('2 of 2 prints')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
+  });
+
+  it('puts focus in the panel when it opens and returns it to the button when it closes', async () => {
+    useArchives([archive(1, 'Benchy')]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    await openFilters(user);
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: /^Filters/ })).toHaveFocus();
+  });
+
+  it('lets Escape close an open dropdown inside the panel before it closes the panel', async () => {
+    useArchives([archive(1, 'Benchy', { filament_type: 'PLA' })]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    await openFilters(user);
+    await user.click(screen.getByRole('button', { name: 'All Materials' }));
+    expect(await screen.findByRole('button', { name: 'PLA' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('button', { name: 'PLA' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument();
+  });
+
+  it('closes the panel when Manage Tags opens, so Escape reaches the dialog', async () => {
+    server.use(http.get('/api/v1/archives/tags', () => HttpResponse.json([{ name: 'calibration', count: 1 }])));
+    useArchives([archive(1, 'Tagged', { tags: 'calibration' })]);
+    server.use(http.get('/api/v1/archives/tags', () => HttpResponse.json([{ name: 'calibration', count: 1 }])));
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Tagged');
+
+    const panel = await openFilters(user);
+    await user.click(panel.getByTitle('Manage Tags'));
+
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Manage Tags' })).toBeInTheDocument();
+  });
+
+  it('names colour swatches by colour and keeps Tab inside the sheet on a phone', async () => {
+    const spy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: true, media: query, onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }));
+    try {
+      useArchives([archive(1, 'Red Cube', { filament_color: '#FF0000' })]);
+      const user = userEvent.setup();
+      render(<ArchivesPage />);
+      await screen.findAllByText('Red Cube');
+
+      const panel = await openFilters(user);
+      expect(screen.getByRole('dialog', { name: 'Filters' })).toHaveAttribute('aria-modal', 'true');
+      expect(panel.getByRole('button', { name: 'Red' })).toBeInTheDocument();
+
+      // Tab from the last control wraps to the first instead of leaving the sheet.
+      panel.getByRole('button', { name: /^Show/ }).focus();
+      await user.tab();
+      expect(panel.getByRole('button', { name: 'All Printers' })).toHaveFocus();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('closes the panel with Escape', async () => {
+    useArchives([archive(1, 'Benchy')]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+    await screen.findAllByText('Benchy');
+
+    await openFilters(user);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).not.toBeInTheDocument();
+  });
+
+  it('moves printer, status and sort into the panel on a phone', async () => {
+    const spy = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      useArchives([archive(1, 'Benchy')]);
+      const user = userEvent.setup();
+      render(<ArchivesPage />);
+      await screen.findAllByText('Benchy');
+
+      expect(screen.queryByRole('button', { name: 'All Printers' })).not.toBeInTheDocument();
+      const panel = await openFilters(user);
+      expect(panel.getByRole('button', { name: 'All Printers' })).toBeInTheDocument();
+      expect(panel.getByRole('button', { name: 'All Statuses' })).toBeInTheDocument();
+      expect(panel.getByRole('button', { name: 'Recently printed' })).toBeInTheDocument();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('ArchivesPage last-printed label and deep links on a cold load', () => {
+  it('only says "Not yet printed" for archives that were never sent to a printer', async () => {
+    useArchives([
+      archive(1, 'Uploaded Only', { status: 'archived', started_at: null, completed_at: null }),
+      archive(2, 'Ran Without Start', { status: 'completed', started_at: null, completed_at: null }),
+    ]);
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Uploaded Only');
+    // One card is genuinely unprinted; the other ran, so it shows a date instead.
+    expect(screen.getAllByText('Not yet printed')).toHaveLength(1);
+  });
+
+  it('finds a highlighted archive on a later page when the page opens cold', async () => {
+    setStorage({ archiveViewMode: 'grid', archivePageSize: '25' });
+    const many = Array.from({ length: 26 }, (_, i) => archive(i + 1, `Print ${String(i + 1).padStart(2, '0')}`));
+    useArchives(many);
+    window.history.pushState({}, '', '/archives?highlight=1');
+    // jsdom has no scrollIntoView; the page calls it once the highlighted card exists.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      render(<ArchivesPage />);
+
+      // Print 01 is the oldest, so it sits on page 2; the jump has to wait for the data.
+      expect(await screen.findByText('Page 2 of 2')).toBeInTheDocument();
+      expect(screen.getByText('Print 01')).toBeInTheDocument();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(screen.queryByText(/not visible/i)).not.toBeInTheDocument();
+      expect(scrollIntoView).toHaveBeenCalled();
+    } finally {
+      delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+      window.history.pushState({}, '', '/');
+    }
   });
 });
