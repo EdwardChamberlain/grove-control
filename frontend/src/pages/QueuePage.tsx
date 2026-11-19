@@ -2107,6 +2107,7 @@ export function QueuePage() {
                   className="flex items-center gap-1.5 text-xs sm:text-sm text-bambu-green hover:text-bambu-green-light"
                   disabled={!hasAnyPermission('queue:update_own', 'queue:update_all')}
                   title={!hasAnyPermission('queue:update_own', 'queue:update_all') ? t('queue.permissions.noEditItems') : t('queue.bulkEdit.editSelected')}
+                  aria-label={t('queue.bulkEdit.editSelected')}
                 >
                   <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   <span className="hidden 2xl:inline">{t('queue.bulkEdit.editSelected')}</span>
@@ -2118,6 +2119,7 @@ export function QueuePage() {
                   className="flex items-center gap-1.5 text-xs sm:text-sm text-red-400 hover:text-red-300"
                   disabled={bulkCancelMutation.isPending || !hasAnyPermission('queue:delete_own', 'queue:delete_all')}
                   title={!hasAnyPermission('queue:delete_own', 'queue:delete_all') ? t('queue.permissions.noCancelItems') : t('queue.bulkEdit.cancelSelected')}
+                  aria-label={t('queue.bulkEdit.cancelSelected')}
                 >
                   <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   <span className="hidden 2xl:inline">{t('queue.bulkEdit.cancelSelected')}</span>
