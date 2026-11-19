@@ -215,8 +215,18 @@ describe('QueuePage', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Active Print')).toBeInTheDocument();
-        expect(screen.getByText('Active jobs')).toBeInTheDocument();
       });
+    });
+
+    it('lists printing and queued jobs without section headings', async () => {
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Active Print')).toBeInTheDocument();
+        expect(screen.getByText('Test Print 1')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Active jobs')).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { level: 2 })).not.toBeInTheDocument();
     });
 
     it('shows dispatching items as active without calling them printing', async () => {
@@ -236,7 +246,6 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Active jobs')).toBeInTheDocument();
         expect(screen.getByText('Awaiting printer acknowledgement')).toBeInTheDocument();
         expect(screen.getAllByText('Dispatching').length).toBeGreaterThan(0);
         expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/1\s*Printing/);
@@ -409,6 +418,50 @@ describe('QueuePage', () => {
       await waitFor(() => {
         expect(screen.getByText('No prints scheduled')).toBeInTheDocument();
       });
+    });
+
+    it('renders the empty state on the page background, not in a card', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([])));
+
+      render(<QueuePage />);
+
+      const title = await screen.findByText('No prints scheduled');
+      const container = title.parentElement as HTMLElement;
+      expect(container.className).not.toMatch(/border|bg-|rounded/);
+    });
+  });
+
+  describe('toolbar', () => {
+    it('puts filters, layout, sort and SJF on one toolbar row', async () => {
+      render(<QueuePage />);
+
+      const printerFilter = await screen.findByRole('button', { name: 'All Printers' });
+      const toolbar = printerFilter.closest('.flex-wrap') as HTMLElement;
+      expect(toolbar).not.toBeNull();
+
+      for (const control of [
+        screen.getByRole('button', { name: 'All Status' }),
+        screen.getByRole('button', { name: /By Printer/ }),
+        screen.getByRole('button', { name: 'Sort by Position' }),
+        screen.getByRole('button', { name: /SJF/ }),
+        screen.getByRole('button', { name: 'Select All' }),
+      ]) {
+        expect(toolbar).toContainElement(control);
+      }
+    });
+
+    it('shows the layout toggle as a pressed segmented control', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      const list = await screen.findByRole('button', { name: /^List$/ });
+      const byPrinter = screen.getByRole('button', { name: /By Printer/ });
+      expect(list).toHaveAttribute('aria-pressed', 'true');
+      expect(byPrinter).toHaveAttribute('aria-pressed', 'false');
+
+      await user.click(byPrinter);
+      expect(byPrinter).toHaveAttribute('aria-pressed', 'true');
+      expect(list).toHaveAttribute('aria-pressed', 'false');
     });
   });
 
