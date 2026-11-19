@@ -299,7 +299,7 @@ test('postponed print submits its UTC start time and is shown as scheduled in th
   expect(queueCall?.body).toMatchObject({ scheduled_time: '2099-12-31T09:30:00.000Z' });
 
   await page.goto('/queue');
-  await expect(page.getByText('Scheduled', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Scheduled, Drag to reorder/ })).toBeVisible();
   await expect(page.getByText(/Dec 31, 2099, 09:30 AM/)).toBeVisible();
 });
 
