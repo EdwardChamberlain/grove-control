@@ -17,6 +17,7 @@ import {
   formatDuration,
   formatRelativeTime,
   localDateKey,
+  localDayBound,
 } from '../../utils/date';
 
 describe('getDatePlaceholder', () => {
@@ -490,5 +491,20 @@ describe('localDateKey (#1446 — Print Activity heatmap bucketing)', () => {
     // The exact local date depends on the CI runner's tz, but the result
     // must always be a well-formed YYYY-MM-DD (10 chars, two dashes).
     expect(key).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('localDayBound', () => {
+  it('returns the start and end of a local day', () => {
+    expect(localDayBound('2026-03-05', 'start')).toEqual(new Date('2026-03-05T00:00:00'));
+    expect(localDayBound('2026-03-05', 'end')).toEqual(new Date('2026-03-05T23:59:59.999'));
+  });
+
+  it('returns null for anything that is not a real date', () => {
+    expect(localDayBound('', 'start')).toBeNull();
+    expect(localDayBound('20255-01-01', 'start')).toBeNull();
+    expect(localDayBound('2026-02-30x', 'end')).toBeNull();
+    expect(localDayBound('2026-13-01', 'start')).toBeNull();
+    expect(localDayBound('not a date', 'end')).toBeNull();
   });
 });

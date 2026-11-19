@@ -441,6 +441,45 @@ describe('ArchivesPage print log: printer filter, server filters and paging', ()
     }
   });
 
+  it('slides the "Last 24 hours" window on a refetch instead of reusing the first one', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+      ({ archiveViewMode: 'log', archiveCollection: 'recent' } as Record<string, string>)[key] ?? null,
+    );
+    useArchives();
+    const lowerBounds: string[] = [];
+    let rows = [entry(11), entry(12, { archive_id: null })];
+    server.use(
+      http.get('/api/v1/print-log/', ({ request }) => {
+        lowerBounds.push(new URL(request.url).searchParams.get('date_from') ?? '');
+        return HttpResponse.json({ items: rows, total: rows.length });
+      }),
+      http.delete('/api/v1/print-log/:id', ({ params }) => {
+        rows = rows.filter((r) => r.id !== Number(params.id));
+        return HttpResponse.json({ status: 'deleted', id: Number(params.id) });
+      }),
+    );
+    // Only Date is faked, so the network and React Query keep their real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-15T12:00:00Z'));
+    try {
+      const user = userEvent.setup();
+      render(<ArchivesPage />);
+      await screen.findByText('Run 11');
+      expect(lowerBounds[0]).toBe('2026-06-14T12:00:00.000Z');
+
+      // Two hours later something refetches the log (here: deleting a row).
+      vi.setSystemTime(new Date('2026-06-15T14:00:00Z'));
+      await user.click(screen.getAllByTitle(/Delete/i).filter((el) => el.closest('tr'))[0]);
+      const confirm = await screen.findAllByRole('button', { name: /^Delete$/ });
+      await user.click(confirm[confirm.length - 1]);
+
+      await waitFor(() => expect(lowerBounds.length).toBeGreaterThan(1));
+      expect(lowerBounds.at(-1)).toBe('2026-06-14T14:00:00.000Z');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('says in the Export menu that the log exports models, not individual prints', async () => {
     setView('log');
     useArchives();
@@ -452,6 +491,28 @@ describe('ArchivesPage print log: printer filter, server filters and paging', ()
     await user.click(screen.getByRole('button', { name: /^Export$/ }));
     expect(screen.getByText(/one row per model/i)).toBeInTheDocument();
   });
+});
+
+describe('ArchivesPage with a bad saved date', () => {
+  const entries = [
+    { id: 11, archive_id: null, print_name: 'Log Benchy', printer_name: 'X1 Carbon', created_by_username: 'ada', status: 'completed', duration_seconds: 60, started_at: '2026-01-01T10:00:00Z', created_at: '2026-01-01T10:00:00Z' },
+  ];
+  // A saved date filter that isn't a real date (a 5-digit year typed into a date field) used to
+  // make the page throw while rendering.
+  for (const view of ['grid', 'log'] as const) {
+    it(`still renders the ${view} view`, async () => {
+      vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+        ({ archiveViewMode: view, logFilterDateFrom: '20255-01-01', logFilterDateTo: '2026-13-45' } as Record<string, string>)[key] ?? null,
+      );
+      useArchives();
+      server.use(http.get('/api/v1/print-log/', () => HttpResponse.json({ items: entries, total: entries.length })));
+      render(<ArchivesPage />);
+
+      expect(await screen.findAllByText(view === 'grid' ? 'Benchy' : 'Log Benchy')).not.toHaveLength(0);
+      // The bad values are dropped, so no date chip is shown.
+      expect(screen.queryByRole('button', { name: /^Remove filter/ })).not.toBeInTheDocument();
+    });
+  }
 });
 
 describe('ArchivesPage deep links', () => {

@@ -1589,25 +1589,33 @@ export function ArchivesPage() {
   // fetch that is filtered and paged here.
   const logNeedsClientFilter = needsClientLogFilter(values);
   const LOG_CLIENT_FETCH_LIMIT = 500;
-  const bounds = useMemo(() => getServerFilterBounds(values), [values]);
   // Status filter and collection that exclude each other can't match anything.
-  const logCanMatch = !bounds.statuses || bounds.statuses.length > 0;
+  const logCanMatch = useMemo(() => {
+    const { statuses } = getServerFilterBounds(values);
+    return !statuses || statuses.length > 0;
+  }, [values]);
 
+  // The key names the filters (not the instants they resolve to) and the bounds are worked out at
+  // fetch time, so a refetch of "Last 24 hours" slides the window instead of reusing the one that
+  // was computed when the filter was chosen.
   const { data: printLogData, isLoading: isLogLoading } = useQuery({
     queryKey: [
-      'print-log', filterPrinter, filterUser, bounds.statuses?.join(','), bounds.from?.toISOString(), bounds.to?.toISOString(),
-      search, logNeedsClientFilter ? 'all' : logOffset, logNeedsClientFilter ? 'all' : logPageSize,
+      'print-log', filterPrinter, filterUser, values.filterStatus, values.collection, values.filterDateFrom,
+      values.filterDateTo, search, logNeedsClientFilter ? 'all' : logOffset, logNeedsClientFilter ? 'all' : logPageSize,
     ],
-    queryFn: () => api.getPrintLog({
-      search: search || undefined,
-      printerId: filterPrinter || undefined,
-      username: filterUser || undefined,
-      status: bounds.statuses?.join(',') || undefined,
-      dateFrom: bounds.from?.toISOString(),
-      dateTo: bounds.to?.toISOString(),
-      limit: logNeedsClientFilter ? LOG_CLIENT_FETCH_LIMIT : logPageSize,
-      offset: logNeedsClientFilter ? 0 : logOffset,
-    }),
+    queryFn: () => {
+      const bounds = getServerFilterBounds(values);
+      return api.getPrintLog({
+        search: search || undefined,
+        printerId: filterPrinter || undefined,
+        username: filterUser || undefined,
+        status: bounds.statuses?.join(',') || undefined,
+        dateFrom: bounds.from?.toISOString(),
+        dateTo: bounds.to?.toISOString(),
+        limit: logNeedsClientFilter ? LOG_CLIENT_FETCH_LIMIT : logPageSize,
+        offset: logNeedsClientFilter ? 0 : logOffset,
+      });
+    },
     enabled: viewMode === 'log' && logCanMatch,
   });
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { localDayBound } from '../utils/date';
 import type {
   Collection, ColorMode, FileTypeFilter, HistoryFilterValues, SortOption,
 } from '../utils/historyFilters';
@@ -22,6 +23,11 @@ const KEYS = {
   dateFrom: 'logFilterDateFrom',
   dateTo: 'logFilterDateTo',
 } as const;
+
+/** A `YYYY-MM-DD` that is a real date, else an empty string. */
+function validDay(value: string | null): string {
+  return value && localDayBound(value, 'start') ? value : '';
+}
 
 /** Save a value, or forget it when there is nothing to keep. */
 function persist(key: string, value: string | null) {
@@ -63,8 +69,9 @@ export function useHistoryFilters() {
   );
   const [filterStatus, setFilterStatus] = useState<string | null>(() => localStorage.getItem(KEYS.status));
   const [filterUser, setFilterUser] = useState<string | null>(() => localStorage.getItem(KEYS.user) || null);
-  const [filterDateFrom, setFilterDateFrom] = useState(() => localStorage.getItem(KEYS.dateFrom) || '');
-  const [filterDateTo, setFilterDateTo] = useState(() => localStorage.getItem(KEYS.dateTo) || '');
+  // A saved date that is not a real one (stale, hand-edited, or a 5-digit year) is dropped.
+  const [filterDateFrom, setDateFrom] = useState(() => validDay(localStorage.getItem(KEYS.dateFrom)));
+  const [filterDateTo, setDateTo] = useState(() => validDay(localStorage.getItem(KEYS.dateTo)));
   const [collection, setCollection] = useState<Collection>(
     () => (localStorage.getItem(KEYS.collection) as Collection) || 'all',
   );
@@ -96,6 +103,15 @@ export function useHistoryFilters() {
     hideDuplicates, filterTag, filterFileType, filterStatus, filterUser, filterDateFrom, filterDateTo, collection,
   ]);
 
+  // Date inputs accept years far past 9999. Ignore a change that isn't a real date (or empty), so the
+  // field snaps back instead of holding a value nothing can filter by.
+  const setFilterDateFrom = useCallback((value: string) => {
+    if (value === '' || localDayBound(value, 'start')) setDateFrom(value);
+  }, []);
+  const setFilterDateTo = useCallback((value: string) => {
+    if (value === '' || localDayBound(value, 'end')) setDateTo(value);
+  }, []);
+
   const toggleColor = useCallback((color: string) => {
     setFilterColors((prev) => {
       const next = new Set(prev);
@@ -113,8 +129,8 @@ export function useHistoryFilters() {
       case 'status': setFilterStatus(null); break;
       case 'collection': setCollection('all'); break;
       case 'user': setFilterUser(null); break;
-      case 'from': setFilterDateFrom(''); break;
-      case 'to': setFilterDateTo(''); break;
+      case 'from': setDateFrom(''); break;
+      case 'to': setDateTo(''); break;
       case 'material': setFilterMaterial(null); break;
       case 'filetype': setFilterFileType('all'); break;
       case 'tag': setFilterTag(null); break;
@@ -144,8 +160,8 @@ export function useHistoryFilters() {
     setFilterFileType('all');
     setFilterStatus(null);
     setFilterUser(null);
-    setFilterDateFrom('');
-    setFilterDateTo('');
+    setDateFrom('');
+    setDateTo('');
     setFilterColors(new Set());
     setCollection('all');
   }, []);

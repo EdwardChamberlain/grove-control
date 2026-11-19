@@ -162,6 +162,27 @@ describe('needsClientLogFilter', () => {
   });
 });
 
+describe('invalid dates', () => {
+  const crashy = ['20255-01-01', '2026-13-45', 'yesterday', '2026-1-1'];
+
+  it('are ignored by the server bounds and the export instead of throwing', () => {
+    for (const bad of crashy) {
+      const f = filters({ filterDateFrom: bad, filterDateTo: bad });
+      expect(() => getServerFilterBounds(f)).not.toThrow();
+      expect(getServerFilterBounds(f)).toMatchObject({ from: null, to: null });
+      expect(() => getExportParams(f)).not.toThrow();
+      expect(getExportParams(f)).toMatchObject({ printedFrom: undefined, printedTo: undefined });
+    }
+  });
+
+  it('do not filter the grid either', () => {
+    const list = [archive(1, 'Benchy'), archive(2, 'Bracket')];
+    for (const bad of crashy) {
+      expect(filterAndSortArchives(list, filters({ filterDateFrom: bad, filterDateTo: bad }), 'name-asc')).toHaveLength(2);
+    }
+  });
+});
+
 describe('getServerFilterBounds and getExportParams', () => {
   const now = new Date(2026, 5, 15, 12, 0, 0); // local noon, 15 June 2026
 
