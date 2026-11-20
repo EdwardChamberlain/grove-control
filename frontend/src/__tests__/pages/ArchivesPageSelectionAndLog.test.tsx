@@ -603,4 +603,18 @@ describe('ArchivesPage calendar view', () => {
     expect(screen.getByText('Bracket')).toBeInTheDocument();
     expect(screen.queryByText('Select a day to see prints')).not.toBeInTheDocument();
   });
+
+  it('jumps to the grid view when a print in the day detail is clicked', async () => {
+    setView('calendar');
+    const when = new Date(new Date().getFullYear(), new Date().getMonth(), 15, 12).toISOString();
+    useArchives([archive(1, 'Benchy', { created_at: when, started_at: when, completed_at: when })]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await user.click(await screen.findByRole('button', { name: /^15\s*1$/ }));
+    await user.click(await screen.findByRole('button', { name: /Benchy/ }));
+
+    await waitFor(() => expect(screen.queryByText('Prints this month')).not.toBeInTheDocument());
+    expect(screen.getByText('Benchy')).toBeInTheDocument();
+  });
 });
