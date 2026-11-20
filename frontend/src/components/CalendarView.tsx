@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Archive } from '../api/client';
 import { api } from '../api/client';
+import { Card } from './Card';
 import { parseUTCDate, getLastPrintedAt } from '../utils/date';
 
 interface CalendarViewProps {
@@ -80,6 +81,18 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
     calendarDays.push(day);
   }
 
+  const monthStats = useMemo(() => {
+    const stats = { total: 0, completed: 0, failed: 0 };
+    archives.forEach(a => {
+      const d = parseUTCDate(getLastPrintedAt(a)) || new Date();
+      if (d.getMonth() !== currentMonth || d.getFullYear() !== currentYear) return;
+      stats.total += 1;
+      if (a.status === 'completed') stats.completed += 1;
+      if (a.status === 'failed') stats.failed += 1;
+    });
+    return stats;
+  }, [archives, currentMonth, currentYear]);
+
   const selectedArchives = selectedDate ? archivesByDate.get(selectedDate) || [] : [];
 
   // Clear selected archive when date changes
@@ -91,9 +104,10 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6">
+    <div className="space-y-6">
+    <div className="flex flex-col lg:flex-row lg:items-stretch gap-6">
       {/* Calendar */}
-      <div className="flex-1">
+      <Card className="flex-1 min-w-0 p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <button
@@ -178,43 +192,11 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
             );
           })}
         </div>
+      </Card>
 
-        {/* Monthly stats */}
-        <div className="mt-4 pt-4 border-t border-bambu-dark-tertiary">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-bold text-white">
-                {archives.filter(a => {
-                  const d = parseUTCDate(getLastPrintedAt(a)) || new Date();
-                  return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-                }).length}
-              </div>
-              <div className="text-xs text-bambu-gray">Prints this month</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-green-400">
-                {archives.filter(a => {
-                  const d = parseUTCDate(getLastPrintedAt(a)) || new Date();
-                  return d.getMonth() === currentMonth && d.getFullYear() === currentYear && a.status === 'completed';
-                }).length}
-              </div>
-              <div className="text-xs text-bambu-gray">Successful</div>
-            </div>
-            <div>
-              <div className="text-2xl font-bold text-red-400">
-                {archives.filter(a => {
-                  const d = parseUTCDate(getLastPrintedAt(a)) || new Date();
-                  return d.getMonth() === currentMonth && d.getFullYear() === currentYear && a.status === 'failed';
-                }).length}
-              </div>
-              <div className="text-xs text-bambu-gray">Failed</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Selected day details */}
-      <div className="lg:w-80 bg-bambu-dark rounded-xl p-4">
+      {/* Selected day details: as tall as the calendar card, scrolling inside on wide screens */}
+      <Card className="lg:w-80 lg:relative">
+        <div className="p-4 lg:absolute lg:inset-0 lg:overflow-y-auto calendar-scroll">
         {selectedDate ? (
           <>
             <h3 className="text-sm font-medium text-bambu-gray mb-3">
@@ -226,7 +208,7 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
               })}
             </h3>
             {selectedArchives.length > 0 ? (
-              <div className="calendar-scroll space-y-2 max-h-96 overflow-y-auto">
+              <div className="calendar-scroll space-y-2 max-h-96 overflow-y-auto lg:max-h-none lg:overflow-visible">
                 {selectedArchives.map(archive => {
                   const isHighlighted = archive.id === selectedArchiveId || archive.id === highlightedArchiveId;
                   return (
@@ -286,6 +268,26 @@ export function CalendarView({ archives, onArchiveClick, highlightedArchiveId }:
             <p className="text-sm text-bambu-gray">Select a day to see prints</p>
           </div>
         )}
+        </div>
+      </Card>
+    </div>
+
+      {/* Monthly stats */}
+      <div className="pt-4 border-t border-bambu-dark-tertiary">
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <div className="text-2xl font-bold text-white">{monthStats.total}</div>
+            <div className="text-xs text-bambu-gray">Prints this month</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-green-400">{monthStats.completed}</div>
+            <div className="text-xs text-bambu-gray">Successful</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-red-400">{monthStats.failed}</div>
+            <div className="text-xs text-bambu-gray">Failed</div>
+          </div>
+        </div>
       </div>
     </div>
   );
