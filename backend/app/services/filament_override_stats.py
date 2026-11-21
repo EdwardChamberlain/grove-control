@@ -35,6 +35,13 @@ def _slot_id(slot: dict[str, Any]) -> int:
         return 0
 
 
+def _used_grams(slot: dict[str, Any]) -> float:
+    try:
+        return float(slot.get("used_g") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def effective_filament_metadata(
     filament_slots: Sequence[dict[str, Any]],
     usage_results: Sequence[dict[str, Any]],
@@ -64,21 +71,22 @@ def effective_filament_metadata(
 
     if not overrides and not actuals:
         return None, None
-    if not overrides:
-        # Tracked spools alone describe the run; no sliced slots are needed.
-        filament_slots = [{"slot_id": slot_id, "used_g": 1} for slot_id in actuals]
+
+    slots_by_id: dict[int, dict[str, Any]] = {}
+    for slot in filament_slots:
+        if isinstance(slot, dict) and _slot_id(slot) > 0:
+            slots_by_id[_slot_id(slot)] = slot
+    used_ids = {slot_id for slot_id, slot in slots_by_id.items() if _used_grams(slot) > 0}
+    # Without sliced slot data (source file unavailable), trust the tracked spools.
+    # With it, only the dispatched plate's used slots count: untracked ones keep
+    # their sliced/override values and tracked ones the measured spool.
+    if not used_ids:
+        used_ids = set(actuals)
 
     types: list[str] = []
     colors: list[str] = []
-    slots = sorted((slot for slot in filament_slots if isinstance(slot, dict)), key=_slot_id)
-    for slot in slots:
-        slot_id = _slot_id(slot)
-        try:
-            used = float(slot.get("used_g") or 0) > 0
-        except (TypeError, ValueError):
-            continue
-        if slot_id <= 0 or not used:
-            continue
+    for slot_id in sorted(used_ids):
+        slot = slots_by_id.get(slot_id, {})
         override = overrides.get(slot_id, {})
         for actual in actuals.get(slot_id, [{}]):
             material = str(actual.get("material") or override.get("type") or slot.get("type") or "").strip()
@@ -129,19 +137,17 @@ async def resolve_run_filament_metadata(
     item = (await db.execute(query.order_by(PrintQueueItem.id.desc()).limit(1))).scalars().first()
     if item is None or not (item.filament_overrides or usage_results):
         return fallback
-    if not item.filament_overrides:
-        material, color = effective_filament_metadata([], usage_results, None)
-        return (material, color) if material and color else fallback
-    if not archive.file_path:
-        return fallback
 
-    try:
-        path = safe_join_under(settings.base_dir, archive.file_path, http=False)
-    except PathTraversalError:
-        return fallback
-    # The dispatcher sends plate_id or 1. Archive.extra_data contains every
-    # plate's slots, so it cannot supply this run's material attribution.
-    slots = await asyncio.to_thread(extract_filament_usage_from_3mf, path, item.plate_id or 1)
+    slots: list[dict] = []
+    if archive.file_path:
+        try:
+            path = safe_join_under(settings.base_dir, archive.file_path, http=False)
+        except PathTraversalError:
+            path = None
+        if path is not None:
+            # The dispatcher sends plate_id or 1. Archive.extra_data contains every
+            # plate's slots, so it cannot supply this run's material attribution.
+            slots = await asyncio.to_thread(extract_filament_usage_from_3mf, path, item.plate_id or 1)
     material, color = effective_filament_metadata(slots, usage_results, item.filament_overrides)
     if not (material and color):
         return fallback

@@ -134,3 +134,18 @@ def test_non_hex_colours_are_not_recorded(color):
 def test_slotless_usage_is_ignored():
     usage = [{"slot_id": None, "material": "PETG", "color": "#FF0000"}]
     assert effective_filament_metadata([{"slot_id": 1, "used_g": 10}], usage, None) == (None, None)
+
+
+def test_untracked_used_slot_keeps_its_sliced_values_alongside_tracked_spool():
+    slots = [
+        {"slot_id": 1, "used_g": 10, "type": "PLA", "color": "#000000"},
+        {"slot_id": 2, "used_g": 5, "type": "PETG", "color": "#FFFFFF"},
+    ]
+    usage = [{"slot_id": 1, "material": "PLA", "color": "#FF0000"}]
+    assert effective_filament_metadata(slots, usage, None) == ("PLA, PETG", "#FF0000,#FFFFFF")
+
+
+def test_tracked_usage_outside_the_dispatched_plate_is_ignored():
+    slots = [{"slot_id": 1, "used_g": 10, "type": "PLA", "color": "#000000"}]
+    usage = [{"slot_id": 5, "material": "ABS", "color": "#123456"}]
+    assert effective_filament_metadata(slots, usage, None) == ("PLA", "#000000")
