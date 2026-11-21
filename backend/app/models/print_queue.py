@@ -71,9 +71,11 @@ class PrintQueueItem(Base):
     # Plate ID for multi-plate 3MF files (1-indexed, None = auto-detect/plate 1)
     plate_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Shortest-job-first scheduling
+    # Cached print-time estimate, used for Timeline/ETA display
     print_time_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Cached from archive/library
-    been_jumped: Mapped[bool] = mapped_column(Boolean, default=False)  # Starvation guard for SJF
+    # Legacy column from the removed Shortest Job First mode. Never read or
+    # written; kept so existing databases need no schema change.
+    been_jumped: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Auto-print G-code injection (#422)
     gcode_injection: Mapped[bool] = mapped_column(Boolean, default=False)

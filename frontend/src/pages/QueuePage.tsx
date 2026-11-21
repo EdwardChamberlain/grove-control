@@ -49,7 +49,6 @@ import {
   List,
   GanttChart,
   Code,
-  Snail,
   Package,
   PlayCircle,
   ChevronDown,
@@ -1246,13 +1245,6 @@ export function QueuePage() {
     queryFn: () => api.getPrinters(),
   });
 
-  const sjfMutation = useMutation({
-    mutationFn: (enabled: boolean) => api.updateSettings({ queue_shortest_first: enabled }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] });
-    },
-  });
-
   const cancelMutation = useMutation({
     mutationFn: (id: number) => api.cancelQueueItem(id),
     onSuccess: () => {
@@ -1467,26 +1459,6 @@ export function QueuePage() {
       return parseUTCDate(item.scheduled_time)?.getTime() ?? 0;
     };
 
-    // When SJF is enabled, override sort to match scheduler order
-    if (settings?.queue_shortest_first) {
-      return [...items].sort((a, b) => {
-        // Group by printer first (nulls = model-based, grouped by target_model)
-        const aPrinter = a.printer_id ?? -(a.target_model?.charCodeAt(0) ?? 0);
-        const bPrinter = b.printer_id ?? -(b.target_model?.charCodeAt(0) ?? 0);
-        if (aPrinter !== bPrinter) return aPrinter - bPrinter;
-        // Within same printer/model: jumped items first (starvation guard)
-        const aJumped = a.been_jumped ? 1 : 0;
-        const bJumped = b.been_jumped ? 1 : 0;
-        if (aJumped !== bJumped) return bJumped - aJumped;
-        // Shortest print time next (nulls last)
-        const aTime = a.print_time_seconds ?? Infinity;
-        const bTime = b.print_time_seconds ?? Infinity;
-        if (aTime !== bTime) return aTime - bTime;
-        // Position as tiebreaker
-        return a.position - b.position;
-      });
-    }
-
     return [...items].sort((a, b) => {
       let cmp: number;
       if (pendingSortBy === 'name') {
@@ -1503,7 +1475,7 @@ export function QueuePage() {
       }
       return pendingSortAsc ? cmp : -cmp;
     });
-  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation, settings?.queue_shortest_first]);
+  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation]);
 
   const handleSelectAll = () => {
     const allPendingIds = pendingItems.map(i => i.id);
@@ -1668,8 +1640,7 @@ export function QueuePage() {
   const canReorderManually =
     hasPermission('queue:reorder') &&
     hasAnyPermission('queue:update_own', 'queue:update_all') &&
-    pendingSortBy === 'position' &&
-    !settings?.queue_shortest_first;
+    pendingSortBy === 'position';
 
   const rowCanMove = (row: QueueRow | undefined): row is QueueRow =>
     !!row &&
@@ -1981,8 +1952,8 @@ export function QueuePage() {
         </div>
       )}
 
-      {/* Single toolbar line. Filters apply to every tab; the layout, sort,
-          SJF and selection controls only apply to the Queue tab. */}
+      {/* Single toolbar line. Filters apply to every tab; the layout, sort
+          and selection controls only apply to the Queue tab. */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
         <ToolbarDropdown
           value={filterPrinter === -1 ? 'unassigned' : filterPrinter ? String(filterPrinter) : 'all'}
@@ -2084,23 +2055,6 @@ export function QueuePage() {
                 </button>
               </>
             )}
-
-            <button
-              onClick={() => {
-                const newValue = !(settings?.queue_shortest_first ?? false);
-                sjfMutation.mutate(newValue);
-              }}
-              className={`h-8 flex items-center gap-1 px-2 text-xs rounded-lg border transition-colors ${
-                settings?.queue_shortest_first
-                  ? 'bg-bambu-green/20 border-bambu-green text-bambu-green'
-                  : 'bg-bambu-dark-secondary border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
-              }`}
-              title={t('queue.sjf.tooltip', 'Shortest Job First — scheduler prioritizes shorter prints')}
-            >
-              <Snail className="w-4 h-4" />
-              <span className="hidden sm:inline">{t('queue.sjf.label', 'SJF')}</span>
-              <span className={`w-1.5 h-1.5 rounded-full ${settings?.queue_shortest_first ? 'bg-bambu-green' : 'bg-bambu-gray'}`} />
-            </button>
           </>
         )}
 

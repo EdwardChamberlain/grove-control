@@ -692,58 +692,24 @@ class PrintScheduler:
             shutdown_printers = await self._check_heat_soaks(db)
             await self._recover_stale_dispatches(db)
 
-            # Check if shortest-job-first scheduling is enabled
-            sjf_enabled = await self._get_bool_setting(db, "queue_shortest_first")
-
-            # Get all pending items, ordered by printer and position (or SJF order)
-            if sjf_enabled:
-                # SJF: group by printer (and target_model for model-based jobs),
-                # then items already jumped get top priority (starvation guard),
-                # then sort by print_time ascending. Items with no print time go last.
-                result = await db.execute(
-                    select(PrintQueueItem)
-                    .where(PrintQueueItem.status == "pending")
-                    .where(PrintQueueItem.dispatching_at.is_(None))
-                    # archive/library_file are read by the cross-model gate
-                    # (#2578); eager-load once per pass instead of a lazy-load
-                    # (which would raise in async) per item.
-                    .options(
-                        selectinload(PrintQueueItem.archive),
-                        # The folder tells dispatch whether the File is in
-                        # Temporary Files (#237) without another query.
-                        selectinload(PrintQueueItem.library_file).selectinload(LibraryFile.folder),
-                        selectinload(PrintQueueItem.printer),
-                        # Cross-model candidates (#671), plus each candidate's file
-                        # for the same cross-model gate. Lazy-loading either would
-                        # raise in async.
-                        selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
-                    )
-                    .order_by(
-                        PrintQueueItem.printer_id,
-                        PrintQueueItem.target_model,
-                        PrintQueueItem.been_jumped.desc(),
-                        PrintQueueItem.print_time_seconds.asc().nullslast(),
-                        PrintQueueItem.position,
-                    )
+            # Get all pending items, ordered by printer and position
+            result = await db.execute(
+                select(PrintQueueItem)
+                .where(PrintQueueItem.status == "pending")
+                .where(PrintQueueItem.dispatching_at.is_(None))
+                .options(
+                    selectinload(PrintQueueItem.archive),
+                    # The folder tells dispatch whether the File is in
+                    # Temporary Files (#237) without another query.
+                    selectinload(PrintQueueItem.library_file).selectinload(LibraryFile.folder),
+                    selectinload(PrintQueueItem.printer),
+                    # Cross-model candidates (#671), plus each candidate's file
+                    # for the same cross-model gate. Lazy-loading either would
+                    # raise in async.
+                    selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
                 )
-            else:
-                result = await db.execute(
-                    select(PrintQueueItem)
-                    .where(PrintQueueItem.status == "pending")
-                    .where(PrintQueueItem.dispatching_at.is_(None))
-                    .options(
-                        selectinload(PrintQueueItem.archive),
-                        # The folder tells dispatch whether the File is in
-                        # Temporary Files (#237) without another query.
-                        selectinload(PrintQueueItem.library_file).selectinload(LibraryFile.folder),
-                        selectinload(PrintQueueItem.printer),
-                        # Cross-model candidates (#671), plus each candidate's file
-                        # for the same cross-model gate. Lazy-loading either would
-                        # raise in async.
-                        selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
-                    )
-                    .order_by(PrintQueueItem.printer_id, PrintQueueItem.position)
-                )
+                .order_by(PrintQueueItem.printer_id, PrintQueueItem.position)
+            )
             items = list(result.scalars().all())
             original_printer_ids = {item.id: item.printer_id for item in items}
 
@@ -1112,23 +1078,6 @@ class PrintScheduler:
                     dispatch_ids.append(item.id)
                     busy_printers.add(item.printer_id)
 
-                    # SJF starvation guard: mark items that were jumped
-                    if sjf_enabled and item.print_time_seconds is not None:
-                        for other in items:
-                            if (
-                                other.id != item.id
-                                and other.status == "pending"
-                                and other.printer_id == item.printer_id
-                                and not other.been_jumped
-                                and other.position < item.position
-                                and (
-                                    other.print_time_seconds is None
-                                    or other.print_time_seconds > item.print_time_seconds
-                                )
-                            ):
-                                other.been_jumped = True
-                        await db.commit()
-
                 elif item.target_model or getattr(item, "variants", None):
                     # Model-based assignment - find any idle printer of matching model.
                     # A plain model-based item has exactly one candidate, built from
@@ -1333,25 +1282,6 @@ class PrintScheduler:
                         _claim_library_row(item)
                         dispatch_ids.append(item.id)
                         busy_printers.add(printer_id)
-
-                        # SJF starvation guard: mark model-based items that were jumped
-                        if sjf_enabled and item.print_time_seconds is not None:
-                            for other in items:
-                                if (
-                                    other.id != item.id
-                                    and other.status == "pending"
-                                    and other.printer_id is None
-                                    and other.target_model
-                                    and other.target_model.upper() == item.target_model.upper()
-                                    and not other.been_jumped
-                                    and other.position < item.position
-                                    and (
-                                        other.print_time_seconds is None
-                                        or other.print_time_seconds > item.print_time_seconds
-                                    )
-                                ):
-                                    other.been_jumped = True
-                            await db.commit()
 
             # Log summary of skip reasons (helps diagnose why queue items aren't starting)
             if skip_reasons:
@@ -1950,8 +1880,8 @@ class PrintScheduler:
         item.filament_overrides = variant.filament_overrides
         item.required_filament_types = variant.required_filament_types
         if variant.print_time_seconds is not None:
-            # The row carried the shortest candidate's estimate so SJF could order
-            # it before a printer was known; now that one is chosen, record what is
+            # The row carried the shortest candidate's estimate so the Timeline had
+            # something before a printer was known; now that one is chosen, record what is
             # actually going to run so history and the ETA agree with reality.
             item.print_time_seconds = variant.print_time_seconds
 

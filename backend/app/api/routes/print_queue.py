@@ -294,8 +294,6 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         # User tracking (Issue #206)
         "created_by_id": item.created_by_id,
         "created_by_username": item.created_by.username if item.created_by else None,
-        # SJF scheduling
-        "been_jumped": item.been_jumped,
         # Auto-print G-code injection
         "gcode_injection": item.gcode_injection,
         # H2C rack-swap nozzle pick (#1780)
@@ -633,8 +631,8 @@ async def add_to_queue(
                 400, "Cannot combine variants with archive_id or library_file_id — the variants are the files"
             )
         variant_specs = await _resolve_queue_variants(db, data.variants, actor)
-        # Mirror the first candidate onto the item so the queue listing, the SJF
-        # grouping and the "Any H2S" label have something before a printer is
+        # Mirror the first candidate onto the item so the queue listing
+        # and the "Any H2S" label have something before a printer is
         # picked. Resolution overwrites it with whichever candidate actually runs.
         target_model_norm = variant_specs[0][2]
 
@@ -843,7 +841,7 @@ async def add_to_queue(
         max_pos = result.scalar() or 0
         start_position = max_pos + 1
 
-    # Resolve print_time_seconds for SJF scheduling (cache on item at creation)
+    # Resolve print_time_seconds (cache on item at creation)
     cached_print_time = None
     if archive:
         cached_print_time = archive.print_time_seconds
@@ -915,8 +913,8 @@ async def add_to_queue(
             _variant_values(spec, library_file, model, position)
             for position, (spec, library_file, model) in enumerate(variant_specs)
         ]
-        # SJF orders pending items before any printer is known, so the row carries
-        # the shortest candidate's estimate. Resolution replaces it with the one
+        # The Timeline needs an estimate before any printer is known, so the row
+        # carries the shortest candidate's estimate. Resolution replaces it with the one
         # that actually runs.
         estimates = [v["print_time_seconds"] for v in variant_values if v["print_time_seconds"]]
         for item in items:

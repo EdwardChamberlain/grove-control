@@ -336,10 +336,6 @@ class AppSettings(BaseModel):
         default=False,
         description="Opening then closing the printer door marks the plate clear while a printer is awaiting plate-clear",
     )
-    queue_shortest_first: bool = Field(
-        default=False,
-        description="Shortest Job First — scheduler prioritizes shorter print jobs over longer ones",
-    )
     queue_max_concurrent_uploads: int = Field(
         default=1,
         ge=1,
@@ -549,7 +545,6 @@ class AppSettingsUpdate(BaseModel):
     default_nozzle_offset_cali: TriState | None = None
     require_plate_clear: bool | None = None
     door_cycle_clears_plate: bool | None = None
-    queue_shortest_first: bool | None = None
     queue_max_concurrent_uploads: int | None = Field(default=None, ge=1, le=16)
     nozzle_temp_presets: str | None = None
     bed_temp_presets: str | None = None

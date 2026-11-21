@@ -243,16 +243,6 @@ describe('QueuePage layouts and filters', () => {
     expect(headers.map((el) => el.textContent)).toEqual(['Any P1S', 'Workshop X1C', 'Unassigned']);
   });
 
-  it('toggles shortest-job-first scheduling', async () => {
-    const captured = useQueue(pending);
-    const user = userEvent.setup();
-    render(<QueuePage />);
-
-    await user.click(await screen.findByRole('button', { name: /SJF/ }));
-
-    await waitFor(() => expect(captured.settings).toEqual([{ queue_shortest_first: true }]));
-  });
-
   it('sorts the pending list by name', async () => {
     useQueue([
       queueItem({ id: 1, position: 1, archive_name: 'Zebra' }),
@@ -361,24 +351,20 @@ describe('QueuePage confirmations', () => {
 });
 
 describe('QueuePage ordering', () => {
-  it('shows shortest-job-first order when the scheduler uses it', async () => {
+  it('keeps saved position order and ignores a legacy shortest-first setting', async () => {
     useQueue([
       queueItem({ id: 1, position: 1, archive_name: 'Long', print_time_seconds: 7200 }),
       queueItem({ id: 2, position: 2, archive_name: 'Short', print_time_seconds: 600 }),
-      queueItem({ id: 3, position: 3, archive_name: 'Jumped', print_time_seconds: 9000, been_jumped: true }),
-      queueItem({ id: 4, position: 4, archive_name: 'Unknown', print_time_seconds: null }),
+      queueItem({ id: 3, position: 3, archive_name: 'Unknown', print_time_seconds: null }),
     ]);
+    // An older backend may still return the retired setting.
     server.use(http.get('/api/v1/settings/', () => HttpResponse.json({ queue_shortest_first: true })));
     render(<QueuePage />);
 
     await screen.findByText('Long');
-    await waitFor(() => {
-      const names = screen.getAllByText(/^(Long|Short|Jumped|Unknown)$/).map((el) => el.textContent);
-      // Jumped jobs first (starvation guard), then shortest, unknown time last.
-      expect(names).toEqual(['Jumped', 'Short', 'Long', 'Unknown']);
-    });
-    // Manual reordering is off while the scheduler picks the order.
-    expect(screen.queryByRole('button', { name: /move up/i })).not.toBeInTheDocument();
+    const names = screen.getAllByText(/^(Long|Short|Unknown)$/).map((el) => el.textContent);
+    expect(names).toEqual(['Long', 'Short', 'Unknown']);
+    expect(screen.queryByRole('button', { name: /SJF/ })).not.toBeInTheDocument();
   });
 
   it('sorts by printer, descending', async () => {

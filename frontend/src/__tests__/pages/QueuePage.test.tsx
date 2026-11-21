@@ -446,7 +446,7 @@ describe('QueuePage', () => {
   });
 
   describe('toolbar', () => {
-    it('puts filters, layout, sort and SJF on one toolbar row', async () => {
+    it('puts filters, layout and sort on one toolbar row', async () => {
       render(<QueuePage />);
 
       const printerFilter = await screen.findByRole('button', { name: 'All Printers' });
@@ -457,7 +457,6 @@ describe('QueuePage', () => {
         screen.getByRole('button', { name: 'All Status' }),
         screen.getByRole('button', { name: /By Printer/ }),
         screen.getByRole('button', { name: 'Sort by Position' }),
-        screen.getByRole('button', { name: /SJF/ }),
         screen.getByRole('button', { name: 'Select All' }),
       ]) {
         expect(toolbar).toContainElement(control);

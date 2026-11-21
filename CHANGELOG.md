@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Queue: removed the Shortest Job First (SJF) toggle (#339). The queue now has
+  one scheduling policy and always follows the saved queue order, so you can
+  reason about what prints next from the order you see. Installs that had SJF
+  enabled switch to this automatically on upgrade; queued jobs keep their
+  positions and print-time estimates. Reordering and Timeline estimates are
+  unchanged. The `queue_shortest_first` setting and the `been_jumped` queue
+  field are no longer part of the API.
 - UI: dropdowns in forms now match the height of the text fields beside them.
   They were forced to the compact toolbar height (32px) and sat visibly shorter
   than neighbouring inputs. Dropdowns that don't set their own padding, such as

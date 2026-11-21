@@ -1159,10 +1159,6 @@ export default {
     itemCount: '{{count}} Element',
     itemCount_plural: '{{count}} Elemente',
     dragToReorder: 'Ziehen zum Neuordnen (nur Sofort)',
-    sjf: {
-      label: 'SJF',
-      tooltip: 'Kürzester Auftrag zuerst — Scheduler bevorzugt kürzere Drucke',
-    },
     addedBy: 'Hinzugefügt von {{name}}',
     selectJob: '{{name}} auswählen',
     nextInQueue: 'Nächster in der Warteschlange',
