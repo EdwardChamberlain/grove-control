@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -17,7 +17,8 @@ class MaintenanceType(Base):
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     default_interval_hours: Mapped[float] = mapped_column(Float, default=100.0)
-    # Interval type: "hours" (print hours) or "days" (calendar days)
+    # Interval type: "hours" (print hours), "days" (calendar days) or "jobs"
+    # (finished print jobs). For "jobs" ``default_interval_hours`` holds a job count.
     interval_type: Mapped[str] = mapped_column(String(20), default="hours")
     icon: Mapped[str | None] = mapped_column(String(50))  # Icon name for UI
     wiki_url: Mapped[str | None] = mapped_column(String(500))  # Documentation link
@@ -49,6 +50,7 @@ class PrinterMaintenance(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_performed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_performed_hours: Mapped[float] = mapped_column(Float, default=0.0)  # Hours at last reset
+    last_performed_jobs: Mapped[int] = mapped_column(Integer, default=0)  # Printer job count at last reset
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -70,6 +72,7 @@ class MaintenanceHistory(Base):
     printer_maintenance_id: Mapped[int] = mapped_column(ForeignKey("printer_maintenance.id", ondelete="CASCADE"))
     performed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     hours_at_maintenance: Mapped[float] = mapped_column(Float, default=0.0)
+    jobs_at_maintenance: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
@@ -95,6 +98,9 @@ class MaintenanceLogEntry(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
     hours_at_maintenance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Printer job count when a scheduled task was completed; NULL for manual
+    # entries and for records that predate job tracking.
+    jobs_at_maintenance: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # A nullable scalar instead of a foreign key is intentional: old task
     # history can be deleted with a removed custom assignment, while this log

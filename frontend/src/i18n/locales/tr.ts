@@ -1587,6 +1587,10 @@ export default {
     exampleName: 'örn., HEPA Filtresini Değiştir',
     viewDocumentation: 'Dokümantasyonu görüntüle',
     timeBasedInterval: 'Zaman tabanlı aralık',
+    printJobs: 'Baskı İşleri',
+    job: '1 iş',
+    jobs: '{{count}} iş',
+    jobBasedInterval: 'İş sayısına dayalı aralık',
     // Aralık geçersiz kılma
     intervalOverrides: 'Aralık Geçersiz Kılmaları',
     intervalOverridesDescription: 'Belirli yazıcılar için aralıkları özelleştir',

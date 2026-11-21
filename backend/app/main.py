@@ -4489,6 +4489,19 @@ async def on_print_complete(printer_id: int, data: dict):
 
     logger.info("Print complete - filename: %s, subtask: %s, status: %s", filename, subtask_name, data.get("status"))
 
+    # Count this job towards print-job based maintenance intervals (#337). This runs
+    # before the archive lookup on purpose: a job whose archive can't be found (or
+    # whose printer has auto_archive off) never writes a print log row, but it still
+    # wore the machine. Any terminal status counts; reconciled completions only reach
+    # here for archives whose real completion callback never ran.
+    try:
+        from backend.app.core.database import run_with_retry
+        from backend.app.services.print_log import increment_print_job_count
+
+        await run_with_retry(lambda db: increment_print_job_count(db, printer_id), label="print job count")
+    except Exception as e:
+        logger.warning("[CALLBACK] Failed to increment print job count for printer %s: %s", printer_id, e)
+
     # Build list of possible keys to try (matching how they were registered in on_print_start)
     possible_keys = []
 

@@ -87,6 +87,7 @@ async def test_manual_update_binds_naive_utc_timestamp():
         notes=None,
         occurred_at=datetime(2026, 1, 1, 0, 0),
         hours_at_maintenance=None,
+        jobs_at_maintenance=None,
         created_by_id=None,
         created_by_username=None,
         updated_by_id=None,

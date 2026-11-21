@@ -1995,6 +1995,16 @@ async def run_migrations(conn):
     # Migration: Add print_hours_offset column to printers (baseline hours adjustment)
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN print_hours_offset REAL DEFAULT 0.0")
 
+    # Migration (#337): print-job based maintenance intervals. ``print_job_count`` is
+    # backfilled from the print log exactly once, when the column is first added; after
+    # that it is maintained by on_print_complete.
+    if "print_job_count" not in await _table_columns(conn, "printers"):
+        await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN print_job_count INTEGER DEFAULT 0")
+        await _backfill_print_job_counts(conn)
+    await _safe_execute(conn, "ALTER TABLE printer_maintenance ADD COLUMN last_performed_jobs INTEGER DEFAULT 0")
+    await _safe_execute(conn, "ALTER TABLE maintenance_history ADD COLUMN jobs_at_maintenance INTEGER DEFAULT 0")
+    await _safe_execute(conn, "ALTER TABLE maintenance_log_entries ADD COLUMN jobs_at_maintenance INTEGER")
+
     # Migration: Add queue notification event columns to notification_providers
     await _safe_execute(conn, "ALTER TABLE notification_providers ADD COLUMN on_queue_job_added BOOLEAN DEFAULT 0")
     try:
@@ -3992,6 +4002,31 @@ async def _ensure_sqlite_archive_queue_integrity(conn) -> None:
             suffix,
             sample_text,
         )
+
+
+async def _backfill_print_job_counts(conn) -> None:
+    """Seed ``printers.print_job_count`` from the print log (#337).
+
+    Every print log row except ``skipped`` is a job the printer actually ran, so
+    counting them gives the best available lifetime figure. Jobs that never wrote
+    a log row (no archive was found) were not recorded anywhere, so the seeded
+    count is a lower bound.
+    """
+    from sqlalchemy import text
+
+    if not {"printer_id", "status"}.issubset(await _table_columns(conn, "print_log_entries")):
+        return
+    async with conn.begin_nested():
+        result = await conn.execute(
+            text(
+                "UPDATE printers SET print_job_count = ("
+                "SELECT COUNT(*) FROM print_log_entries l "
+                "WHERE l.printer_id = printers.id AND l.status != 'skipped'"
+                ")"
+            )
+        )
+    if result.rowcount:
+        logger.info("Backfilled print job counts for %d printer(s) from the print log", result.rowcount)
 
 
 async def _backfill_maintenance_log_entries(conn) -> None:

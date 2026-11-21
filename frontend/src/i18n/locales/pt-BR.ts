@@ -1585,6 +1585,10 @@ export default {
     exampleName: 'ex., Substituir Filtro HEPA',
     viewDocumentation: 'Ver documentação',
     timeBasedInterval: 'Intervalo baseado em tempo',
+    printJobs: 'Trabalhos de impressão',
+    job: '1 trabalho',
+    jobs: '{{count}} trabalhos',
+    jobBasedInterval: 'Intervalo baseado em trabalhos',
     // Interval overrides
     intervalOverrides: 'Substituições de Intervalo',
     intervalOverridesDescription: 'Personalize os intervalos para impressoras específicas',

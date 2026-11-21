@@ -10,8 +10,8 @@ class MaintenanceTypeBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = None
     default_interval_hours: float = Field(default=100.0, ge=1.0)
-    # "hours" = print hours, "days" = calendar days
-    interval_type: str = Field(default="hours", pattern="^(hours|days)$")
+    # "hours" = print hours, "days" = calendar days, "jobs" = finished print jobs
+    interval_type: str = Field(default="hours", pattern="^(hours|days|jobs)$")
     icon: str | None = None
     wiki_url: str | None = None  # Documentation link for custom types
 
@@ -24,7 +24,7 @@ class MaintenanceTypeUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     default_interval_hours: float | None = Field(default=None, ge=1.0)
-    interval_type: str | None = Field(default=None, pattern="^(hours|days)$")
+    interval_type: str | None = Field(default=None, pattern="^(hours|days|jobs)$")
     icon: str | None = None
     wiki_url: str | None = None
 
@@ -52,7 +52,7 @@ class PrinterMaintenanceCreate(PrinterMaintenanceBase):
 
 class PrinterMaintenanceUpdate(BaseModel):
     custom_interval_hours: float | None = None
-    custom_interval_type: str | None = Field(default=None, pattern="^(hours|days)$")
+    custom_interval_type: str | None = Field(default=None, pattern="^(hours|days|jobs)$")
     enabled: bool | None = None
 
 
@@ -65,6 +65,7 @@ class PrinterMaintenanceResponse(BaseModel):
     enabled: bool
     last_performed_at: datetime | None
     last_performed_hours: float
+    last_performed_jobs: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -86,6 +87,7 @@ class MaintenanceHistoryResponse(MaintenanceHistoryBase):
     printer_maintenance_id: int
     performed_at: datetime
     hours_at_maintenance: float
+    jobs_at_maintenance: int = 0
 
     class Config:
         from_attributes = True
@@ -120,6 +122,7 @@ class MaintenanceLogEntryResponse(BaseModel):
     notes: str | None
     occurred_at: datetime
     hours_at_maintenance: float | None
+    jobs_at_maintenance: int | None = None
     created_by_id: int | None
     created_by_username: str | None
     updated_by_id: int | None
@@ -147,8 +150,8 @@ class MaintenanceStatus(BaseModel):
     maintenance_type_wiki_url: str | None  # Custom wiki URL for the type
     enabled: bool
     # Interval configuration
-    interval_hours: float  # custom or default (hours for print-based, days for time-based)
-    interval_type: str  # "hours" or "days"
+    interval_hours: float  # custom or default (hours for print-based, days for time-based, count for jobs)
+    interval_type: str  # "hours", "days" or "jobs"
     # For print-hour based maintenance
     current_hours: float  # total print hours for printer
     hours_since_maintenance: float  # current - last_performed
@@ -156,8 +159,12 @@ class MaintenanceStatus(BaseModel):
     # For time-based maintenance
     days_since_maintenance: float | None  # days since last performed
     days_until_due: float | None  # for days type
+    # For print-job based maintenance
+    current_jobs: int = 0  # lifetime finished jobs for the printer
+    jobs_since_maintenance: int | None = None  # current - last_performed (jobs type)
+    jobs_until_due: float | None = None  # interval - jobs_since (jobs type)
     # Status flags
-    is_due: bool  # hours_until_due <= 0 OR days_until_due <= 0
+    is_due: bool  # hours_until_due <= 0 OR days_until_due <= 0 OR jobs_until_due <= 0
     is_warning: bool  # within 10% of interval
     last_performed_at: datetime | None
 
@@ -170,6 +177,7 @@ class PrinterMaintenanceOverview(BaseModel):
     printer_model: str | None  # For model-specific documentation links
     is_active: bool  # False while the printer is in Maintenance Mode
     total_print_hours: float
+    total_print_jobs: int = 0
     maintenance_items: list[MaintenanceStatus]
     due_count: int
     warning_count: int

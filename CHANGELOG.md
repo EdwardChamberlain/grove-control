@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Maintenance: tasks can now be due after a number of finished print jobs, not
+  just print hours or calendar days (#337). Pick "Print Jobs" as the interval
+  type when adding or editing a task, or override a single printer's interval.
+  Each card shows the jobs left (or overdue), and completing a task records the
+  printer's job count in its history and the maintenance log. Every finished
+  print counts, whatever its outcome, including jobs with no archive. Existing
+  printers start from the number of runs already in their print log (a lower
+  bound, since jobs that were never archived weren't recorded). A task switched
+  to "Print Jobs" counts from the printer's lifetime total until it is next
+  marked as done.
 - Queue: tidied the page chrome around the job cards (#347). The Printing and
   Queued section headings are gone, so printing and queued jobs form one list.
   Filters, the List / By Printer toggle, sort, SJF and Select All now share a
