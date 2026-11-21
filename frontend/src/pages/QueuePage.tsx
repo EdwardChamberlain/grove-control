@@ -1333,11 +1333,30 @@ export function QueuePage() {
 
   const reorderMutation = useMutation({
     mutationFn: (items: { id: number; position: number }[]) => api.reorderQueue(items),
-    onSuccess: () => {
+    // Apply the new order to the cache immediately so the row stays where it
+    // was dropped instead of snapping back until the server round-trip and
+    // the following refetch complete.
+    onMutate: async (items) => {
+      // Stop in-flight/polled refetches from overwriting the optimistic state.
+      await queryClient.cancelQueries({ queryKey: ['queue'] });
+      const previous = queryClient.getQueriesData<PrintQueueItem[]>({ queryKey: ['queue'] });
+      const newPositions = new Map(items.map((i) => [i.id, i.position]));
+      queryClient.setQueriesData<PrintQueueItem[]>({ queryKey: ['queue'] }, (old) =>
+        old?.map((item) =>
+          newPositions.has(item.id) ? { ...item, position: newPositions.get(item.id)! } : item,
+        ),
+      );
+      return { previous };
+    },
+    onError: (_error, _items, context) => {
+      context?.previous.forEach(([key, data]) => queryClient.setQueryData(key, data));
+      showToast(t('queue.toast.reorderFailed'), 'error');
+    },
+    // Refetch either way so the cache converges on the server's truth.
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
     },
-    onError: () => showToast(t('queue.toast.reorderFailed'), 'error'),
   });
 
   const clearHistoryMutation = useMutation({
