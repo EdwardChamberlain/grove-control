@@ -1585,6 +1585,10 @@ export default {
     exampleName: '例如：更换 HEPA 过滤器',
     viewDocumentation: '查看文档',
     timeBasedInterval: '基于时间的间隔',
+    printJobs: '打印任务',
+    job: '1 个任务',
+    jobs: '{{count}} 个任务',
+    jobBasedInterval: '基于打印任务的间隔',
     // Interval overrides
     intervalOverrides: '间隔覆盖',
     intervalOverridesDescription: '为特定打印机自定义间隔',

@@ -1584,6 +1584,10 @@ export default {
     exampleName: '例: HEPAフィルター交換',
     viewDocumentation: 'ドキュメントを表示',
     timeBasedInterval: '時間ベースのインターバル',
+    printJobs: '印刷ジョブ',
+    job: '1 ジョブ',
+    jobs: '{{count}} ジョブ',
+    jobBasedInterval: 'ジョブ数ベースのインターバル',
     // Interval overrides
     intervalOverrides: 'インターバルのオーバーライド',
     intervalOverridesDescription: '特定のプリンターの間隔をカスタマイズ',

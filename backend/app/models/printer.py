@@ -29,6 +29,10 @@ class Printer(Base):
     last_runtime_update: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )  # Last time runtime was updated
+    # Lifetime count of finished print jobs (any terminal status). Drives the
+    # "print jobs" maintenance interval type (#337); incremented once per job in
+    # on_print_complete and backfilled from the print log when the column is added.
+    print_job_count: Mapped[int] = mapped_column(Integer, default=0)
     # External camera configuration
     external_camera_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     external_camera_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # mjpeg, rtsp, snapshot

@@ -42,6 +42,7 @@ import { api } from '../api/client';
 import type {
   MaintenanceLogEntry,
   MaintenanceLogEntryInput,
+  MaintenanceIntervalType,
   MaintenanceLogEntryType,
   MaintenanceStatus,
   PrinterMaintenanceOverview,
@@ -95,7 +96,21 @@ function getIcon(iconName: string | null) {
 
 type TFunction = (key: string, options?: Record<string, unknown>) => string;
 
-function formatDuration(value: number, type: 'hours' | 'days', t?: TFunction): string {
+// Icon for an interval type: calendar for time-based, printer for job-based, timer for print hours
+function IntervalTypeIcon({ type, className }: { type: MaintenanceIntervalType; className: string }) {
+  if (type === 'days') return <Calendar className={className} />;
+  if (type === 'jobs') return <Printer className={className} />;
+  return <Timer className={className} />;
+}
+
+function formatJobs(value: number, t?: TFunction): string {
+  const jobs = Math.max(0, Math.round(value));
+  if (jobs === 1) return t ? t('maintenance.job') : '1 job';
+  return t ? t('maintenance.jobs', { count: jobs }) : `${jobs} jobs`;
+}
+
+function formatDuration(value: number, type: MaintenanceIntervalType, t?: TFunction): string {
+  if (type === 'jobs') return formatJobs(value, t);
   if (type === 'days') {
     if (value < 1) return t ? t('common.today') : 'Today';
     if (value === 1) return t ? t('maintenance.day') : '1 day';
@@ -128,7 +143,8 @@ function formatDuration(value: number, type: 'hours' | 'days', t?: TFunction): s
   }
 }
 
-function formatIntervalLabel(value: number, type: 'hours' | 'days', t?: TFunction): string {
+function formatIntervalLabel(value: number, type: MaintenanceIntervalType, t?: TFunction): string {
+  if (type === 'jobs') return formatJobs(value, t);
   if (type === 'days') {
     if (value === 1) return t ? t('maintenance.day') : '1 day';
     if (value === 7) return t ? t('maintenance.week') : '1 week';
@@ -170,6 +186,10 @@ function MaintenanceCard({
 
   // Calculate progress based on interval type
   const getProgress = () => {
+    if (intervalType === 'jobs') {
+      const jobsSince = item.jobs_since_maintenance ?? 0;
+      return Math.max(0, Math.min(100, (jobsSince / item.interval_hours) * 100));
+    }
     if (intervalType === 'days') {
       const daysSince = item.days_since_maintenance ?? 0;
       return Math.max(0, Math.min(100, (daysSince / item.interval_hours) * 100));
@@ -205,7 +225,12 @@ function MaintenanceCard({
   const getStatusText = () => {
     if (!item.enabled) return t('common.disabled');
 
-    if (intervalType === 'days') {
+    if (intervalType === 'jobs') {
+      const jobsUntil = item.jobs_until_due ?? 0;
+      if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(jobsUntil), 'jobs', t) });
+      if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(jobsUntil, 'jobs', t) });
+      return t('maintenance.timeLeft', { duration: formatDuration(jobsUntil, 'jobs', t) });
+    } else if (intervalType === 'days') {
       const daysUntil = item.days_until_due ?? 0;
       if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(daysUntil), 'days', t) });
       if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(daysUntil, 'days', t) });
@@ -243,6 +268,11 @@ function MaintenanceCard({
             {intervalType === 'days' && (
               <span title={t('maintenance.timeBasedInterval')}>
                 <Calendar className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
+              </span>
+            )}
+            {intervalType === 'jobs' && (
+              <span title={t('maintenance.jobBasedInterval')}>
+                <Printer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
               </span>
             )}
             {/* Wiki link - next to name */}
@@ -501,9 +531,9 @@ function SettingsSection({
 }: {
   overview: PrinterMaintenanceOverview[] | undefined;
   types: MaintenanceType[];
-  onUpdateInterval: (id: number, data: { custom_interval_hours?: number | null; custom_interval_type?: 'hours' | 'days' | null }) => void;
-  onAddType: (data: { name: string; description?: string; default_interval_hours: number; interval_type: 'hours' | 'days'; icon?: string; wiki_url?: string | null }, printerIds: number[]) => void;
-  onUpdateType: (id: number, data: { name?: string; default_interval_hours?: number; interval_type?: 'hours' | 'days'; icon?: string; wiki_url?: string | null }) => void;
+  onUpdateInterval: (id: number, data: { custom_interval_hours?: number | null; custom_interval_type?: MaintenanceIntervalType | null }) => void;
+  onAddType: (data: { name: string; description?: string; default_interval_hours: number; interval_type: MaintenanceIntervalType; icon?: string; wiki_url?: string | null }, printerIds: number[]) => void;
+  onUpdateType: (id: number, data: { name?: string; default_interval_hours?: number; interval_type?: MaintenanceIntervalType; icon?: string; wiki_url?: string | null }) => void;
   onDeleteType: (id: number) => void;
   onRestoreDefaults: () => void;
   isRestoringDefaults: boolean;
@@ -514,11 +544,11 @@ function SettingsSection({
 }) {
   const [editingInterval, setEditingInterval] = useState<number | null>(null);
   const [intervalInput, setIntervalInput] = useState('');
-  const [intervalTypeInput, setIntervalTypeInput] = useState<'hours' | 'days'>('hours');
+  const [intervalTypeInput, setIntervalTypeInput] = useState<MaintenanceIntervalType>('hours');
   const [showAddType, setShowAddType] = useState(false);
   const [newTypeName, setNewTypeName] = useState('');
   const [newTypeInterval, setNewTypeInterval] = useState('100');
-  const [newTypeIntervalType, setNewTypeIntervalType] = useState<'hours' | 'days'>('hours');
+  const [newTypeIntervalType, setNewTypeIntervalType] = useState<MaintenanceIntervalType>('hours');
   const [newTypeIcon, setNewTypeIcon] = useState('Wrench');
   const [newTypeWikiUrl, setNewTypeWikiUrl] = useState('');
   const [selectedPrinters, setSelectedPrinters] = useState<Set<number>>(new Set());
@@ -554,7 +584,7 @@ function SettingsSection({
   const [editingType, setEditingType] = useState<MaintenanceType | null>(null);
   const [editTypeName, setEditTypeName] = useState('');
   const [editTypeInterval, setEditTypeInterval] = useState('');
-  const [editTypeIntervalType, setEditTypeIntervalType] = useState<'hours' | 'days'>('hours');
+  const [editTypeIntervalType, setEditTypeIntervalType] = useState<MaintenanceIntervalType>('hours');
   const [editTypeIcon, setEditTypeIcon] = useState('Wrench');
   const [editTypeWikiUrl, setEditTypeWikiUrl] = useState('');
 
@@ -580,7 +610,7 @@ function SettingsSection({
     }
   };
 
-  const handleSaveInterval = (itemId: number, defaultInterval: number, defaultIntervalType: 'hours' | 'days') => {
+  const handleSaveInterval = (itemId: number, defaultInterval: number, defaultIntervalType: MaintenanceIntervalType) => {
     const newInterval = parseFloat(intervalInput);
     if (!isNaN(newInterval) && newInterval > 0) {
       const customInterval = Math.abs(newInterval - defaultInterval) < 0.01 ? null : newInterval;
@@ -684,10 +714,12 @@ function SettingsSection({
                     <ReactSelect
                       value={newTypeIntervalType}
                       onChange={(e) => {
-                        setNewTypeIntervalType(e.target.value as 'hours' | 'days');
+                        setNewTypeIntervalType(e.target.value as MaintenanceIntervalType);
                         // Set sensible default based on type
                         if (e.target.value === 'days') {
                           setNewTypeInterval('30');
+                        } else if (e.target.value === 'jobs') {
+                          setNewTypeInterval('50');
                         } else {
                           setNewTypeInterval('100');
                         }
@@ -696,11 +728,12 @@ function SettingsSection({
                     >
                       <option value="hours">{t('maintenance.printHours')}</option>
                       <option value="days">{t('maintenance.calendarDays')}</option>
+                      <option value="jobs">{t('maintenance.printJobs')}</option>
                     </ReactSelect>
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1.5">
-                      {t('maintenance.intervalValue', { type: newTypeIntervalType === 'days' ? t('maintenance.calendarDays').toLowerCase() : t('common.hours') })}
+                      {t('maintenance.intervalValue', { type: newTypeIntervalType === 'days' ? t('maintenance.calendarDays').toLowerCase() : newTypeIntervalType === 'jobs' ? t('maintenance.printJobs').toLowerCase() : t('common.hours') })}
                     </label>
                     <input
                       type="number"
@@ -797,7 +830,7 @@ function SettingsSection({
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-white truncate">{type.name}</div>
                     <div className="text-xs text-bambu-gray mt-0.5 flex items-center gap-1">
-                      {intervalType === 'days' ? <Calendar className="w-3 h-3" /> : <Timer className="w-3 h-3" />}
+                      <IntervalTypeIcon type={intervalType} className="w-3 h-3" />
                       {formatIntervalLabel(type.default_interval_hours, intervalType, t)}
                     </div>
                   </div>
@@ -837,11 +870,12 @@ function SettingsSection({
                     <div className="flex gap-2">
                       <ReactSelect
                         value={editTypeIntervalType}
-                        onChange={(e) => setEditTypeIntervalType(e.target.value as 'hours' | 'days')}
+                        onChange={(e) => setEditTypeIntervalType(e.target.value as MaintenanceIntervalType)}
                         className={`flex-1 ${maintenanceFieldClass}`}
                       >
                         <option value="hours">{t('maintenance.printHours')}</option>
                         <option value="days">{t('maintenance.calendarDays')}</option>
+                      <option value="jobs">{t('maintenance.printJobs')}</option>
                       </ReactSelect>
                       <input
                         type="number"
@@ -908,7 +942,7 @@ function SettingsSection({
                       </span>
                     </div>
                     <div className="text-xs text-bambu-gray mt-0.5 flex items-center gap-1">
-                      {intervalType === 'days' ? <Calendar className="w-3 h-3" /> : <Timer className="w-3 h-3" />}
+                      <IntervalTypeIcon type={intervalType} className="w-3 h-3" />
                       {formatIntervalLabel(type.default_interval_hours, intervalType, t)}
                     </div>
                   </div>
@@ -1025,18 +1059,15 @@ function SettingsSection({
 
                           {isEditing ? (
                             <div className="flex items-center gap-1">
-                              {intervalTypeInput === 'days' ? (
-                                <Calendar className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
-                              ) : (
-                                <Timer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
-                              )}
+                              <IntervalTypeIcon type={intervalTypeInput} className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
                               <ReactSelect
                                 value={intervalTypeInput}
-                                onChange={(e) => setIntervalTypeInput(e.target.value as 'hours' | 'days')}
+                                onChange={(e) => setIntervalTypeInput(e.target.value as MaintenanceIntervalType)}
                                 className="px-1.5 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-xs"
                               >
                                 <option value="hours">{t('maintenance.printHours')}</option>
                                 <option value="days">{t('maintenance.calendarDays')}</option>
+                      <option value="jobs">{t('maintenance.printJobs')}</option>
                               </ReactSelect>
                               <input
                                 type="number"
@@ -1063,7 +1094,7 @@ function SettingsSection({
                               title={!hasPermission('maintenance:update') ? t('maintenance.noPermissionEditIntervals') : undefined}
                               className={`px-2 py-1 bg-bambu-dark-tertiary border border-bambu-dark-tertiary rounded text-xs font-medium text-white transition-colors flex items-center gap-1 ${hasPermission('maintenance:update') ? 'hover:bg-bambu-dark-secondary hover:border-bambu-green' : 'opacity-50 cursor-not-allowed'}`}
                             >
-                              {intervalType === 'days' ? <Calendar className="w-3 h-3" /> : <Timer className="w-3 h-3" />}
+                              <IntervalTypeIcon type={intervalType} className="w-3 h-3" />
                               {formatIntervalLabel(item.interval_hours, intervalType, t)}
                               <Edit3 className="w-3 h-3 text-bambu-gray" />
                             </button>
@@ -1300,6 +1331,12 @@ function MaintenanceLogSection({
                               <span>{entry.hours_at_maintenance.toFixed(1)}h</span>
                             </>
                           )}
+                          {entry.jobs_at_maintenance != null && (
+                            <>
+                              <span aria-hidden="true">•</span>
+                              <span>{formatJobs(entry.jobs_at_maintenance, t)}</span>
+                            </>
+                          )}
                         </div>
                         <div>
                           <span>{entry.printer_name}</span>
@@ -1533,7 +1570,7 @@ export function MaintenancePage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { custom_interval_hours?: number | null; custom_interval_type?: 'hours' | 'days' | null; enabled?: boolean } }) =>
+    mutationFn: ({ id, data }: { id: number; data: { custom_interval_hours?: number | null; custom_interval_type?: MaintenanceIntervalType | null; enabled?: boolean } }) =>
       api.updateMaintenanceItem(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maintenanceOverview'] });
@@ -1551,7 +1588,7 @@ export function MaintenancePage() {
     // correctly at runtime (the api helper takes `Partial<MaintenanceTypeCreate>`),
     // but the inline shape on this mutation used to omit it — making the
     // type lie about what the payload carries (#1596 nit).
-    mutationFn: ({ id, data }: { id: number; data: Partial<{ name: string; default_interval_hours: number; interval_type: 'hours' | 'days'; icon: string; wiki_url: string | null }> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<{ name: string; default_interval_hours: number; interval_type: MaintenanceIntervalType; icon: string; wiki_url: string | null }> }) =>
       api.updateMaintenanceType(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maintenanceTypes'] });

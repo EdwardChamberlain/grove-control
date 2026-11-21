@@ -6,9 +6,11 @@ Log entries are written to a separate table and never touch archives or queue it
 import logging
 from datetime import datetime
 
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_log import PrintLogEntry
+from backend.app.models.printer import Printer
 
 logger = logging.getLogger(__name__)
 
@@ -64,3 +66,20 @@ async def write_log_entry(
     db.add(entry)
     await db.flush()
     return entry
+
+
+async def increment_print_job_count(db: AsyncSession, printer_id: int) -> None:
+    """Add one finished job to a printer's lifetime job counter and commit.
+
+    The counter drives the "print jobs" maintenance interval type (#337). It is
+    deliberately separate from the print log: a job still counts when no archive
+    (and therefore no log row) exists, and clearing the log never resets it.
+    The update is a single atomic SQL increment, so concurrent completions on
+    different printers (or a reconnect race on one) cannot lose a count.
+    """
+    await db.execute(
+        update(Printer)
+        .where(Printer.id == printer_id)
+        .values(print_job_count=func.coalesce(Printer.print_job_count, 0) + 1)
+    )
+    await db.commit()
