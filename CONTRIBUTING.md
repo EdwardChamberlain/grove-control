@@ -15,11 +15,9 @@ Thank you for your interest in contributing to Grove Control! This document prov
 - [Internationalization (i18n)](#internationalization-i18n)
 - [Authentication & Permissions](#authentication--permissions)
 - [Testing](#testing)
-- [README Screenshot Generation](#readme-screenshot-generation)
 - [CI Pipeline](#ci-pipeline)
 - [Submitting Changes](#submitting-changes)
-- [Reporting Bugs](#reporting-bugs)
-- [Requesting Features](#requesting-features)
+- [Bugs and Feature Requests](#bugs-and-feature-requests)
 
 ## Code of Conduct
 
@@ -35,6 +33,11 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) to keep our com
 4. **Then start coding** — only open a PR for an issue that is assigned to you
 
 **No assigned issue = no PR.** Pull requests without a corresponding assigned issue will be closed.
+
+**GitHub is the source of truth.** The issue captures intent (the problem, the
+scope and the decisions made) and the PR captures the implementation. Keep
+status, decisions and follow-ups in issue and PR threads rather than in chat or
+local notes, and open a new issue for anything you find that is out of scope.
 
 This keeps everyone on the same page, avoids wasted effort on changes that may not fit the project's direction, and prevents multiple contributors from working on the same thing.
 
@@ -99,39 +102,6 @@ DEBUG=true uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Terminal 2
 cd frontend
-npm run dev
-```
-
-The frontend will be available at `http://localhost:5173` and will proxy API requests to the backend.
-
-### Backend Setup
-
-```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt  # Dev/test dependencies (pytest, ruff, bandit, etc.)
-
-# Install pre-commit hooks
-pip install pre-commit
-pre-commit install
-
-# Run backend
-DEBUG=true uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Frontend Setup
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Run development server
 npm run dev
 ```
 
@@ -291,10 +261,8 @@ The frontend uses [react-i18next](https://react.i18next.com/) for all user-facin
 
 ### Locale Files
 
-Translations live in `frontend/src/i18n/locales/`, one file per language:
-`en.ts` (English, the primary), `de.ts`, `es.ts`, `fr.ts`, `it.ts`, `ja.ts`,
-`ko.ts`, `pt-BR.ts`, `tr.ts`, `zh-CN.ts` and `zh-TW.ts`. List the directory for
-the current set.
+Translations live in `frontend/src/i18n/locales/`, one file per language, with
+`en.ts` as the primary. List the directory for the current set of languages.
 
 ### Adding New Strings
 
@@ -403,7 +371,7 @@ python3 -m venv venv && venv/bin/pip install -r requirements.txt -r requirements
 
 ```bash
 cd backend
-../venv/bin/python -m pytest tests/ -n auto                                   # All tests (parallel, a few minutes)
+../venv/bin/python -m pytest tests/ -n auto                                   # All tests (parallel)
 ../venv/bin/python -m pytest tests/unit/                                      # Unit tests only
 ../venv/bin/python -m pytest tests/integration/test_print_queue_api.py        # One file
 ../venv/bin/python -m pytest tests/ -k "queue and start"                      # By name
@@ -411,8 +379,8 @@ cd backend
 ```
 
 - `tests/unit/services/test_bambu_ftp.py` runs the FTP client against a local
-  mock FTPS server (no hardware). It takes about 16s, so leave it out of quick
-  runs with `--ignore` if you like; CI always runs it.
+  mock FTPS server (no hardware). It is slow, so leave it out of quick runs with
+  `--ignore` if you like; CI always runs it.
 - CI shards the suite with `pytest-split` using `backend/.test_durations`.
   Refresh it occasionally so shards stay balanced (new tests are fine without
   it, they just get an average duration):
@@ -452,22 +420,11 @@ match the real API types. A new top-level TypeScript folder must be added to one
   `POST /api/v1/auth/setup` with `auth_enabled: true` and an admin, log in, and
   send `Authorization: Bearer <token>`. See `_enable_auth_with_admin` in
   `tests/integration/test_queue_start_user_attribution.py`.
-- **Every new route needs an auth dependency.**
-  `tests/unit/test_route_auth_coverage.py` fails otherwise; adding a public
-  route means adding it to that file's allowlist with a reason.
-- **Adding, removing or renaming a route** means regenerating the frontend's
-  copy of the route table, `frontend/src/__tests__/api/backend-routes.json`,
-  which the API contract test checks every client call against.
-  `tests/unit/test_api_route_snapshot.py` fails until you do:
-
-  ```bash
-  cd backend && UPDATE_ROUTE_SNAPSHOT=1 ../venv/bin/python -m pytest tests/unit/test_api_route_snapshot.py
-  ```
-
-  Commit the updated JSON with the route change.
-- Other structural guards will catch you too: `test_no_hardcoded_secrets.py`,
-  `test_no_unsafe_path_joins.py`, `test_no_fail_open_in_auth.py`,
-  `test_code_quality.py`.
+- **Structural guard tests** run with the suite and fail with instructions:
+  every route needs an auth dependency, the frontend's route snapshot
+  (`frontend/src/__tests__/api/backend-routes.json`) must match the backend
+  routes, and there are guards against hardcoded secrets and unsafe path joins.
+  Follow the failure message rather than working around the guard.
 
 ### Writing Frontend Tests
 
@@ -488,129 +445,46 @@ match the real API types. A new top-level TypeScript folder must be added to one
 
 ### Coverage
 
-CI enforces coverage floors, so untested code can fail the build on its own.
+CI enforces coverage floors for the backend and frontend, so untested code can
+fail the build on its own. The config is the source of truth for the figures:
+the backend line floor is in the `Backend Coverage` job of
+`.github/workflows/ci.yml` (mirrored in `test_backend.sh`), and the frontend
+floors are in `coverage.thresholds` in `frontend/vitest.config.ts`. Branch
+coverage is reported but not gated.
 
-- Backend: the line floor is passed to `scripts/coverage_gate.py` in the
-  Backend Coverage job of `.github/workflows/ci.yml` (mirrored in
-  `test_backend.sh`). Coverage is collected in 6 parallel shards and combined
-  in that job. Branch coverage (`branch = True` in `backend/.coveragerc`) is
-  measured and reported in the job summary but not yet gated; the gate does
-  not use coverage.py's combined line+branch TOTAL.
-- Frontend: `coverage.thresholds` in `frontend/vitest.config.ts`.
-  In CI, Vitest runs as 3 shards and Playwright as its own job; the Frontend
-  Tests job merges the shard reports, enforces these thresholds and runs the
-  i18n parity check. The Docker smoke test has no dependencies and starts
-  immediately (its Dockerfile builds the frontend itself).
-
-When your change raises coverage, raise the floors in the same PR to the new
-figure rounded down (backend to one decimal place, frontend to whole numbers).
-Never lower a floor to get a PR through. The targets from issue #256 are now
-the minimum: 80% backend lines; 70% frontend statements and lines, 65%
-branches and 60% functions. No floor may go below these.
-
-On pull requests, both coverage jobs also check how much of the PR's new and
-changed lines are covered (`diff-cover`, in the job summary). The check fails
-the job when that coverage is below 90%. A PR that changes no measurable lines
-(docs, config or test files only) passes. The coverage exclusion rules below
-still apply to this check: exclude code only where those rules allow it, and
-write tests for everything else.
+- When your change raises coverage, raise the floors in the same PR to the new
+  figure, rounded down (backend to one decimal place, frontend to whole
+  numbers). Never lower a floor to get a PR through.
+- Pull requests also have their new and changed lines checked (`diff-cover`,
+  in the job summary). PRs that change only docs, config or tests pass.
 
 #### Coverage exclusions
 
-Excluding code from coverage hides it from the floors, so exclusions are rare
-and every one is explained. `tests/unit/test_coverage_exclusions.py` enforces
-these rules:
+Exclusions hide code from the floors, so they are rare and always explained.
+Only exclude code that cannot run in the test environment (it needs a real GPU
+or WebGL, blocks forever by design, or only runs on a platform the tests don't
+use). Code that is hard or tedious to test is not excluded: write the test.
+Mark individual lines or blocks, never files or patterns, and state the reason
+on the same line:
 
-- **Only code that cannot run in the test environment may be excluded**: it
-  needs a real GPU or WebGL, blocks forever by design, or only runs on a
-  platform or Python version the tests don't use. Code that is hard, slow or
-  tedious to test is not excluded; write the test, or leave it uncovered.
-- **Mark lines or blocks, never whole files or patterns.** No `omit`,
-  `exclude_lines` or `exclude_also` in `backend/.coveragerc`, no `ignore file`
-  hints, and no new entries in `coverage.exclude` in `frontend/vitest.config.ts`
-  (the existing entries are tests, setup, `main.tsx` and type declarations).
-- **State the reason on the same line**, in at least four words that say why
-  the code cannot run:
-
-  ```python
-  except AttributeError:  # pragma: no cover - unreachable on Python 3.11+, which the app requires
-  ```
-
-  ```ts
-  /* v8 ignore next -- jsdom has no WebGL context to create */
-  ```
-- **Call out new exclusions in the PR description** so a reviewer checks them.
-
-## README Screenshot Generation
-
-README screenshots are generated by deterministic Playwright scenarios in
-`frontend/screenshot-generation/readme-screenshots.spec.ts`. The scenarios use
-mocked API and WebSocket data, so they do not require a running backend or real
-printers. The supported screenshots currently cover:
-
-- Single-printer cockpit monitoring
-- Fleet list view
-- Printer health details
-- Queue-first print setup and scheduling options
-- Kiosk mode with a plate-clear warning
-
-### Generate screenshots locally
-
-Run the generator from the frontend directory:
-
-```bash
-cd frontend
-npm ci
-npx playwright install chromium
-npm run generate:readme-screenshots
+```python
+except AttributeError:  # pragma: no cover - unreachable on Python 3.11+, which the app requires
 ```
 
-The command writes the five README assets under `docs/screenshots/`:
+```ts
+/* v8 ignore next -- jsdom has no WebGL context to create */
+```
 
-- `printers-cockpit.png`
-- `printers-list.png`
-- `printer-health.png`
-- `print-modal.png`
-- `kiosk-mode.png`
-
-Review the generated images before committing them. Routine screenshot refreshes
-should modify only these PNG files. Update `README.md` only when the screenshot
-set, captions, or asset names change.
-
-### Release workflow
-
-The GitHub Actions workflow at `.github/workflows/readme-screenshots.yml` is
-intentionally restricted to the `dev` branch. It checks out `dev`, verifies that
-only the five screenshot assets changed, and opens or updates a PR from the
-`automation/readme-screenshots` branch into `dev`. It must never be run with
-`main` selected.
-
-GitHub only exposes manually dispatched workflows after the workflow file has
-reached the repository's default branch. Therefore, the first release is a
-bootstrap release:
-
-1. Before merging `dev` into `main` for v1.0.0, run the local generation command
-   above against the final `dev` state.
-2. Review the generated images, commit the changed screenshot assets to a branch,
-   and open a PR targeting `dev`.
-3. Merge the screenshot PR into `dev`.
-4. Merge `dev` into `main`.
-
-After v1.0.0, maintainers can refresh the assets from the Actions tab by
-selecting `Refresh README screenshots` and choosing `dev` as the branch. The
-workflow will open or update an asset-only PR targeting `dev`; merge that PR
-before the next release.
+`backend/tests/unit/test_coverage_exclusions.py` enforces the rules. Call out
+new exclusions in the PR description so a reviewer checks them.
 
 ## CI Pipeline
 
-Pull requests trigger automated CI checks via GitHub Actions (`.github/workflows/ci.yml`):
-
-- **Backend**: Ruff lint + format check, pytest (4 shards), coverage floor
-- **Frontend**: ESLint, TypeScript type check, Vitest with coverage thresholds and i18n parity, Playwright browser tests, `npm audit`, production build
-- **Docker**: Image build, import and static-file checks, `/health` smoke test
-- **Security**: CodeQL runs on PRs to `main` and weekly
-
-Pull requests to `dev` must pass: Backend Lint, Backend Tests (4 shards), Backend Coverage, Frontend Lint, Frontend Type Check, Frontend Tests, Frontend Build and Frontend Security Audit (see `.github/MAINTAINERS.md` for the authoritative list). Run `./test_all.sh` locally before pushing to catch issues early.
+Pull requests run the checks in `.github/workflows/ci.yml`: backend lint and
+tests, frontend lint, type check, tests and build, a security audit, and a
+Docker smoke test. [.github/MAINTAINERS.md](.github/MAINTAINERS.md) lists every
+job and which ones are required before merging. Run `./test_all.sh` locally
+before pushing to catch issues early.
 
 ## Submitting Changes
 
@@ -621,11 +495,10 @@ Before you push, check that:
 1. The branch is rebased on `origin/dev` with no merge commits.
 2. Lint and types are clean: `ruff check backend/ && ruff format --check backend/` from the repo root, and `npm run lint && npm run typecheck` in `frontend/`.
 3. The tests for what you touched pass, and you have run the full suites once (`./test_backend.sh`, `./test_frontend.sh`).
-4. New or changed routes have an auth dependency, and the route snapshot is regenerated (see [Writing Backend Tests](#writing-backend-tests)).
-5. New user-facing strings are in every locale file (`npm run check:i18n`).
-6. Coverage floors are raised if your change raised coverage, never lowered, and any new exclusion is explained on its line.
-7. User-visible changes have a [changelog](#changelog) entry.
-8. Frontend UI changes have before/after screenshots ready for the PR.
+4. New user-facing strings are in every locale file (`npm run check:i18n`).
+5. Coverage floors are raised if your change raised coverage, never lowered, and any new exclusion is explained on its line.
+6. User-visible changes have a [changelog](#changelog) entry.
+7. Frontend UI changes have before/after screenshots ready for the PR.
 
 ### Opening the Pull Request
 
@@ -654,25 +527,11 @@ Before you push, check that:
 - Follow the existing code style
 - **Visual changes require screenshots** — if your PR changes any frontend UI, include before/after screenshots showing the old and new appearance
 
-## Reporting Bugs
+## Bugs and Feature Requests
 
-Use the [Bug Report template](https://github.com/EdwardChamberlain/grove-control/issues/new?template=bug_report.yml) and include:
-
-- Clear description of the bug
-- Steps to reproduce
-- Expected vs actual behavior
-- Your environment (OS, Python version, browser)
-- Printer model and firmware version
-- Relevant logs
-
-## Requesting Features
-
-Use the [Feature Request template](https://github.com/EdwardChamberlain/grove-control/issues/new?template=feature_request.yml) and include:
-
-- Clear description of the feature
-- Use case / problem it solves
-- Proposed solution
-- Alternatives considered
+Open an issue using the [bug report](https://github.com/EdwardChamberlain/grove-control/issues/new?template=bug_report.yml)
+or [feature request](https://github.com/EdwardChamberlain/grove-control/issues/new?template=feature_request.yml)
+template; the templates say what to include.
 
 ## Questions?
 

@@ -8,12 +8,24 @@ style, code style, testing, CI, coverage floors, PRs) lives in
 [CONTRIBUTING.md](CONTRIBUTING.md). Read it before you start; this file only
 adds what is specific to agents.
 
+## GitHub is the source of truth
+
+- **Work to an issue.** The issue captures intent and the PR captures the
+  implementation, so find the issue before you start and link it from the PR
+  (`Fixes #123`). If you are asked to do a task that has no issue, raise one
+  first (the problem, the scope and what done looks like) so the work is
+  tracked, and tell the user.
+- **Keep state on GitHub.** Decisions, findings and follow-ups belong in the
+  issue, the PR description or PR comments, not only in chat or local files,
+  which are lost when the session ends. Raise an issue for anything out of scope
+  that you notice. If GitHub and your notes disagree, GitHub wins.
+
 ## Branch names
 
 Name branches `<agent>/<type>/<short-kebab-summary>`, where `<agent>` is the
 agent responsible for the work: `claude/` for Claude, `codex/` for Codex, and so
-on. Use the agent's own name, never another agent's. Types and the summary
-format are in [Branch Naming](CONTRIBUTING.md#branch-naming).
+on. Use your own name, never another agent's. Types and the summary format are
+in [Branch Naming](CONTRIBUTING.md#branch-naming).
 
 ```text
 claude/feat/spool-usage-chart
@@ -27,25 +39,22 @@ description in the PR title instead.
 
 ## Pull requests
 
-- Raise PRs as **open**, never as drafts, even if a tool or environment
-  defaults to draft. A PR is either ready to be raised or it isn't; if it isn't
-  ready, keep working on the branch.
-- Target `dev`, and fill in the PR template.
-- Never approve or merge a PR.
+- Open PRs as regular PRs, never as drafts, even if a tool or environment
+  defaults to draft. See
+  [Opening the Pull Request](CONTRIBUTING.md#opening-the-pull-request).
+- Approve or merge a PR only when the user has explicitly asked you to do so for
+  that PR. Consent for one PR does not carry over to the next.
 
 ## Before you push
 
-Work through the [pre-push checklist](CONTRIBUTING.md#pre-push-checklist). The
-two items agents most often miss:
+Work through the [pre-push checklist](CONTRIBUTING.md#pre-push-checklist) and
+write commit messages in the [conventional style](CONTRIBUTING.md#commit-messages).
+The two items agents most often miss:
 
-- **Changelog:** a user-visible change needs a bullet under `## Unreleased` in
-  `CHANGELOG.md` in the same PR. See [Changelog](CONTRIBUTING.md#changelog).
-- **User-facing strings:** add every new string to **every** locale file in
-  `frontend/src/i18n/locales/`, then run `npm run check:i18n`. Never hardcode
-  visible text.
-
-Write commit messages in the conventional style described in
-[Commit Messages](CONTRIBUTING.md#commit-messages).
+- **Changelog:** add a bullet under `## Unreleased` in `CHANGELOG.md` for any
+  user-visible change ([Changelog](CONTRIBUTING.md#changelog)).
+- **User-facing strings:** add each new string to every locale file, never
+  hardcode visible text ([i18n](CONTRIBUTING.md#internationalization-i18n)).
 
 ## When to stop and ask
 
