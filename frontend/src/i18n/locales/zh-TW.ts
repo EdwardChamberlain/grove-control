@@ -1588,7 +1588,9 @@ export default {
     printJobs: '列印工作',
     job: '1 個工作',
     jobs: '{{count}} 個工作',
-    jobBasedInterval: '依列印工作數的間隔',
+    filamentChanges: '換料次數',
+    change: '1 次',
+    changes: '{{count}} 次',
     // Interval overrides
     intervalOverrides: '間隔覆蓋',
     intervalOverridesDescription: '為特定印表機自訂間隔',

@@ -1588,7 +1588,9 @@ export default {
     printJobs: 'Impressions',
     job: '1 impression',
     jobs: '{{count}} impressions',
-    jobBasedInterval: 'Intervalle basé sur les impressions',
+    filamentChanges: 'Changements de filament',
+    change: '1 changement',
+    changes: '{{count}} changements',
     // Interval overrides
     intervalOverrides: 'Exceptions d\'intervalle',
     intervalOverridesDescription: 'Intervalles spécifiques par imprimante',

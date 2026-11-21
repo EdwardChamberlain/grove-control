@@ -2005,6 +2005,16 @@ async def run_migrations(conn):
     await _safe_execute(conn, "ALTER TABLE maintenance_history ADD COLUMN jobs_at_maintenance INTEGER DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE maintenance_log_entries ADD COLUMN jobs_at_maintenance INTEGER")
 
+    # Migration (#337): filament-change based maintenance intervals. Like print_job_count,
+    # ``filament_change_count`` is seeded once, when the column is first added, from the
+    # archived prints' 3MF files.
+    if "filament_change_count" not in await _table_columns(conn, "printers"):
+        await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN filament_change_count INTEGER DEFAULT 0")
+        await _backfill_filament_change_counts(conn)
+    await _safe_execute(conn, "ALTER TABLE printer_maintenance ADD COLUMN last_performed_changes INTEGER DEFAULT 0")
+    await _safe_execute(conn, "ALTER TABLE maintenance_history ADD COLUMN changes_at_maintenance INTEGER DEFAULT 0")
+    await _safe_execute(conn, "ALTER TABLE maintenance_log_entries ADD COLUMN changes_at_maintenance INTEGER")
+
     # Migration: Add queue notification event columns to notification_providers
     await _safe_execute(conn, "ALTER TABLE notification_providers ADD COLUMN on_queue_job_added BOOLEAN DEFAULT 0")
     try:
@@ -4027,6 +4037,60 @@ async def _backfill_print_job_counts(conn) -> None:
         )
     if result.rowcount:
         logger.info("Backfilled print job counts for %d printer(s) from the print log", result.rowcount)
+
+
+async def _backfill_filament_change_counts(conn) -> None:
+    """Seed ``printers.filament_change_count`` from the print log and archived 3MFs (#337).
+
+    Each non-skipped print log row is one run; its filament changes are read from the
+    archive's 3MF. A completed run counts every load in the plate, any other run counts
+    the initial load only (the print log doesn't record how far it got). Runs whose
+    archive or 3MF is gone can't be counted, and a reprint shares its archive's file, so
+    the seeded figure is an estimate. Plates are not recorded on the archive, so a
+    multi-plate file is counted from its lowest-numbered plate.
+    """
+    import asyncio
+
+    from sqlalchemy import text
+
+    from backend.app.core.config import settings
+    from backend.app.services.filament_changes import count_run_filament_changes
+
+    if not {"printer_id", "status", "archive_id"}.issubset(await _table_columns(conn, "print_log_entries")):
+        return
+    if not {"id", "file_path"}.issubset(await _table_columns(conn, "print_archives")):
+        return
+
+    runs = (
+        await conn.execute(
+            text(
+                "SELECT l.printer_id, l.status, a.file_path "
+                "FROM print_log_entries l JOIN print_archives a ON a.id = l.archive_id "
+                "WHERE l.printer_id IS NOT NULL AND l.status != 'skipped'"
+            )
+        )
+    ).fetchall()
+
+    per_file: dict[tuple[str, bool], int | None] = {}
+    totals: dict[int, int] = {}
+    for printer_id, status, file_path in runs:
+        completed = status == "completed"
+        key = (file_path, completed)
+        if key not in per_file:
+            per_file[key] = await asyncio.to_thread(
+                count_run_filament_changes, settings.base_dir / file_path, None, status, 0
+            )
+        if per_file[key]:
+            totals[printer_id] = totals.get(printer_id, 0) + per_file[key]
+
+    async with conn.begin_nested():
+        for printer_id, changes in totals.items():
+            await conn.execute(
+                text("UPDATE printers SET filament_change_count = :changes WHERE id = :id"),
+                {"changes": changes, "id": printer_id},
+            )
+    if totals:
+        logger.info("Backfilled filament change counts for %d printer(s) from archived prints", len(totals))
 
 
 async def _backfill_maintenance_log_entries(conn) -> None:

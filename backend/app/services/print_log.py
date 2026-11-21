@@ -83,3 +83,19 @@ async def increment_print_job_count(db: AsyncSession, printer_id: int) -> None:
         .values(print_job_count=func.coalesce(Printer.print_job_count, 0) + 1)
     )
     await db.commit()
+
+
+async def add_filament_changes(db: AsyncSession, printer_id: int, changes: int) -> None:
+    """Add filament changes to a printer's lifetime counter. Does not commit.
+
+    Called alongside the print log write so the log row and the counter land in one
+    transaction. Like the job counter it is an atomic SQL increment and is kept
+    independent of the print log, so clearing the log never resets it.
+    """
+    if changes <= 0:
+        return
+    await db.execute(
+        update(Printer)
+        .where(Printer.id == printer_id)
+        .values(filament_change_count=func.coalesce(Printer.filament_change_count, 0) + changes)
+    )

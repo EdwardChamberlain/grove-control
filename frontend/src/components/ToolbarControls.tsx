@@ -20,8 +20,29 @@ type ReactSelectChangeEvent = {
   currentTarget: { value: string; name?: string };
 };
 
-export const toolbarControlClass =
-  'h-8 px-2 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white text-sm font-medium transition-colors hover:bg-bambu-dark-tertiary focus:outline-none focus:border-bambu-green';
+// Fixed toolbar sizing, kept separate from the surface styles so a select can opt out of it.
+const toolbarControlSizing = { height: 'h-8', paddingX: 'px-2' };
+const toolbarControlSurface =
+  'rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white text-sm font-medium transition-colors hover:bg-bambu-dark-tertiary focus:outline-none focus:border-bambu-green';
+
+export const toolbarControlClass = `${toolbarControlSizing.height} ${toolbarControlSizing.paddingX} ${toolbarControlSurface}`;
+
+/**
+ * Toolbar sizing for a select, unless the caller sizes it itself.
+ *
+ * A select in a form brings its own padding (e.g. `px-3 py-2`) so it lines up with the
+ * text inputs beside it. The toolbar's fixed 32px height used to be appended after those
+ * classes and win, leaving form selects visibly shorter than their neighbouring inputs.
+ * Each axis is dropped only when the caller sets that axis, so toolbar selects that pass
+ * no sizing keep the compact toolbar size.
+ */
+function toolbarControlSizingFor(callerClassName: string): string {
+  const setsHeight = /(^|\s)(h|p|py|pt|pb)-/.test(callerClassName);
+  const setsPaddingX = /(^|\s)(p|px|pl|pr)-/.test(callerClassName);
+  return [setsHeight ? '' : toolbarControlSizing.height, setsPaddingX ? '' : toolbarControlSizing.paddingX]
+    .filter(Boolean)
+    .join(' ');
+}
 
 export const toolbarIconButtonClass =
   'h-8 w-8 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center justify-center';
@@ -478,7 +499,7 @@ export function ReactSelect({
         aria-expanded={isOpen}
         aria-controls={isOpen ? listboxId : undefined}
         aria-activedescendant={isOpen && activeIndex >= 0 ? getOptionId(activeIndex) : undefined}
-        className={`${className} ${toolbarControlClass} flex items-center justify-between gap-2 ${className.includes('w-full') ? 'w-full' : 'min-w-28'} ${disabled ? 'opacity-60 cursor-not-allowed hover:bg-bambu-dark' : ''}`}
+        className={`${className} ${toolbarControlSizingFor(className)} ${toolbarControlSurface} flex items-center justify-between gap-2 ${className.includes('w-full') ? 'w-full' : 'min-w-28'} ${disabled ? 'opacity-60 cursor-not-allowed hover:bg-bambu-dark' : ''}`}
       >
         <span id={selectedValueId} className="truncate">{selectedOption?.label}</span>
         <ChevronDown className={`w-4 h-4 text-bambu-gray transition-transform ${isOpen ? 'rotate-180' : ''}`} />

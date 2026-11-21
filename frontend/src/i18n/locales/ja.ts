@@ -1587,7 +1587,9 @@ export default {
     printJobs: '印刷ジョブ',
     job: '1 ジョブ',
     jobs: '{{count}} ジョブ',
-    jobBasedInterval: 'ジョブ数ベースのインターバル',
+    filamentChanges: 'フィラメント交換',
+    change: '1 回',
+    changes: '{{count}} 回',
     // Interval overrides
     intervalOverrides: 'インターバルのオーバーライド',
     intervalOverridesDescription: '特定のプリンターの間隔をカスタマイズ',

@@ -1589,7 +1589,9 @@ export default {
     printJobs: 'Trabajos de impresión',
     job: '1 trabajo',
     jobs: '{{count}} trabajos',
-    jobBasedInterval: 'Intervalo basado en trabajos',
+    filamentChanges: 'Cambios de filamento',
+    change: '1 cambio',
+    changes: '{{count}} cambios',
     // Interval overrides
     intervalOverrides: 'Anulaciones de intervalo',
     intervalOverridesDescription: 'Personalizar intervalos para impresoras concretas',

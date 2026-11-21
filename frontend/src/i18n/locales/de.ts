@@ -1588,7 +1588,9 @@ export default {
     printJobs: 'Druckaufträge',
     job: '1 Auftrag',
     jobs: '{{count}} Aufträge',
-    jobBasedInterval: 'Auftragsbasiertes Intervall',
+    filamentChanges: 'Filamentwechsel',
+    change: '1 Wechsel',
+    changes: '{{count}} Wechsel',
     // Interval overrides
     intervalOverrides: 'Intervall-Überschreibungen',
     intervalOverridesDescription: 'Intervalle für bestimmte Drucker anpassen',

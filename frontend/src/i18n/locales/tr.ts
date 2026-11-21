@@ -1590,7 +1590,9 @@ export default {
     printJobs: 'Baskı İşleri',
     job: '1 iş',
     jobs: '{{count}} iş',
-    jobBasedInterval: 'İş sayısına dayalı aralık',
+    filamentChanges: 'Filament Değişimleri',
+    change: '1 değişim',
+    changes: '{{count}} değişim',
     // Aralık geçersiz kılma
     intervalOverrides: 'Aralık Geçersiz Kılmaları',
     intervalOverridesDescription: 'Belirli yazıcılar için aralıkları özelleştir',

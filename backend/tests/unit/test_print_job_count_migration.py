@@ -13,11 +13,11 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-import backend.app.models  # noqa: F401  # Register the complete mapped schema for Base.metadata.
 from backend.app.core.database import Base, run_migrations
 from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, MaintenanceType, PrinterMaintenance
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.printer import Printer
+from backend.tests._fixtures.models import register_all_models
 
 
 @pytest.fixture(autouse=True)
@@ -74,6 +74,7 @@ async def _legacy_database(session_factory, engine):
 
 @pytest.fixture
 async def legacy_engine():
+    register_all_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -95,6 +95,7 @@ def _log_response(entry: MaintenanceLogEntry, printer_name: str) -> MaintenanceL
         occurred_at=entry.occurred_at,
         hours_at_maintenance=entry.hours_at_maintenance,
         jobs_at_maintenance=entry.jobs_at_maintenance,
+        changes_at_maintenance=entry.changes_at_maintenance,
         created_by_id=entry.created_by_id,
         created_by_username=entry.created_by_username,
         updated_by_id=entry.updated_by_id,
@@ -394,6 +395,7 @@ async def _get_printer_maintenance_internal(
 
     total_hours = await get_printer_total_hours(db, printer_id)
     total_jobs = printer.print_job_count or 0
+    total_changes = printer.filament_change_count or 0
 
     # Get all maintenance types
     result = await db.execute(select(MaintenanceType).where(MaintenanceType.is_deleted.is_(False)))
@@ -429,6 +431,7 @@ async def _get_printer_maintenance_internal(
             enabled = item.enabled
             last_performed_hours = item.last_performed_hours
             last_performed_jobs = item.last_performed_jobs or 0
+            last_performed_changes = item.last_performed_changes or 0
             last_performed_at = item.last_performed_at
             item_id = item.id
         else:
@@ -452,12 +455,15 @@ async def _get_printer_maintenance_internal(
             enabled = True
             last_performed_hours = 0.0
             last_performed_jobs = 0
+            last_performed_changes = 0
             last_performed_at = None
             item_id = item.id
 
-        # Only populated for the "jobs" interval type
+        # Only populated for the matching count-based interval type
         jobs_since: int | None = None
         jobs_until: float | None = None
+        changes_since: int | None = None
+        changes_until: float | None = None
 
         # Calculate status based on interval type
         if interval_type == "days":
@@ -478,12 +484,19 @@ async def _get_printer_maintenance_internal(
             # For compatibility, also set hours values (but they won't be primary)
             hours_since = total_hours - last_performed_hours
             hours_until = 0  # Not applicable for time-based
-        elif interval_type == "jobs":
-            # Print-job based: finished jobs since the last service (#337)
-            jobs_since = max(total_jobs - last_performed_jobs, 0)
-            jobs_until = interval - jobs_since
-            is_due = jobs_until <= 0
-            is_warning = jobs_until <= (interval * 0.1) and not is_due
+        elif interval_type in ("jobs", "changes"):
+            # Count based (#337): finished jobs or filament changes since the last service
+            if interval_type == "jobs":
+                count_since = max(total_jobs - last_performed_jobs, 0)
+            else:
+                count_since = max(total_changes - last_performed_changes, 0)
+            count_until = interval - count_since
+            is_due = count_until <= 0
+            is_warning = count_until <= (interval * 0.1) and not is_due
+            if interval_type == "jobs":
+                jobs_since, jobs_until = count_since, count_until
+            else:
+                changes_since, changes_until = count_since, count_until
 
             # Hours/days are not the primary measure here; keep them populated for reference
             hours_since = total_hours - last_performed_hours
@@ -533,6 +546,9 @@ async def _get_printer_maintenance_internal(
                 current_jobs=total_jobs,
                 jobs_since_maintenance=jobs_since,
                 jobs_until_due=jobs_until,
+                current_changes=total_changes,
+                changes_since_maintenance=changes_since,
+                changes_until_due=changes_until,
                 is_due=is_due,
                 is_warning=is_warning,
                 last_performed_at=last_performed_at,
@@ -549,6 +565,7 @@ async def _get_printer_maintenance_internal(
         is_active=printer.is_active,
         total_print_hours=total_hours,
         total_print_jobs=total_jobs,
+        total_filament_changes=total_changes,
         maintenance_items=maintenance_items,
         due_count=due_count,
         warning_count=warning_count,
@@ -857,6 +874,7 @@ async def perform_maintenance(
     # Get current hours and job count
     current_hours = await get_printer_total_hours(db, item.printer_id)
     current_jobs = printer.print_job_count or 0
+    current_changes = printer.filament_change_count or 0
 
     # Create history entry
     performed_at = utcnow_naive()
@@ -865,6 +883,7 @@ async def perform_maintenance(
         performed_at=performed_at,
         hours_at_maintenance=current_hours,
         jobs_at_maintenance=current_jobs,
+        changes_at_maintenance=current_changes,
         notes=data.notes,
     )
     db.add(history)
@@ -879,6 +898,7 @@ async def perform_maintenance(
             occurred_at=performed_at,
             hours_at_maintenance=current_hours,
             jobs_at_maintenance=current_jobs,
+            changes_at_maintenance=current_changes,
             source_history_id=history.id,
             **_actor_values(actor),
         )
@@ -888,6 +908,7 @@ async def perform_maintenance(
     item.last_performed_at = performed_at
     item.last_performed_hours = current_hours
     item.last_performed_jobs = current_jobs
+    item.last_performed_changes = current_changes
 
     await db.commit()
 
@@ -929,6 +950,9 @@ async def perform_maintenance(
         current_jobs=current_jobs,
         jobs_since_maintenance=0 if interval_type == "jobs" else None,
         jobs_until_due=interval if interval_type == "jobs" else None,
+        current_changes=current_changes,
+        changes_since_maintenance=0 if interval_type == "changes" else None,
+        changes_until_due=interval if interval_type == "changes" else None,
         is_due=False,
         is_warning=False,
         last_performed_at=item.last_performed_at,

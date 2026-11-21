@@ -17,8 +17,9 @@ class MaintenanceType(Base):
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     default_interval_hours: Mapped[float] = mapped_column(Float, default=100.0)
-    # Interval type: "hours" (print hours), "days" (calendar days) or "jobs"
-    # (finished print jobs). For "jobs" ``default_interval_hours`` holds a job count.
+    # Interval type: "hours" (print hours), "days" (calendar days), "jobs" (finished
+    # print jobs) or "changes" (filament changes). For "jobs" and "changes"
+    # ``default_interval_hours`` holds a count.
     interval_type: Mapped[str] = mapped_column(String(20), default="hours")
     icon: Mapped[str | None] = mapped_column(String(50))  # Icon name for UI
     wiki_url: Mapped[str | None] = mapped_column(String(500))  # Documentation link
@@ -51,6 +52,7 @@ class PrinterMaintenance(Base):
     last_performed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_performed_hours: Mapped[float] = mapped_column(Float, default=0.0)  # Hours at last reset
     last_performed_jobs: Mapped[int] = mapped_column(Integer, default=0)  # Printer job count at last reset
+    last_performed_changes: Mapped[int] = mapped_column(Integer, default=0)  # Filament change count at last reset
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -73,6 +75,7 @@ class MaintenanceHistory(Base):
     performed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     hours_at_maintenance: Mapped[float] = mapped_column(Float, default=0.0)
     jobs_at_maintenance: Mapped[int] = mapped_column(Integer, default=0)
+    changes_at_maintenance: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
@@ -101,6 +104,8 @@ class MaintenanceLogEntry(Base):
     # Printer job count when a scheduled task was completed; NULL for manual
     # entries and for records that predate job tracking.
     jobs_at_maintenance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Printer filament change count when a scheduled task was completed; NULL as above.
+    changes_at_maintenance: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # A nullable scalar instead of a foreign key is intentional: old task
     # history can be deleted with a removed custom assignment, while this log
