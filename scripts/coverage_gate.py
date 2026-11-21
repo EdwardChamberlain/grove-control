@@ -2,7 +2,7 @@
 
 With branch measurement on, coverage.py folds branches into its TOTAL
 percentage, so `coverage report --fail-under` would gate on a figure that is
-not the line floor in CLAUDE.md. This script reads `coverage json` output on
+not the line floor in CONTRIBUTING.md. This script reads `coverage json` output on
 stdin, reports line and branch totals separately, and fails only when the line
 percentage is below --fail-under. The line figure is rounded to the report's
 one decimal place before the comparison, the same way coverage.py rounds it.

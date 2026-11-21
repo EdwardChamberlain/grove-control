@@ -1,7 +1,7 @@
 """Background sweepers survive errors, and the VP bridge survives a failed import.
 
 These error paths used to be marked ``pragma: no cover - defensive``. They run
-fine under test, so they are tested instead (CLAUDE.md, "Coverage exclusions").
+fine under test, so they are tested instead (CONTRIBUTING.md, "Coverage exclusions").
 """
 
 import asyncio
