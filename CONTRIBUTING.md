@@ -9,6 +9,7 @@ Thank you for your interest in contributing to Grove Control! This document prov
 - [Product Direction](#product-direction)
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
+- [Repository Layout](#repository-layout)
 - [Making Changes](#making-changes)
 - [Code Style](#code-style)
 - [Internationalization (i18n)](#internationalization-i18n)
@@ -147,29 +148,62 @@ docker compose -f docker-compose.test.yml run --rm backend-test
 docker compose -f docker-compose.test.yml run --rm frontend-test
 ```
 
+## Repository Layout
+
+| Path | What it is |
+|---|---|
+| `backend/app/api/routes/` | FastAPI routers, one module per area |
+| `backend/app/services/` | Business logic, printer comms (MQTT/FTP), integrations |
+| `backend/app/models/`, `schemas/` | SQLAlchemy models, Pydantic schemas |
+| `backend/tests/unit/`, `integration/` | pytest suites |
+| `frontend/src/pages/`, `components/` | React UI |
+| `frontend/src/api/client.ts` | Typed API client used by every page |
+| `frontend/src/__tests__/` | Vitest suites, mirroring `src/` |
+| `frontend/e2e/` | Playwright browser tests (mocked API) |
+
 ## Making Changes
 
-1. **Create a branch** from `dev` for your changes:
+1. **Create a branch** from `origin/dev` (see [Branching](#branching)):
    ```bash
-   git checkout dev
-   git pull upstream dev
-   git checkout -b feat/your-feature-name
-   # or
-   git checkout -b fix/your-bug-fix
+   git fetch origin
+   git checkout -b feat/spool-usage-chart origin/dev
    ```
 
 2. **Make your changes** following our code style guidelines
 
-3. **Test your changes** thoroughly
+3. **Test your changes** thoroughly. Run the tests for what you touch while you work, and the full suites once before you push
 
-4. **Commit your changes** with clear, descriptive messages:
-   ```bash
-   git commit -m "Add feature: description of what you added"
-   ```
+4. **Commit your changes** using the [commit message style](#commit-messages) below
+
+5. **Work through the [pre-push checklist](#pre-push-checklist)**, then [open a pull request](#submitting-changes)
+
+### Branching
+
+- `dev` is the default and integration branch; `main` only holds releases.
+  Cut every branch from `origin/dev` and merge it back through a PR against
+  `dev`.
+- **There are no release or hotfix branches.** A release is a `dev` → `main`
+  PR, and urgent fixes go through `dev` like everything else. The
+  `Release PR Route` check rejects any PR into `main` whose source isn't `dev`,
+  so a feature or hotfix PR aimed at `main` will never go green.
+- **Base, review and compare against `origin/dev`,** never `main`, which can be
+  hundreds of commits behind. Older clones may still have `origin/HEAD`
+  pointing at `main`; if `git log --oneline HEAD..origin/dev` lists more than
+  a handful of commits, your branch is missing most of `dev` and is on a stale
+  base. Fix the clone with `git remote set-head origin --auto` and re-cut the
+  branch from `origin/dev`.
+- **Keep branches up to date by rebasing, never by merging.** Do not merge
+  `dev` (or `main`) into a feature branch and do not create merge commits to
+  catch up with the base branch:
+  `git fetch origin && git rebase origin/dev`, then
+  `git push --force-with-lease`. When branches are stacked, rebase each one onto
+  its base in turn (use `git rebase --onto` if the base was squashed or
+  rebased).
 
 ### Branch Naming
 
-Use `<type>/<short-kebab-summary>` so the branch name describes the change:
+Name a branch after the work it carries, so the branch list alone tells you what
+each one is: `<type>/<short-kebab-summary>`.
 
 - `feat/` - New features
 - `fix/` - Bug fixes
@@ -179,8 +213,35 @@ Use `<type>/<short-kebab-summary>` so the branch name describes the change:
 - `chore/` - Maintenance, dependencies and tooling
 - `scratch/` - Investigations and spikes that may never become a PR
 
-Branches created by AI agents are prefixed with `claude/`, for example
-`claude/fix/queue-bulk-delete-403`.
+Keep the summary to 2-5 words about the change itself (`feat/spool-usage-chart`,
+`fix/queue-bulk-delete-403`), not about the tooling or session that produced it.
+Branches created by AI agents carry a prefix naming the responsible agent; see
+[AGENTS.md](AGENTS.md).
+
+### Commit Messages
+
+Use conventional commits: `type(scope): summary`.
+
+- `type` is one of `feat`, `fix`, `docs`, `refactor`, `test` or `chore`.
+- `scope` is the area touched, such as `queue`, `history`, `i18n` or `ci`.
+- The summary is a short, lower-case, imperative description with no trailing
+  period.
+
+```text
+feat(history): calendar in its own card, full-width stats
+fix(queue): label icon-only bulk buttons and add changelog entry
+test(history): cover opening a print from the calendar day detail
+chore(i18n): remove the unused queue.reorderHint string
+```
+
+### Changelog
+
+Any change a user, API consumer or administrator would notice (new features,
+changed behaviour, API or permission changes, removals and notable fixes) needs
+a bullet under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md), in the same PR.
+Write it from the user's point of view as `Area: what changed`, and reference
+the issue or PR number where there is one. Documentation-only, test-only and
+internal refactoring changes don't need an entry.
 
 ## Code Style
 
@@ -230,21 +291,14 @@ The frontend uses [react-i18next](https://react.i18next.com/) for all user-facin
 
 ### Locale Files
 
-Translations live in `frontend/src/i18n/locales/`:
-
-| File | Language |
-|------|----------|
-| `en.ts` | English (primary) |
-| `de.ts` | German |
-| `fr.ts` | French |
-| `ja.ts` | Japanese |
-| `pt-BR.ts` | Brazilian Portuguese |
-[...]
-check for possibly more files!!!
+Translations live in `frontend/src/i18n/locales/`, one file per language:
+`en.ts` (English, the primary), `de.ts`, `es.ts`, `fr.ts`, `it.ts`, `ja.ts`,
+`ko.ts`, `pt-BR.ts`, `tr.ts`, `zh-CN.ts` and `zh-TW.ts`. List the directory for
+the current set.
 
 ### Adding New Strings
 
-1. Add the key to the appropriate section in **all three** locale files
+1. Add the key to the appropriate section in **every** locale file
 2. Use the `useTranslation` hook in your component:
 
 ```tsx
@@ -260,9 +314,8 @@ function MyComponent() {
 
 ### Important Notes
 
-- All three locale files must use the **same key structure** — same nesting, same key paths
-- Always add keys to all three locales to maintain parity
-- Run frontend tests after changes — locale parity is validated
+- Every locale file must use the **same key structure** — same nesting, same key paths
+- Always add keys to every locale to maintain parity; `npm run check:i18n` (part of `npm run test:run`) fails if they drift apart
 - If you find structural inconsistencies between locales, fix them — different key paths cause silent fallback to English
 
 ## Authentication & Permissions
@@ -342,15 +395,28 @@ The easiest way to run tests is with the provided scripts in the project root:
 
 ### Running Tests Individually
 
-**Backend** — tests are in `backend/tests/` with `unit/` and `integration/` subdirectories:
+**Backend** — tests are in `backend/tests/` with `unit/` and `integration/` subdirectories. Run them from `backend/` with the repo-root virtualenv (`../venv`). A fresh clone or git worktree has none; create it from the **repo root** first:
+
+```bash
+python3 -m venv venv && venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+```
 
 ```bash
 cd backend
-pytest tests/ -n auto                                   # All tests (parallel)
-pytest tests/unit/                                      # Unit tests only
-pytest tests/integration/test_print_queue_api.py -k start  # One file / matching tests
-pytest tests/ -n auto --cov=app --cov-report=term-missing:skip-covered  # With coverage, as CI measures it
+../venv/bin/python -m pytest tests/ -n auto                                   # All tests (parallel, a few minutes)
+../venv/bin/python -m pytest tests/unit/                                      # Unit tests only
+../venv/bin/python -m pytest tests/integration/test_print_queue_api.py        # One file
+../venv/bin/python -m pytest tests/ -k "queue and start"                      # By name
+../venv/bin/python -m pytest tests/ -n auto --cov=app --cov-report=term-missing:skip-covered  # With coverage, as CI measures it
 ```
+
+- `tests/unit/services/test_bambu_ftp.py` runs the FTP client against a local
+  mock FTPS server (no hardware). It takes about 16s, so leave it out of quick
+  runs with `--ignore` if you like; CI always runs it.
+- CI shards the suite with `pytest-split` using `backend/.test_durations`.
+  Refresh it occasionally so shards stay balanced (new tests are fine without
+  it, they just get an average duration):
+  `cd backend && ../venv/bin/python -m pytest tests/ -n auto --store-durations`
 
 **Frontend** — tests use [Vitest](https://vitest.dev/) and are in `frontend/src/__tests__/`:
 
@@ -359,15 +425,121 @@ cd frontend
 npm run test:run       # Single run with coverage thresholds + i18n parity (what CI runs)
 npm test               # Watch mode
 npx vitest run src/__tests__/pages/QueuePage.test.tsx  # One file
+npx vitest related src/pages/QueuePage.tsx --run       # Tests that import a file
 npm run test:browser   # Playwright browser tests in frontend/e2e/ (run `npm run setup:browser` once)
 ```
 
+`npm run typecheck` (`tsc -b`) type-checks the app, the tests (`src/__tests__/`, `e2e/`) and the
+`*.config.ts` files, through the projects referenced from `frontend/tsconfig.json`. Test fixtures must
+match the real API types. A new top-level TypeScript folder must be added to one of those projects'
+`include`; `scripts/check-typecheck-coverage.mjs` fails the check if a project lists no files of its own.
+
+### Writing Backend Tests
+
+- **API behaviour → `tests/integration/`.** Use the `async_client` fixture
+  (an `httpx.AsyncClient` on the real app) and `db_session` (an isolated
+  in-memory SQLite database per test). Assert on status codes *and* response
+  bodies.
+- **Pure logic → `tests/unit/`.** Mock I/O; don't start the app.
+- **Factories** in `backend/tests/conftest.py`: `printer_factory`,
+  `archive_factory`, `smart_plug_factory`, `notification_provider_factory`.
+  Prefer them over building models by hand.
+- **Never reach real hardware or networks.** Use `mock_mqtt_client`,
+  `mock_ftp_client`, `mock_httpx_client`, `mock_printer_manager`, and the
+  Tasmota/Home Assistant mocks. Printer connections are already stubbed in
+  `async_client`.
+- **Auth is off by default.** To test an authenticated route, call
+  `POST /api/v1/auth/setup` with `auth_enabled: true` and an admin, log in, and
+  send `Authorization: Bearer <token>`. See `_enable_auth_with_admin` in
+  `tests/integration/test_queue_start_user_attribution.py`.
+- **Every new route needs an auth dependency.**
+  `tests/unit/test_route_auth_coverage.py` fails otherwise; adding a public
+  route means adding it to that file's allowlist with a reason.
+- **Adding, removing or renaming a route** means regenerating the frontend's
+  copy of the route table, `frontend/src/__tests__/api/backend-routes.json`,
+  which the API contract test checks every client call against.
+  `tests/unit/test_api_route_snapshot.py` fails until you do:
+
+  ```bash
+  cd backend && UPDATE_ROUTE_SNAPSHOT=1 ../venv/bin/python -m pytest tests/unit/test_api_route_snapshot.py
+  ```
+
+  Commit the updated JSON with the route change.
+- Other structural guards will catch you too: `test_no_hardcoded_secrets.py`,
+  `test_no_unsafe_path_joins.py`, `test_no_fail_open_in_auth.py`,
+  `test_code_quality.py`.
+
+### Writing Frontend Tests
+
+- Put tests under `frontend/src/__tests__/` mirroring the source path
+  (`pages/FooPage.tsx` → `__tests__/pages/FooPage.test.tsx`).
+- Import `render` from `src/__tests__/utils.tsx`, not straight from Testing
+  Library; it wraps the component in the app's providers (React Query, router,
+  auth, theme, toasts). i18n and MSW are set up in `src/__tests__/setup.ts`.
+- The network is mocked with MSW. Default handlers live in
+  `src/__tests__/mocks/handlers.ts`; override per test with
+  `server.use(http.get('*/api/v1/...', () => HttpResponse.json(...)))`.
+- Query by role or label text and drive interactions with `userEvent`. Assert on
+  what the user sees and on the requests sent.
+- New user-facing strings go in every locale file (see
+  [Internationalization](#internationalization-i18n)).
+- Playwright tests in `frontend/e2e/` stub the API and WebSocket
+  (`e2e/mockWebSocket.ts`); they test the UI, not the backend.
+
 ### Coverage
 
-CI fails if coverage drops below the floors set in the `Backend Coverage` job of
-`.github/workflows/ci.yml` and in `coverage.thresholds` in
-`frontend/vitest.config.ts`. New code needs tests to keep coverage above them.
-See [CLAUDE.md](CLAUDE.md) for test-writing conventions and fixtures.
+CI enforces coverage floors, so untested code can fail the build on its own.
+
+- Backend: the line floor is passed to `scripts/coverage_gate.py` in the
+  Backend Coverage job of `.github/workflows/ci.yml` (mirrored in
+  `test_backend.sh`). Coverage is collected in 6 parallel shards and combined
+  in that job. Branch coverage (`branch = True` in `backend/.coveragerc`) is
+  measured and reported in the job summary but not yet gated; the gate does
+  not use coverage.py's combined line+branch TOTAL.
+- Frontend: `coverage.thresholds` in `frontend/vitest.config.ts`.
+  In CI, Vitest runs as 3 shards and Playwright as its own job; the Frontend
+  Tests job merges the shard reports, enforces these thresholds and runs the
+  i18n parity check. The Docker smoke test has no dependencies and starts
+  immediately (its Dockerfile builds the frontend itself).
+
+When your change raises coverage, raise the floors in the same PR to the new
+figure rounded down (backend to one decimal place, frontend to whole numbers).
+Never lower a floor to get a PR through. The targets from issue #256 are now
+the minimum: 80% backend lines; 70% frontend statements and lines, 65%
+branches and 60% functions. No floor may go below these.
+
+On pull requests, both coverage jobs also check how much of the PR's new and
+changed lines are covered (`diff-cover`, in the job summary). The check fails
+the job when that coverage is below 90%. A PR that changes no measurable lines
+(docs, config or test files only) passes. The coverage exclusion rules below
+still apply to this check: exclude code only where those rules allow it, and
+write tests for everything else.
+
+#### Coverage exclusions
+
+Excluding code from coverage hides it from the floors, so exclusions are rare
+and every one is explained. `tests/unit/test_coverage_exclusions.py` enforces
+these rules:
+
+- **Only code that cannot run in the test environment may be excluded**: it
+  needs a real GPU or WebGL, blocks forever by design, or only runs on a
+  platform or Python version the tests don't use. Code that is hard, slow or
+  tedious to test is not excluded; write the test, or leave it uncovered.
+- **Mark lines or blocks, never whole files or patterns.** No `omit`,
+  `exclude_lines` or `exclude_also` in `backend/.coveragerc`, no `ignore file`
+  hints, and no new entries in `coverage.exclude` in `frontend/vitest.config.ts`
+  (the existing entries are tests, setup, `main.tsx` and type declarations).
+- **State the reason on the same line**, in at least four words that say why
+  the code cannot run:
+
+  ```python
+  except AttributeError:  # pragma: no cover - unreachable on Python 3.11+, which the app requires
+  ```
+
+  ```ts
+  /* v8 ignore next -- jsdom has no WebGL context to create */
+  ```
+- **Call out new exclusions in the PR description** so a reviewer checks them.
 
 ## README Screenshot Generation
 
@@ -438,13 +610,28 @@ Pull requests trigger automated CI checks via GitHub Actions (`.github/workflows
 - **Docker**: Image build, import and static-file checks, `/health` smoke test
 - **Security**: CodeQL runs on PRs to `main` and weekly
 
-Required checks must pass before merging (see `.github/MAINTAINERS.md` for the list). Run `./test_all.sh` locally before pushing to catch issues early.
+Pull requests to `dev` must pass: Backend Lint, Backend Tests (4 shards), Backend Coverage, Frontend Lint, Frontend Type Check, Frontend Tests, Frontend Build and Frontend Security Audit (see `.github/MAINTAINERS.md` for the authoritative list). Run `./test_all.sh` locally before pushing to catch issues early.
 
 ## Submitting Changes
 
-1. **Push your branch** to your fork:
+### Pre-push Checklist
+
+Before you push, check that:
+
+1. The branch is rebased on `origin/dev` with no merge commits.
+2. Lint and types are clean: `ruff check backend/ && ruff format --check backend/` from the repo root, and `npm run lint && npm run typecheck` in `frontend/`.
+3. The tests for what you touched pass, and you have run the full suites once (`./test_backend.sh`, `./test_frontend.sh`).
+4. New or changed routes have an auth dependency, and the route snapshot is regenerated (see [Writing Backend Tests](#writing-backend-tests)).
+5. New user-facing strings are in every locale file (`npm run check:i18n`).
+6. Coverage floors are raised if your change raised coverage, never lowered, and any new exclusion is explained on its line.
+7. User-visible changes have a [changelog](#changelog) entry.
+8. Frontend UI changes have before/after screenshots ready for the PR.
+
+### Opening the Pull Request
+
+1. **Push your branch** to your fork (agents push to the repository directly):
    ```bash
-   git push origin feat/your-feature-name
+   git push -u origin feat/your-feature-name
    ```
 
 2. **Create a Pull Request** on GitHub:
@@ -453,6 +640,7 @@ Required checks must pass before merging (see `.github/MAINTAINERS.md` for the l
    - Fill out the PR template completely
    - Link any related issues
    - Include before/after screenshots for any visual changes
+   - **Open it as a regular PR, not a draft.** A PR is either ready for review or it isn't ready to be raised yet. Drafts only add an extra step, so keep the work on your branch until it is ready, then open the PR.
 
 3. **Wait for review** - maintainers will review your PR and may request changes
 

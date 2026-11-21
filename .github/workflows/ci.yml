@@ -210,7 +210,7 @@ jobs:
           coverage report --skip-covered --show-missing
           # The floor gates line coverage only; branch coverage is written to
           # the job summary and not gated yet. Raise this floor in the same PR
-          # as the tests that lift coverage (CLAUDE.md, "Coverage floors").
+          # as the tests that lift coverage (CONTRIBUTING.md, "Coverage floors").
           coverage json -q -o - | python ../scripts/coverage_gate.py --fail-under 80.0
 
       - name: Enforce coverage of changed lines

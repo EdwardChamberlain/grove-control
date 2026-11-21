@@ -1,7 +1,7 @@
 """Coverage exclusions must be rare, narrow and explained.
 
 Excluding code from coverage hides it from the CI floors, so the rules in
-CLAUDE.md ("Coverage exclusions") are enforced here:
+CONTRIBUTING.md ("Coverage exclusions") are enforced here:
 
 - Only code that cannot run in the test environment may be excluded.
 - Exclusions mark lines or blocks, never whole files or patterns.
@@ -124,7 +124,7 @@ class TestFrontendExclusions:
         unexpected = excludes - ALLOWED_VITEST_EXCLUDES.keys()
         assert not unexpected, (
             f"New whole-file coverage exclusions in vitest.config.ts: {sorted(unexpected)}. "
-            "Mark individual lines with a reason instead (see CLAUDE.md)."
+            "Mark individual lines with a reason instead (see CONTRIBUTING.md)."
         )
 
 
