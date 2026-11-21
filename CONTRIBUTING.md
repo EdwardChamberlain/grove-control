@@ -153,7 +153,7 @@ docker compose -f docker-compose.test.yml run --rm frontend-test
    ```bash
    git checkout dev
    git pull upstream dev
-   git checkout -b feature/your-feature-name
+   git checkout -b feat/your-feature-name
    # or
    git checkout -b fix/your-bug-fix
    ```
@@ -169,11 +169,18 @@ docker compose -f docker-compose.test.yml run --rm frontend-test
 
 ### Branch Naming
 
-- `feature/` - New features
+Use `<type>/<short-kebab-summary>` so the branch name describes the change:
+
+- `feat/` - New features
 - `fix/` - Bug fixes
 - `docs/` - Documentation changes
 - `refactor/` - Code refactoring
 - `test/` - Test additions or fixes
+- `chore/` - Maintenance, dependencies and tooling
+- `scratch/` - Investigations and spikes that may never become a PR
+
+Branches created by AI agents are prefixed with `claude/`, for example
+`claude/fix/queue-bulk-delete-403`.
 
 ## Code Style
 
@@ -437,7 +444,7 @@ Required checks must pass before merging (see `.github/MAINTAINERS.md` for the l
 
 1. **Push your branch** to your fork:
    ```bash
-   git push origin feature/your-feature-name
+   git push origin feat/your-feature-name
    ```
 
 2. **Create a Pull Request** on GitHub:

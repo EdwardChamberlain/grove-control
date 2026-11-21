@@ -6,9 +6,18 @@ Guidance for AI coding agents (and humans) working in this repository. See
 ## Workflow
 
 - **Branching (git-flow style, simplified):** `dev` is the default and
-  integration branch; `main` only holds releases. Cut `feature/`, `fix/`,
-  `docs/`, `refactor/` or `test/` branches from `origin/dev` and merge them
-  back via PR against `dev`.
+  integration branch; `main` only holds releases. Cut a branch from
+  `origin/dev` and merge it back via PR against `dev`.
+- **Branch names must describe the work.** Use `<type>/<short-kebab-summary>`,
+  and prefix it with `claude/` when an agent creates it:
+  `claude/feat/spool-usage-chart`, `claude/fix/queue-bulk-delete-403`,
+  `claude/docs/branch-naming`, `claude/scratch/mqtt-reconnect-investigation`.
+  Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, plus `scratch` for
+  investigations and spikes that may never become a PR. Keep the summary to
+  2-5 words about the change itself, not the session or tooling; never use
+  random or auto-generated names such as `claude/trusting-edison-11syu7`. If
+  the environment assigns a branch name you cannot change, use it, and make the
+  PR title carry the description instead.
 - **There are no release or hotfix branches.** A release is a `dev` → `main`
   PR, and urgent fixes go through `dev` like everything else. The
   `Release PR Route` check rejects any PR into `main` whose source isn't `dev`,

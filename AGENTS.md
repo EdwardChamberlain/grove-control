@@ -3,6 +3,14 @@
 Before working in this repository, read and follow [CLAUDE.md](CLAUDE.md) for
 the shared repository-specific instructions.
 
+## Naming branches
+
+Name every branch after the work it carries, in the form
+`claude/<type>/<short-kebab-summary>` (for example `claude/feat/spool-usage-chart`
+or `claude/scratch/mqtt-reconnect-investigation`), so a reader can tell what
+it is from the branch list alone. Do not use random or generated names. The
+full convention and the list of types are in [CLAUDE.md](CLAUDE.md).
+
 ## Keeping branches up to date
 
 Never merge `dev` (or `main`) into a feature branch. Always rebase it instead:
