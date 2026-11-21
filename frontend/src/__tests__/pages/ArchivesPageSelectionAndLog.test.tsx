@@ -165,6 +165,49 @@ describe('ArchivesPage print log view', () => {
     expect(await screen.findByText('2 log entries cleared')).toBeInTheDocument();
   });
 
+  it('puts clear log in the toolbar as an icon-only button', async () => {
+    setView('log');
+    useArchives();
+    useLog(entries);
+    render(<ArchivesPage />);
+
+    await screen.findByText('Log Benchy');
+    const clear = screen.getByRole('button', { name: /Clear Log/ });
+    expect(clear).toHaveTextContent('');
+    expect(clear).toHaveAttribute('title', expect.stringMatching(/Clear Log/));
+    expect(clear).toBeEnabled();
+  });
+
+  it('disables clear log for someone without permission to delete all archives', async () => {
+    setView('log');
+    setAuthToken('test-token', 'session');
+    try {
+      server.use(
+        http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+        http.get('/api/v1/auth/me', () =>
+          HttpResponse.json({ id: 7, username: 'reader', groups: [], permissions: ['archives:read_all'] }),
+        ),
+      );
+      useArchives();
+      useLog(entries);
+      render(<ArchivesPage />);
+
+      await screen.findByText('Log Benchy');
+      await waitFor(() => expect(screen.getByRole('button', { name: /Clear Log/ })).toBeDisabled());
+    } finally {
+      setAuthToken(null);
+    }
+  });
+
+  it('does not show clear log outside the log view', async () => {
+    setView('grid');
+    useArchives();
+    render(<ArchivesPage />);
+
+    await screen.findByText('Benchy');
+    expect(screen.queryByRole('button', { name: /Clear Log/ })).not.toBeInTheDocument();
+  });
+
   it('shows an empty state', async () => {
     setView('log');
     useArchives();
@@ -537,5 +580,41 @@ describe('ArchivesPage calendar view', () => {
 
     const monthName = new Date().toLocaleString('en-US', { month: 'long' });
     expect(await screen.findByText(new RegExp(monthName))).toBeInTheDocument();
+  });
+
+  it('shows the day detail for a selected day and the month totals for the whole page', async () => {
+    setView('calendar');
+    const now = new Date();
+    const when = new Date(now.getFullYear(), now.getMonth(), 15, 12).toISOString();
+    useArchives([
+      archive(1, 'Benchy', { created_at: when, started_at: when, completed_at: when }),
+      archive(2, 'Bracket', { created_at: when, started_at: when, completed_at: when, status: 'failed' }),
+    ]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    expect(await screen.findByText('Select a day to see prints')).toBeInTheDocument();
+    expect(screen.getByText('Prints this month').previousElementSibling).toHaveTextContent('2');
+    expect(screen.getByText('Successful').previousElementSibling).toHaveTextContent('1');
+    expect(screen.getByText('Failed').previousElementSibling).toHaveTextContent('1');
+
+    await user.click(screen.getByRole('button', { name: /^15\s*2$/ }));
+    expect(await screen.findByText('Benchy')).toBeInTheDocument();
+    expect(screen.getByText('Bracket')).toBeInTheDocument();
+    expect(screen.queryByText('Select a day to see prints')).not.toBeInTheDocument();
+  });
+
+  it('jumps to the grid view when a print in the day detail is clicked', async () => {
+    setView('calendar');
+    const when = new Date(new Date().getFullYear(), new Date().getMonth(), 15, 12).toISOString();
+    useArchives([archive(1, 'Benchy', { created_at: when, started_at: when, completed_at: when })]);
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await user.click(await screen.findByRole('button', { name: /^15\s*1$/ }));
+    await user.click(await screen.findByRole('button', { name: /Benchy/ }));
+
+    await waitFor(() => expect(screen.queryByText('Prints this month')).not.toBeInTheDocument());
+    expect(screen.getByText('Benchy')).toBeInTheDocument();
   });
 });

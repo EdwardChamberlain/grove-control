@@ -2098,6 +2098,8 @@ export function ArchivesPage() {
         shownCount={shownCount}
         searchInputRef={searchInputRef}
         onManageTags={() => setShowTagManagement(true)}
+        onClearLog={() => setShowClearLogConfirm(true)}
+        clearLogDisabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
       />
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}
@@ -2125,18 +2127,16 @@ export function ArchivesPage() {
           </CardContent>
         </Card>
       ) : viewMode === 'calendar' ? (
-        <Card className="p-6">
-          <CalendarView
-            archives={filteredArchives || []}
-            onArchiveClick={(archive) => {
-              // Switch to grid view and highlight the archive
-              setSearch(''); // Clear search to show all archives
-              setViewMode('grid');
-              setHighlightedArchiveId(archive.id);
-            }}
-            highlightedArchiveId={highlightedArchiveId}
-          />
-        </Card>
+        <CalendarView
+          archives={filteredArchives || []}
+          onArchiveClick={(archive) => {
+            // Switch to grid view and highlight the archive
+            setSearch(''); // Clear search to show all archives
+            setViewMode('grid');
+            setHighlightedArchiveId(archive.id);
+          }}
+          highlightedArchiveId={highlightedArchiveId}
+        />
       ) : viewMode === 'grid' ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -2177,15 +2177,6 @@ export function ArchivesPage() {
                 {t('archives.log.truncatedNote', { limit: LOG_CLIENT_FETCH_LIMIT, total: printLogData?.total ?? 0 })}
               </p>
             ) : <span />}
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setShowClearLogConfirm(true)}
-              disabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
-            >
-              <Trash2 className="w-4 h-4" />
-              {t('archives.log.clearLog')}
-            </Button>
           </div>
 
           <HistoryLogTable

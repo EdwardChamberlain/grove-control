@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  AlertCircle, CalendarDays, ClipboardList, Copy, LayoutGrid, Search, Settings, SlidersHorizontal, Star, X,
+  AlertCircle, CalendarDays, ClipboardList, Copy, LayoutGrid, Search, Settings, SlidersHorizontal, Star, Trash2, X,
 } from 'lucide-react';
 import { Button } from './Button';
 import { ToolbarDropdown } from './ToolbarControls';
@@ -28,6 +28,9 @@ interface HistoryFilterBarProps {
   shownCount: number;
   searchInputRef: RefObject<HTMLInputElement | null>;
   onManageTags: () => void;
+  /** Log view only: opens the clear-log confirmation. The icon button is hidden without it. */
+  onClearLog?: () => void;
+  clearLogDisabled?: boolean;
 }
 
 const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-wide text-bambu-gray';
@@ -39,7 +42,7 @@ const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-w
  */
 export function HistoryFilterBar({
   filters, viewMode, onViewModeChange, chips, printers, users, uniqueMaterials, uniqueColors, uniqueTags,
-  shownCount, searchInputRef, onManageTags,
+  shownCount, searchInputRef, onManageTags, onClearLog, clearLogDisabled,
 }: HistoryFilterBarProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -392,6 +395,18 @@ export function HistoryFilterBar({
             <div className="h-6 w-px bg-bambu-dark-tertiary" />
             {sortControl(false)}
           </>
+        )}
+        {viewMode === 'log' && onClearLog && (
+          <button
+            type="button"
+            onClick={onClearLog}
+            disabled={clearLogDisabled}
+            title={t('archives.log.clearLog')}
+            aria-label={t('archives.log.clearLog')}
+            className="h-8 w-8 flex flex-shrink-0 items-center justify-center rounded-lg border border-bambu-dark-tertiary bg-bambu-dark text-red-400 transition-colors hover:border-red-500 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-bambu-dark-tertiary disabled:hover:bg-bambu-dark"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         )}
         <div className="flex h-8 items-center border border-bambu-dark-tertiary rounded-lg overflow-hidden flex-shrink-0">
           <button
