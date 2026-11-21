@@ -1189,6 +1189,25 @@ describe('QueuePage', () => {
       expect(order()).toEqual(['second', 'first']);
       release();
     });
+
+    it('rolls back to the previous order and shows an error when the reorder request fails', async () => {
+      let attempted = false;
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(twoPending)),
+        http.post('/api/v1/queue/reorder', () => {
+          attempted = true;
+          return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+        }),
+      );
+      render(<QueuePage />);
+
+      await screen.findByText('Second Pending');
+      act(() => dnd.onDragEnd!({ active: { id: 1 }, over: { id: 5 } }));
+
+      expect(await screen.findByText('Failed to reorder queue')).toBeInTheDocument();
+      expect(attempted).toBe(true);
+      expect(order()).toEqual(['first', 'second']);
+    });
   });
 
   describe('selection checkbox on the thumbnail', () => {
