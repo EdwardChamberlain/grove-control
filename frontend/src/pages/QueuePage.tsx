@@ -132,6 +132,14 @@ const QUEUE_TONES = {
     footer: 'bg-yellow-400/10 border-yellow-400/25 text-yellow-700 dark:text-yellow-300',
     ring: 'ring-1 ring-yellow-400',
   },
+  paused: {
+    text: 'text-orange-700 dark:text-orange-300',
+    gutter: 'bg-orange-500/20 border-orange-500/50',
+    border: 'border-orange-500/55',
+    wash: 'bg-orange-500/[0.08]',
+    footer: 'bg-orange-500/10 border-orange-500/30 text-orange-700 dark:text-orange-300',
+    ring: 'ring-1 ring-orange-500',
+  },
   preheating: {
     text: 'text-amber-700 dark:text-amber-300',
     gutter: 'bg-amber-400/15 border-amber-400/40',
@@ -141,6 +149,18 @@ const QUEUE_TONES = {
     ring: 'ring-1 ring-amber-400',
   },
 } satisfies Record<string, QueueTone>;
+
+/**
+ * Printer stage numbers (`stg_cur`) that mean the print is paused, mapped to
+ * the i18n key for why. Other stages are not pause reasons.
+ */
+const PAUSE_REASON_KEYS: Record<number, string> = {
+  6: 'queue.pauseReason.filamentRanOut',
+  16: 'queue.pauseReason.byUser',
+  17: 'queue.pauseReason.frontCover',
+  20: 'queue.pauseReason.nozzleTemperature',
+  21: 'queue.pauseReason.bedTemperature',
+};
 
 /**
  * Status colour, icon and label for a queue card's gutter. Only statuses that
@@ -161,7 +181,7 @@ function resolveQueueTone(
     return { tone: QUEUE_TONES.waiting, Icon: Clock, label: t('queue.status.waiting') };
   }
   if (status === 'printing' && printerState === 'PAUSE') {
-    return { tone: QUEUE_TONES.scheduled, Icon: Pause, label: t('queue.status.paused') };
+    return { tone: QUEUE_TONES.paused, Icon: Pause, label: t('queue.status.paused') };
   }
   switch (status) {
     case 'preheating': return { tone: QUEUE_TONES.preheating, Icon: Timer, label: t('heatSoak.status') };
@@ -604,6 +624,10 @@ function SortableQueueItem({
         : t('heatSoak.waitingForConfirmation'))
     : null;
 
+  const pauseReasonKey = isPrinting && printerState === 'PAUSE' && status
+    ? PAUSE_REASON_KEYS[status.stg_cur]
+    : undefined;
+
   const printingProgress = isPrinting && status
     ? (() => {
         // Gate progress/remaining/layer on printer actually running this print.
@@ -926,6 +950,12 @@ function SortableQueueItem({
               <span className="flex items-center gap-1">
                 <Layers className="h-3 w-3" />
                 {printingProgress.layerNum}/{printingProgress.totalLayers}
+              </span>
+            )}
+            {pauseReasonKey && (
+              <span className="flex items-center gap-1 font-semibold">
+                <AlertCircle className="h-3 w-3" />
+                {t(pauseReasonKey)}
               </span>
             )}
           </div>

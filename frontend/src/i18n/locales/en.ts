@@ -1218,6 +1218,13 @@ export default {
       history: 'History',
     },
     // Status
+    pauseReason: {
+      filamentRanOut: 'Filament ran out',
+      byUser: 'Paused by user',
+      frontCover: 'Front cover removed',
+      nozzleTemperature: 'Nozzle temperature fault',
+      bedTemperature: 'Bed temperature fault',
+    },
     status: {
       pending: 'Pending',
       scheduled: 'Scheduled',

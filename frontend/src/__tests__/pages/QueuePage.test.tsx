@@ -950,6 +950,37 @@ describe('QueuePage', () => {
       });
     });
 
+    it('shows why a paused print stopped in the card footer', async () => {
+      server.use(
+        http.get('/api/v1/printers/1/status', () => HttpResponse.json({
+          id: 1, name: 'Test Printer', connected: true, state: 'PAUSE', progress: 40,
+          layer_num: 10, total_layers: 100, remaining_time: 30,
+          stg_cur: 6, stg_cur_name: 'Paused (filament ran out)',
+        })),
+      );
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Filament ran out')).toBeInTheDocument();
+      });
+    });
+
+    it('omits the pause reason when the printer stage is not a pause reason', async () => {
+      server.use(
+        http.get('/api/v1/printers/1/status', () => HttpResponse.json({
+          id: 1, name: 'Test Printer', connected: true, state: 'PAUSE', progress: 40,
+          layer_num: 10, total_layers: 100, remaining_time: 30,
+          stg_cur: -1, stg_cur_name: null,
+        })),
+      );
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Paused').length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByText('Filament ran out')).not.toBeInTheDocument();
+    });
+
     it('names the plate of a multi-plate job', async () => {
       server.use(
         http.get('/api/v1/queue/', () => HttpResponse.json([
