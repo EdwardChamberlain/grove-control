@@ -1469,7 +1469,7 @@ export function ArchivesPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission, hasAnyPermission } = useAuth();
+  const { hasPermission, hasAnyPermission, loading: authLoading } = useAuth();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filters = useHistoryFilters();
   const { values, sortBy, setSearch } = filters;
@@ -1579,10 +1579,21 @@ export function ArchivesPage() {
     queryFn: api.getSettings,
   });
 
+  // Someone limited to their own prints has no one to filter by, so the User
+  // filter is hidden and the user list isn't fetched (it needs users:read).
+  // Until auth has loaded, permissions read as "auth disabled" (allow all), so wait.
+  const canFilterByUser = !authLoading && hasPermission('archives:read_all');
   const { data: users } = useQuery({
     queryKey: ['users'],
     queryFn: api.getUsers,
+    enabled: canFilterByUser,
   });
+  // A user filter saved while the viewer could see everyone's prints must not
+  // keep filtering, invisibly, once they can't.
+  const { setFilterUser } = filters;
+  useEffect(() => {
+    if (!authLoading && !canFilterByUser && filterUser) setFilterUser(null);
+  }, [authLoading, canFilterByUser, filterUser, setFilterUser]);
 
   // Filters the print log can't apply on the server (they depend on the linked
   // archive, or on fields the log API doesn't expose) switch it to a larger
@@ -2092,6 +2103,7 @@ export function ArchivesPage() {
         chips={activeChips}
         printers={printers}
         users={users}
+        showUserFilter={canFilterByUser}
         uniqueMaterials={uniqueMaterials}
         uniqueColors={uniqueColors}
         uniqueTags={uniqueTags}
