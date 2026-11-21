@@ -277,19 +277,9 @@ function MyComponent() {
 
 ## Authentication & Permissions
 
-Grove Control has an optional authentication system. When auth is enabled, API endpoints are protected by granular permissions.
-
-### How It Works
-
-Authentication is **opt-in** — when disabled, all endpoints are open. The system uses `RequirePermissionIfAuthEnabled` which:
-
-- Checks if auth is enabled in settings
-- If disabled: allows the request through (no-op)
-- If enabled: validates JWT token/API key and checks the user has the required permission
-
-### Adding Auth to New Endpoints
-
-Use the `RequirePermissionIfAuthEnabled` dependency in your route:
+Authentication is opt-in, and when it is enabled API endpoints are protected by
+granular permissions. Every route needs the `RequirePermissionIfAuthEnabled`
+dependency (a guard test fails otherwise):
 
 ```python
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
@@ -302,37 +292,13 @@ async def get_my_resource(
     ...
 ```
 
-### Permission Convention
+Permissions follow the `resource:action` pattern (for example `filaments:read`).
+To add one:
 
-Permissions follow the `resource:action` pattern (e.g., `filaments:read`, `printers:control`). Standard actions:
-
-| Action | Usage |
-|--------|-------|
-| `read` | View/list resources |
-| `create` | Create new resources |
-| `update` | Modify existing resources |
-| `delete` | Remove resources |
-
-Some resources have additional actions. Examples: `printers:control` for live printer controls
-such as stop/pause/resume, `printers:files` for printer storage access, `queue:create` for
-creating queue items that may dispatch immediately when scheduled ASAP, `library:upload` for
-File Manager uploads/imports, and `archives:reprint_own` / `archives:reprint_all` for archive
-reprint eligibility. Archive reprint still needs `queue:create` before it can enqueue a job.
-
-### Adding New Permissions
-
-1. Add the permission to the `Permission` enum in `backend/app/core/permissions.py`
+1. Add it to the `Permission` enum in `backend/app/core/permissions.py`
 2. Add it to the appropriate category in `PERMISSION_CATEGORIES`
 3. Add it to the relevant default groups (`Administrators` gets all, `Operators` and `Viewers` as appropriate)
 4. Use it in your route with `RequirePermissionIfAuthEnabled`
-
-### Default Groups
-
-| Group | Access Level |
-|-------|-------------|
-| **Administrators** | All permissions |
-| **Operators** | Full control of printers, own items in archives/queue, read-only settings |
-| **Viewers** | Read-only access to all resources |
 
 ## Testing
 
