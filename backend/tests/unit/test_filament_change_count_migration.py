@@ -15,13 +15,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-import backend.app.models  # noqa: F401  # Register the complete mapped schema for Base.metadata.
-from backend.app.core.config import settings
+from backend.app.core import config as config_module
 from backend.app.core.database import Base, run_migrations
 from backend.app.models.archive import PrintArchive
 from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, MaintenanceType, PrinterMaintenance
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.printer import Printer
+from backend.tests._fixtures.models import register_all_models
 
 FIXTURES = Path(__file__).resolve().parent.parent / "_fixtures" / "threemf"
 
@@ -38,8 +38,13 @@ def force_sqlite_dialect(monkeypatch):
 
 @pytest.fixture
 def base_dir(tmp_path, monkeypatch):
-    """Point archive storage at a temp dir holding real sliced plates."""
-    monkeypatch.setattr(settings, "base_dir", tmp_path)
+    """Point archive storage at a temp dir holding real sliced plates.
+
+    Patch whatever ``settings`` object the config module holds *now*: another test
+    reloads that module, and the migration looks ``settings`` up at call time, so an
+    object imported at collection time can be a stale one that the migration never sees.
+    """
+    monkeypatch.setattr(config_module.settings, "base_dir", tmp_path)
     (tmp_path / "archives").mkdir()
     for name in ("cylinder_2_changes.3mf", "cylinder_painted_74_changes.3mf"):
         shutil.copy(FIXTURES / name, tmp_path / "archives" / name)
@@ -48,6 +53,7 @@ def base_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 async def legacy_engine():
+    register_all_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
