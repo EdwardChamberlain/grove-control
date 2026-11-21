@@ -2575,7 +2575,8 @@ async def run_migrations(conn):
     await _safe_execute(conn, "ALTER TABLE users ADD COLUMN cloud_region VARCHAR(10)")
 
     # Cleanup: Remove obsolete settings keys that are no longer used
-    obsolete_keys = ["slicer_binary_path"]
+    # queue_shortest_first: Shortest Job First mode was removed; drop any saved value.
+    obsolete_keys = ["slicer_binary_path", "queue_shortest_first"]
     for key in obsolete_keys:
         await conn.execute(text("DELETE FROM settings WHERE key = :key"), {"key": key})
 

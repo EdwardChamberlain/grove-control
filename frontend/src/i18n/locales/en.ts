@@ -1173,10 +1173,6 @@ export default {
     itemCount: '{{count}} item',
     itemCount_plural: '{{count}} items',
     dragToReorder: 'Drag to reorder (ASAP only)',
-    sjf: {
-      label: 'SJF',
-      tooltip: 'Shortest Job First — scheduler prioritizes shorter prints',
-    },
     addedBy: 'Added by {{name}}',
     selectJob: 'Select {{name}}',
     nextInQueue: 'Next in queue',

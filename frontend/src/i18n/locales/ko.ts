@@ -1105,10 +1105,6 @@ export default {
     itemCount: '{{count}}개 항목',
     itemCount_plural: '{{count}}개 항목',
     dragToReorder: '드래그하여 순서 변경 (즉시만)',
-    sjf: {
-      label: 'SJF',
-      tooltip: '최단 작업 우선 — 스케줄러가 짧은 인쇄를 우선합니다'
-    },
     addedBy: '{{name}}님이 추가함',
     selectJob: '{{name}} 선택',
     nextInQueue: '다음 대기',

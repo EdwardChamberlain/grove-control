@@ -1159,10 +1159,6 @@ export default {
     itemCount: '{{count}} elemento',
     itemCount_plural: '{{count}} elementos',
     dragToReorder: 'Arrastre para reordenar (solo elementos «lo antes posible»)',
-    sjf: {
-      label: 'SJF',
-      tooltip: 'Trabajo más corto primero — el planificador prioriza las impresiones más cortas',
-    },
     addedBy: 'Añadido por {{name}}',
     selectJob: 'Seleccionar {{name}}',
     nextInQueue: 'Siguiente en la cola',

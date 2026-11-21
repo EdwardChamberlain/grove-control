@@ -1159,10 +1159,6 @@ export default {
     itemCount: '{{count}} item',
     itemCount_plural: '{{count}} itens',
     dragToReorder: 'Arraste para reordenar (apenas ASAP)',
-    sjf: {
-      label: 'SJF',
-      tooltip: 'Trabalho mais curto primeiro — o agendador prioriza impressões mais curtas',
-    },
     addedBy: 'Adicionado por {{name}}',
     selectJob: 'Selecionar {{name}}',
     nextInQueue: 'Próximo na fila',

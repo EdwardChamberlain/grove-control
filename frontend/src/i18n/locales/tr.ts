@@ -1159,10 +1159,6 @@ export default {
     itemCount: '{{count}} öğe',
     itemCount_plural: '{{count}} öğe',
     dragToReorder: 'Yeniden sıralamak için sürükleyin (yalnızca ASAP)',
-    sjf: {
-      label: 'SJF',
-      tooltip: 'En Kısa İş İlk — planlayıcı daha kısa baskılara öncelik verir',
-    },
     addedBy: '{{name}} tarafından eklendi',
     selectJob: '{{name}} öğesini seç',
     nextInQueue: 'Kuyrukta sıradaki',

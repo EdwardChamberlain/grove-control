@@ -1304,7 +1304,6 @@ export interface AppSettings {
   // Door open→close marks the plate clear (#238)
   door_cycle_clears_plate: boolean;
   // Shortest job first scheduling
-  queue_shortest_first: boolean;
   // Maximum independent printer uploads/sessions in flight
   queue_max_concurrent_uploads: number;
   // User-configurable presets for the printer-card popovers (JSON arrays of 3 ints).
@@ -2227,7 +2226,6 @@ export interface PrintQueueItem {
   created_by_id?: number | null;
   created_by_username?: string | null;
   // Shortest-job-first scheduling
-  been_jumped?: boolean;
   // Auto-print G-code injection
   gcode_injection?: boolean;
   cleanup_library_after_dispatch?: boolean;

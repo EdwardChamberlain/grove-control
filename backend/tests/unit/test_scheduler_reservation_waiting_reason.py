@@ -10,10 +10,9 @@ from backend.app.models.printer import Printer
 from backend.app.services.print_scheduler import PrintScheduler
 
 
-@pytest.mark.parametrize("shortest_first", [False, True])
 @pytest.mark.parametrize("reserved_status", ["preheating", "dispatching", "printing", None])
 @pytest.mark.asyncio
-async def test_reservation_wait_uses_current_printer_name(test_engine, shortest_first, reserved_status):
+async def test_reservation_wait_uses_current_printer_name(test_engine, reserved_status):
     session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
     async with session_maker() as db:
         db.add(
@@ -36,7 +35,7 @@ async def test_reservation_wait_uses_current_printer_name(test_engine, shortest_
     scheduler = PrintScheduler()
 
     async def bool_setting(_db, key, default=False):
-        return shortest_first if key == "queue_shortest_first" else default
+        return default
 
     with (
         patch("backend.app.services.print_scheduler.async_session", session_maker),

@@ -272,9 +272,6 @@ class PrintQueueItemResponse(BaseModel):
     # which library_file_id / target_model name the candidate that actually ran.
     variants: list[QueueVariantSummary] = []
 
-    # Shortest-job-first scheduling
-    been_jumped: bool = False
-
     # Auto-print G-code injection
     gcode_injection: bool = False
     # Legacy (pre-#237): set on direct-upload rows created before Temporary

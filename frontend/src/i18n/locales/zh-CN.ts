@@ -1159,10 +1159,6 @@ export default {
     itemCount: '{{count}} 个项目',
     itemCount_plural: '{{count}} 个项目',
     dragToReorder: '拖动以重新排序（仅限尽快）',
-    sjf: {
-      label: 'SJF',
-      tooltip: '最短任务优先 — 调度器优先处理较短的打印任务',
-    },
     addedBy: '由 {{name}} 添加',
     selectJob: '选择 {{name}}',
     nextInQueue: '队列中的下一个',
