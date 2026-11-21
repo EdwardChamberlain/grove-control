@@ -4797,7 +4797,7 @@ export default {
   editArchive: {
     title: 'Modifica archivio',
     name: 'Nome',
-    namePlaceholder: 'Nome stampa',
+    nameReadOnlyHelp: 'Il nome registrato non può essere modificato qui. Usa «Salva in File» e rinomina quella copia.',
     printer: 'Stampante',
     noPrinter: 'Nessuna stampante',
     project: 'Progetto',

@@ -4782,7 +4782,7 @@ export default {
   editArchive: {
     title: 'Arşivi Düzenle',
     name: 'Ad',
-    namePlaceholder: 'Baskı adı',
+    nameReadOnlyHelp: 'Kaydedilen ad burada değiştirilemez. Dosyalara Kaydet\'i kullanın, ardından o kopyayı yeniden adlandırın.',
     printer: 'Yazıcı',
     noPrinter: 'Yazıcı yok',
     project: 'Proje',

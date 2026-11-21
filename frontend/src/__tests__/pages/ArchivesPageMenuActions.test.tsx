@@ -335,7 +335,7 @@ describe.each(layouts)('archive actions menu (%s layout)', (layout) => {
 
     await openMenu(user);
     await user.click(menuItem('Edit'));
-    expect(await screen.findByDisplayValue('Benchy')).toBeInTheDocument();
+    expect(await screen.findByTestId('archive-print-name')).toHaveTextContent('Benchy');
   });
 
   it('disables actions that need a file the archive does not have', async () => {

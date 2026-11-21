@@ -4796,7 +4796,7 @@ export default {
   editArchive: {
     title: '编辑归档',
     name: '名称',
-    namePlaceholder: '打印名称',
+    nameReadOnlyHelp: '此处无法更改已记录的名称。请先“保存到文件”，再重命名该副本。',
     printer: '打印机',
     noPrinter: '无打印机',
     project: '项目',

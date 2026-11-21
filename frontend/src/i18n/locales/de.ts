@@ -4808,7 +4808,7 @@ export default {
   editArchive: {
     title: 'Archiv bearbeiten',
     name: 'Name',
-    namePlaceholder: 'Druckname',
+    nameReadOnlyHelp: 'Der aufgezeichnete Name kann hier nicht geändert werden. Mit „In Dateien speichern“ eine Kopie anlegen und diese umbenennen.',
     printer: 'Drucker',
     noPrinter: 'Kein Drucker',
     project: 'Projekt',

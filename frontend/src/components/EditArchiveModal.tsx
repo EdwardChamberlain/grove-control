@@ -47,7 +47,6 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
   const queryClient = useQueryClient();
-  const [printName, setPrintName] = useState(archive.print_name || '');
   const [printerId, setPrinterId] = useState<number | null>(archive.printer_id);
   const [projectId, setProjectId] = useState<number | null>(archive.project_id ?? null);
   const [notes, setNotes] = useState(archive.notes || '');
@@ -187,7 +186,6 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
     e.preventDefault();
     // Build update data
     const updateData: Parameters<typeof api.updateArchive>[1] = {
-      print_name: printName || undefined,
       printer_id: printerId,
       project_id: projectId,
       notes: notes || undefined,
@@ -241,16 +239,16 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
             <PrintLogTable archiveId={archive.id} />
           </div>
 
-          {/* Print Name */}
+          {/* Print Name - the recorded name is read-only (#329); rename a copy in Files */}
           <div>
-            <label className="block text-sm text-bambu-gray mb-1">{t('editArchive.name')}</label>
-            <input
-              type="text"
-              value={printName}
-              onChange={(e) => setPrintName(e.target.value)}
-              className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-              placeholder={t('editArchive.namePlaceholder')}
-            />
+            <span className="block text-sm text-bambu-gray mb-1">{t('editArchive.name')}</span>
+            <p
+              data-testid="archive-print-name"
+              className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white break-words"
+            >
+              {archive.print_name || archive.filename}
+            </p>
+            <p className="text-xs text-bambu-gray mt-1">{t('editArchive.nameReadOnlyHelp')}</p>
           </div>
 
           {/* Printer */}

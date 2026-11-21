@@ -19,6 +19,12 @@
   prints, since there is no one else to filter by. It also no longer requests the
   user list for them, and a user filter saved earlier is dropped instead of
   silently hiding prints (#328).
+- Archive: the recorded print name is now read-only (#329). The Edit Archive
+  dialog shows it as text instead of an input, and the archive update API
+  (`PATCH /api/v1/archives/{id}`) ignores a `print_name` it is sent, so an entry
+  stays easy to match to the print that produced it. Existing names are kept as
+  stored. Notes, tags, project, status and the other fields stay editable. To
+  give a print a more useful name, use Save to Files and rename that copy.
 - UI: dropdowns in forms now match the height of the text fields beside them.
   They were forced to the compact toolbar height (32px) and sat visibly shorter
   than neighbouring inputs. Dropdowns that don't set their own padding, such as

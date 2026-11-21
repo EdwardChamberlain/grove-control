@@ -4796,7 +4796,7 @@ export default {
   editArchive: {
     title: '編輯歸檔',
     name: '名稱',
-    namePlaceholder: '列印名稱',
+    nameReadOnlyHelp: '此處無法變更已記錄的名稱。請先「儲存至檔案」，再重新命名該副本。',
     printer: '印表機',
     noPrinter: '無印表機',
     project: '專案',

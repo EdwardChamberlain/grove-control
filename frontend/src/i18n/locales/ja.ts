@@ -4809,7 +4809,7 @@ export default {
   editArchive: {
     title: 'アーカイブを編集',
     name: '名前',
-    namePlaceholder: '印刷名',
+    nameReadOnlyHelp: '記録された名前はここでは変更できません。「ファイルに保存」してから、そのコピーの名前を変更してください。',
     printer: 'プリンター',
     noPrinter: 'プリンターなし',
     project: 'プロジェクト',
