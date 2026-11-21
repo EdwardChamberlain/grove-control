@@ -1,0 +1,44 @@
+{
+  "_readme": [
+    "Golden files for filament-change counting (#337). Each .3mf here is a real sliced plate.",
+    "expected_loads is the ground truth and must never be copied from the parser's output: it is",
+    "programmed_changes + 1 (the initial load), where programmed_changes is what the slicer was",
+    "told to do (the file name) or reported (the painted file: the slicer shows 74 changes).",
+    "A change to expected_loads needs a reason in the PR; do not regenerate it from the code.",
+    "layer_checks are [max_layer, loads_up_to_and_including_that_layer] pairs, 1-based like the printer's layer_num."
+  ],
+  "files": {
+    "cylinder_single_filament.3mf": {
+      "slicer": "OrcaSlicer 2.4.2",
+      "printer_model_id": "C12",
+      "plate": 1,
+      "programmed_changes": 0,
+      "expected_loads": 1,
+      "layer_checks": [[0, 1], [9999, 1]]
+    },
+    "cylinder_1_change.3mf": {
+      "slicer": "OrcaSlicer 2.4.2",
+      "printer_model_id": "C12",
+      "plate": 1,
+      "programmed_changes": 1,
+      "expected_loads": 2,
+      "layer_checks": [[0, 1], [56, 1], [57, 2], [9999, 2]]
+    },
+    "cylinder_2_changes.3mf": {
+      "slicer": "OrcaSlicer 2.4.2",
+      "printer_model_id": "C12",
+      "plate": 1,
+      "programmed_changes": 2,
+      "expected_loads": 3,
+      "layer_checks": [[0, 1], [56, 1], [57, 2], [95, 2], [96, 3], [9999, 3]]
+    },
+    "cylinder_painted_74_changes.3mf": {
+      "slicer": "OrcaSlicer 2.4.2",
+      "printer_model_id": "C12",
+      "plate": 1,
+      "programmed_changes": 74,
+      "expected_loads": 75,
+      "layer_checks": [[0, 1], [23, 1], [24, 2], [25, 3], [9999, 75]]
+    }
+  }
+}

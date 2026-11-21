@@ -33,6 +33,11 @@ class Printer(Base):
     # "print jobs" maintenance interval type (#337); incremented once per job in
     # on_print_complete and backfilled from the print log when the column is added.
     print_job_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Lifetime count of filament changes: for every job, the initial load plus each change
+    # defined in its sliced file. Drives the "filament changes" maintenance interval type
+    # (#337); incremented in on_print_complete from the archive's 3MF, so jobs whose 3MF
+    # can't be read are not counted. Backfilled from archived prints when the column is added.
+    filament_change_count: Mapped[int] = mapped_column(Integer, default=0)
     # External camera configuration
     external_camera_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     external_camera_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # mjpeg, rtsp, snapshot

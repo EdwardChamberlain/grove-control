@@ -1610,7 +1610,9 @@ export default {
     printJobs: 'Print Jobs',
     job: '1 job',
     jobs: '{{count}} jobs',
-    jobBasedInterval: 'Print-job-based interval',
+    filamentChanges: 'Filament Changes',
+    change: '1 change',
+    changes: '{{count}} changes',
     // Interval overrides
     intervalOverrides: 'Interval Overrides',
     intervalOverridesDescription: 'Customize intervals for specific printers',

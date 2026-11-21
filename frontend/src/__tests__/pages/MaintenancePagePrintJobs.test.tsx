@@ -122,14 +122,6 @@ describe('job-based task cards', () => {
     expect(screen.getByText('30 jobs left')).toBeInTheDocument();
   });
 
-  it('marks job-based tasks so they are not mistaken for print-hour tasks', async () => {
-    const user = userEvent.setup();
-    await openPrinter(user);
-
-    expect(screen.getAllByTitle('Print-job-based interval')).toHaveLength(4);
-    expect(screen.queryByTitle('Time-based interval')).not.toBeInTheDocument();
-  });
-
   it('does not overflow the progress bar for an overdue task', async () => {
     const user = userEvent.setup();
     await openPrinter(user);

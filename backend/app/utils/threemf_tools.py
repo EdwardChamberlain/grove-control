@@ -6,11 +6,13 @@ accurate partial usage reporting for multi-material prints.
 """
 
 import hashlib
+import io
 import json
 import logging
 import math
 import re
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 
 import defusedxml.ElementTree as ET
@@ -158,6 +160,22 @@ def mm_to_grams(
     return volume_cm3 * density_g_cm3
 
 
+def _resolve_plate_gcode_name(names: list[str], plate_id: int | None) -> str | None:
+    """Pick the G-code member for a plate, shared by every per-plate extractor.
+
+    Exact ``plate_<n>.gcode`` match first. With no plate asked for, or a file whose
+    single G-code member doesn't follow the plate_N naming convention (non-Bambu
+    slicers), the lone/lowest member is unambiguous. A multi-plate file asked for a
+    plate it doesn't contain returns None rather than silently using another plate.
+    """
+    gcode_path = select_plate_gcode_name(names, plate_id)
+    if gcode_path is None:
+        gcode_files = [f for f in names if f.endswith(".gcode")]
+        if plate_id is None or len(gcode_files) == 1:
+            gcode_path = default_plate_gcode_name(names)
+    return gcode_path
+
+
 def extract_layer_filament_usage_from_3mf(
     file_path: Path, plate_id: int | None = None
 ) -> dict[int, dict[int, float]] | None:
@@ -179,15 +197,7 @@ def extract_layer_filament_usage_from_3mf(
     """
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
-            names = zf.namelist()
-            gcode_path = select_plate_gcode_name(names, plate_id)
-            if gcode_path is None:
-                # No plate asked for, or a file whose single G-code member
-                # doesn't follow the plate_N naming convention (non-Bambu
-                # slicers) — the lone member is unambiguous either way.
-                gcode_files = [f for f in names if f.endswith(".gcode")]
-                if plate_id is None or len(gcode_files) == 1:
-                    gcode_path = default_plate_gcode_name(names)
+            gcode_path = _resolve_plate_gcode_name(zf.namelist(), plate_id)
             if gcode_path is None:
                 return None
 
@@ -196,6 +206,102 @@ def extract_layer_filament_usage_from_3mf(
             return parse_gcode_layer_filament_usage(gcode_content)
     except Exception:
         return None
+
+
+# A filament *load* in Bambu G-code is "M620 S<n>A": the first one is the initial load
+# at print start and every later one is a filament change. "M620 S255" (no A) is the
+# end-of-print unload and "M620 M" only sets a mode; neither is a load.
+_FILAMENT_LOAD_RE = re.compile(r"M620\s+S(\d+)A")
+_LAYER_MARKER_RE = re.compile(r"M73\b.*?\bL(\d+)")
+_FILAMENT_SEQUENCE_MEMBER = "Metadata/filament_sequence.json"
+
+
+def parse_gcode_filament_load_layers(lines: Iterable[str], max_layer: int | None = None) -> list[int]:
+    """Return the layer of every filament load in G-code, in print order.
+
+    The first entry is the initial load at print start (layer 0); each later entry is
+    a filament change at the layer given by the preceding ``M73 L<n>`` marker, the same
+    1-based layer numbering the printer reports as ``layer_num``. With ``max_layer``
+    scanning stops once a layer beyond it begins, so a partial print only reads the
+    G-code it actually reached.
+    """
+    loads: list[int] = []
+    layer = 0
+    for raw in lines:
+        line = raw.lstrip()
+        if line.startswith("M73"):
+            marker = _LAYER_MARKER_RE.match(line)
+            if marker:
+                layer = int(marker.group(1))
+                if max_layer is not None and layer > max_layer:
+                    break
+        elif line.startswith("M620 "):
+            load = _FILAMENT_LOAD_RE.match(line)
+            if load and load.group(1) != "255":
+                loads.append(layer)
+    return loads
+
+
+def extract_filament_load_layers_from_3mf(
+    file_path: Path, plate_id: int | None = None, max_layer: int | None = None
+) -> list[int] | None:
+    """Scan a plate's embedded G-code for filament loads (see parse_gcode_filament_load_layers).
+
+    This is the ground truth for what the printer executes, and the only source that
+    says *where* each change happens. Returns None when the file or the plate's
+    G-code can't be read.
+    """
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            gcode_path = _resolve_plate_gcode_name(zf.namelist(), plate_id)
+            if gcode_path is None:
+                return None
+            with zf.open(gcode_path) as raw, io.TextIOWrapper(raw, encoding="utf-8", errors="ignore") as text:
+                return parse_gcode_filament_load_layers(text, max_layer)
+    except Exception:
+        logger.debug("Could not scan filament loads in %s", file_path, exc_info=True)
+        return None
+
+
+def _filament_sequence_length(zf: zipfile.ZipFile, plate_id: int | None) -> int | None:
+    """Number of filament loads the slicer recorded for a plate, or None if absent/ambiguous."""
+    try:
+        data = json.loads(zf.read(_FILAMENT_SEQUENCE_MEMBER))
+    except (KeyError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if plate_id is not None:
+        plate = data.get(f"plate_{plate_id}")
+    elif len(data) == 1:
+        plate = next(iter(data.values()))
+    else:
+        return None
+    sequence = plate.get("sequence") if isinstance(plate, dict) else None
+    if isinstance(sequence, list) and sequence and all(isinstance(entry, int) for entry in sequence):
+        return len(sequence)
+    return None
+
+
+def extract_filament_load_count_from_3mf(file_path: Path, plate_id: int | None = None) -> int | None:
+    """Total filament loads for a whole plate: the initial load plus every change.
+
+    Reads the slicer's ``filament_sequence.json`` (one tiny member, no G-code scan) and
+    falls back to scanning the G-code when it is missing or doesn't cover the plate.
+    The two agree on every known file; tests pin that. Unlike the per-layer slice_info
+    ranges, this counts changes painted *within* a layer. Returns None when the count
+    can't be determined.
+    """
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            count = _filament_sequence_length(zf, plate_id)
+    except Exception:
+        logger.debug("Could not read %s", file_path, exc_info=True)
+        return None
+    if count is not None:
+        return count
+    layers = extract_filament_load_layers_from_3mf(file_path, plate_id)
+    return None if layers is None else len(layers)
 
 
 def get_cumulative_usage_at_layer(

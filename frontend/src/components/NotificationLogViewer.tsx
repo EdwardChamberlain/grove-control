@@ -123,7 +123,9 @@ export function NotificationLogViewer({ onClose }: NotificationLogViewerProps) {
           <ReactSelect
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
-            className="px-3 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-bambu-green"
+            // h-8 (not py-1.5): the small buttons beside this are 28.8px with no border, so the
+            // bordered dropdown needs a fixed height to line up with them.
+            className="px-3 h-8 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-bambu-green"
           >
             <option value={1}>{t('notifications.last24Hours')}</option>
             <option value={7}>{t('notifications.last7Days')}</option>

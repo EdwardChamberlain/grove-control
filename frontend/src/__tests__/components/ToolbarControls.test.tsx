@@ -66,6 +66,56 @@ describe('ReactSelect', () => {
   });
 });
 
+describe('ReactSelect sizing', () => {
+  const renderSelect = (className?: string) => {
+    render(
+      <ReactSelect value="a" className={className} onChange={vi.fn()}>
+        <option value="a">Alpha</option>
+        <option value="b">Beta</option>
+      </ReactSelect>,
+    );
+    return screen.getByRole('combobox');
+  };
+
+  it('keeps the compact toolbar size when the caller sets no sizing', () => {
+    const trigger = renderSelect();
+
+    expect(trigger).toHaveClass('h-8', 'px-2');
+  });
+
+  it('lets a form field size itself so it matches the text inputs beside it', () => {
+    // A fixed 32px toolbar height used to win over py-2 and leave form selects shorter than inputs.
+    const trigger = renderSelect('w-full px-3 py-2 bg-bambu-dark border rounded-lg text-white');
+
+    expect(trigger).toHaveClass('px-3', 'py-2');
+    expect(trigger).not.toHaveClass('h-8');
+    expect(trigger).not.toHaveClass('px-2');
+  });
+
+  it('respects an explicit height from the caller', () => {
+    const trigger = renderSelect('w-full h-10');
+
+    expect(trigger).toHaveClass('h-10');
+    expect(trigger).not.toHaveClass('h-8');
+  });
+
+  it('only drops the axis the caller sizes', () => {
+    expect(renderSelect('px-3')).toHaveClass('px-3', 'h-8');
+  });
+
+  it('does not mistake min/max height utilities for sizing', () => {
+    const trigger = renderSelect('min-h-0 max-h-12');
+
+    expect(trigger).toHaveClass('h-8', 'px-2');
+  });
+
+  it.each([undefined, 'w-full px-3 py-2'])('keeps the shared control styling (%s)', (className) => {
+    const trigger = renderSelect(className);
+
+    expect(trigger).toHaveClass('rounded-lg', 'border', 'text-sm');
+  });
+});
+
 describe('ToolbarDropdown keyboard', () => {
   it('closes its menu on Escape and marks the key handled so a surrounding panel can stay open', async () => {
     const user = userEvent.setup();

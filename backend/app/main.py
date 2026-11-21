@@ -5206,6 +5206,27 @@ async def on_print_complete(printer_id: int, data: dict):
                     created_by_id=archive.created_by_id,
                     created_by_username=_print_user_info.get("username") if _print_user_info else None,
                 )
+
+                # Count this run's filament changes (initial load + each change defined in
+                # the sliced file) for filament-change maintenance intervals (#337). Read
+                # from the archive's 3MF; a run whose file is missing is left uncounted.
+                # Isolated so a problem here can never lose the log entry above.
+                try:
+                    from backend.app.services.filament_changes import count_run_filament_changes
+                    from backend.app.services.print_log import add_filament_changes
+
+                    _run_changes = await asyncio.to_thread(
+                        count_run_filament_changes,
+                        app_settings.base_dir / archive.file_path,
+                        notify_plate_id if notify_plate_id is not None else parse_plate_id(filename),
+                        _run_status,
+                        data.get("last_layer_num"),
+                    )
+                    if _run_changes:
+                        await add_filament_changes(db, printer_id, _run_changes)
+                except Exception as e:
+                    logger.warning("[PRINT_LOG] Could not count filament changes for archive %s: %s", archive_id, e)
+
                 await db.commit()
                 logger.info("[PRINT_LOG] Log entry written for archive %s", archive_id)
     except Exception as e:

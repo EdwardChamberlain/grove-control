@@ -100,7 +100,14 @@ type TFunction = (key: string, options?: Record<string, unknown>) => string;
 function IntervalTypeIcon({ type, className }: { type: MaintenanceIntervalType; className: string }) {
   if (type === 'days') return <Calendar className={className} />;
   if (type === 'jobs') return <Printer className={className} />;
+  if (type === 'changes') return <RefreshCw className={className} />;
   return <Timer className={className} />;
+}
+
+function formatChanges(value: number, t?: TFunction): string {
+  const changes = Math.max(0, Math.round(value));
+  if (changes === 1) return t ? t('maintenance.change') : '1 change';
+  return t ? t('maintenance.changes', { count: changes }) : `${changes} changes`;
 }
 
 function formatJobs(value: number, t?: TFunction): string {
@@ -111,6 +118,7 @@ function formatJobs(value: number, t?: TFunction): string {
 
 function formatDuration(value: number, type: MaintenanceIntervalType, t?: TFunction): string {
   if (type === 'jobs') return formatJobs(value, t);
+  if (type === 'changes') return formatChanges(value, t);
   if (type === 'days') {
     if (value < 1) return t ? t('common.today') : 'Today';
     if (value === 1) return t ? t('maintenance.day') : '1 day';
@@ -145,6 +153,7 @@ function formatDuration(value: number, type: MaintenanceIntervalType, t?: TFunct
 
 function formatIntervalLabel(value: number, type: MaintenanceIntervalType, t?: TFunction): string {
   if (type === 'jobs') return formatJobs(value, t);
+  if (type === 'changes') return formatChanges(value, t);
   if (type === 'days') {
     if (value === 1) return t ? t('maintenance.day') : '1 day';
     if (value === 7) return t ? t('maintenance.week') : '1 week';
@@ -190,6 +199,10 @@ function MaintenanceCard({
       const jobsSince = item.jobs_since_maintenance ?? 0;
       return Math.max(0, Math.min(100, (jobsSince / item.interval_hours) * 100));
     }
+    if (intervalType === 'changes') {
+      const changesSince = item.changes_since_maintenance ?? 0;
+      return Math.max(0, Math.min(100, (changesSince / item.interval_hours) * 100));
+    }
     if (intervalType === 'days') {
       const daysSince = item.days_since_maintenance ?? 0;
       return Math.max(0, Math.min(100, (daysSince / item.interval_hours) * 100));
@@ -225,7 +238,12 @@ function MaintenanceCard({
   const getStatusText = () => {
     if (!item.enabled) return t('common.disabled');
 
-    if (intervalType === 'jobs') {
+    if (intervalType === 'changes') {
+      const changesUntil = item.changes_until_due ?? 0;
+      if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(changesUntil), 'changes', t) });
+      if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(changesUntil, 'changes', t) });
+      return t('maintenance.timeLeft', { duration: formatDuration(changesUntil, 'changes', t) });
+    } else if (intervalType === 'jobs') {
       const jobsUntil = item.jobs_until_due ?? 0;
       if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(jobsUntil), 'jobs', t) });
       if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(jobsUntil, 'jobs', t) });
@@ -270,11 +288,8 @@ function MaintenanceCard({
                 <Calendar className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
               </span>
             )}
-            {intervalType === 'jobs' && (
-              <span title={t('maintenance.jobBasedInterval')}>
-                <Printer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
-              </span>
-            )}
+            {intervalType === 'jobs' && <Printer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />}
+            {intervalType === 'changes' && <RefreshCw className="w-3.5 h-3.5 text-bambu-gray shrink-0" />}
             {/* Wiki link - next to name */}
             {(() => {
               // Use custom wiki_url from type if available, otherwise use computed URL
@@ -720,6 +735,8 @@ function SettingsSection({
                           setNewTypeInterval('30');
                         } else if (e.target.value === 'jobs') {
                           setNewTypeInterval('50');
+                        } else if (e.target.value === 'changes') {
+                          setNewTypeInterval('20');
                         } else {
                           setNewTypeInterval('100');
                         }
@@ -729,11 +746,12 @@ function SettingsSection({
                       <option value="hours">{t('maintenance.printHours')}</option>
                       <option value="days">{t('maintenance.calendarDays')}</option>
                       <option value="jobs">{t('maintenance.printJobs')}</option>
+                      <option value="changes">{t('maintenance.filamentChanges')}</option>
                     </ReactSelect>
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1.5">
-                      {t('maintenance.intervalValue', { type: newTypeIntervalType === 'days' ? t('maintenance.calendarDays').toLowerCase() : newTypeIntervalType === 'jobs' ? t('maintenance.printJobs').toLowerCase() : t('common.hours') })}
+                      {t('maintenance.intervalValue', { type: newTypeIntervalType === 'days' ? t('maintenance.calendarDays').toLowerCase() : newTypeIntervalType === 'jobs' ? t('maintenance.printJobs').toLowerCase() : newTypeIntervalType === 'changes' ? t('maintenance.filamentChanges').toLowerCase() : t('common.hours') })}
                     </label>
                     <input
                       type="number"
@@ -876,6 +894,7 @@ function SettingsSection({
                         <option value="hours">{t('maintenance.printHours')}</option>
                         <option value="days">{t('maintenance.calendarDays')}</option>
                       <option value="jobs">{t('maintenance.printJobs')}</option>
+                      <option value="changes">{t('maintenance.filamentChanges')}</option>
                       </ReactSelect>
                       <input
                         type="number"
@@ -1068,6 +1087,7 @@ function SettingsSection({
                                 <option value="hours">{t('maintenance.printHours')}</option>
                                 <option value="days">{t('maintenance.calendarDays')}</option>
                       <option value="jobs">{t('maintenance.printJobs')}</option>
+                      <option value="changes">{t('maintenance.filamentChanges')}</option>
                               </ReactSelect>
                               <input
                                 type="number"
@@ -1335,6 +1355,12 @@ function MaintenanceLogSection({
                             <>
                               <span aria-hidden="true">•</span>
                               <span>{formatJobs(entry.jobs_at_maintenance, t)}</span>
+                            </>
+                          )}
+                          {entry.changes_at_maintenance != null && (
+                            <>
+                              <span aria-hidden="true">•</span>
+                              <span>{formatChanges(entry.changes_at_maintenance, t)}</span>
                             </>
                           )}
                         </div>

@@ -3203,8 +3203,8 @@ export interface UpdateStatus {
 }
 
 // Maintenance types
-/** "hours" = print hours, "days" = calendar days, "jobs" = finished print jobs */
-export type MaintenanceIntervalType = 'hours' | 'days' | 'jobs';
+/** "hours" = print hours, "days" = calendar days, "jobs" = finished print jobs, "changes" = filament changes */
+export type MaintenanceIntervalType = 'hours' | 'days' | 'jobs' | 'changes';
 
 export interface MaintenanceType {
   id: number;
@@ -3237,7 +3237,7 @@ export interface MaintenanceStatus {
   maintenance_type_icon: string | null;
   maintenance_type_wiki_url: string | null;  // Custom wiki URL from type
   enabled: boolean;
-  interval_hours: number;  // For hours type: print hours; for days type: number of days; for jobs type: number of jobs
+  interval_hours: number;  // For hours type: print hours; for days type: number of days; for jobs type: number of jobs; for changes type: number of filament changes
   interval_type: MaintenanceIntervalType;
   current_hours: number;
   hours_since_maintenance: number;
@@ -3247,6 +3247,9 @@ export interface MaintenanceStatus {
   current_jobs: number;  // Lifetime finished jobs for the printer
   jobs_since_maintenance: number | null;  // For jobs type
   jobs_until_due: number | null;  // For jobs type
+  current_changes: number;  // Lifetime filament changes for the printer
+  changes_since_maintenance: number | null;  // For changes type
+  changes_until_due: number | null;  // For changes type
   is_due: boolean;
   is_warning: boolean;
   last_performed_at: string | null;
@@ -3260,6 +3263,7 @@ export interface PrinterMaintenanceOverview {
   is_active: boolean;
   total_print_hours: number;
   total_print_jobs: number;
+  total_filament_changes: number;
   maintenance_items: MaintenanceStatus[];
   due_count: number;
   warning_count: number;
@@ -3271,6 +3275,7 @@ export interface MaintenanceHistory {
   performed_at: string;
   hours_at_maintenance: number;
   jobs_at_maintenance: number;
+  changes_at_maintenance: number;
   notes: string | null;
 }
 
@@ -3284,6 +3289,7 @@ export interface MaintenanceLogEntry {
   occurred_at: string;
   hours_at_maintenance: number | null;
   jobs_at_maintenance: number | null;
+  changes_at_maintenance: number | null;
   created_by_id: number | null;
   created_by_username: string | null;
   updated_by_id: number | null;
