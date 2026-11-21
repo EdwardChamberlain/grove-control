@@ -317,6 +317,18 @@ class TestModelTargetedJobs:
         assert (await env.get(gated)).status == "skipped"
         env.notifications.on_queue_job_skipped.assert_awaited_once()
 
+    async def test_legacy_shortest_first_setting_is_ignored_for_pinned_jobs(self, env, printer_factory):
+        printer = await printer_factory(model="P1S")
+        env.printer_state(printer.id)
+        await env.add(Settings(key="queue_shortest_first", value="true"))
+        long_job = await env.item(printer_id=printer.id, position=1, print_time_seconds=7200)
+        short_job = await env.item(printer_id=printer.id, position=2, print_time_seconds=600)
+
+        await env.run()
+
+        assert env.dispatched == [long_job.id]
+        assert (await env.get(short_job)).been_jumped is False
+
     async def test_legacy_shortest_first_setting_is_ignored(self, env, printer_factory):
         """An install upgraded with SJF enabled dispatches in saved position order."""
         env.printer_state((await printer_factory(model="P1S")).id)
