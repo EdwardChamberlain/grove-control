@@ -2669,7 +2669,7 @@ function SinglePrinterCockpit({
                   </span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-black/60 shadow-[0_1px_8px_rgba(0,0,0,0.45)] ring-1 ring-white/15">
-                  <div className="h-full rounded-full bg-gradient-to-r from-bambu-green to-emerald-300 transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+                  <div className={`h-full rounded-full bg-gradient-to-r transition-all ${isPaused ? 'from-orange-500 to-orange-300' : 'from-bambu-green to-emerald-300'}`} style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
                 </div>
               </div>
             </div>
@@ -3320,6 +3320,7 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const isPrinterPaused = status?.state === 'PAUSE';
   const hasQueuedWork = isPrintingOrPaused || !!(queueWork?.[printer.id] ?? status?.has_queued_work);
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
@@ -4132,7 +4133,7 @@ function PrinterCard({
   return (
     <Card
       id={`printer-card-${printer.id}`}
-      className={`relative flex h-full min-w-0 flex-col ${isSelected ? 'ring-2 ring-bambu-green' : ''}`}
+      className={`relative flex h-full min-w-0 flex-col ${isSelected ? 'ring-2 ring-bambu-green' : ''} ${isPrinterPaused ? '!border-orange-500/60 !shadow-[0_0_18px_2px_rgba(249,115,22,0.45)]' : ''}`}
       onDragEnter={handleCardDragEnter}
       onDragOver={handleCardDragOver}
       onDragLeave={handleCardDragLeave}
@@ -4474,7 +4475,7 @@ function PrinterCard({
                             <div className="flex h-3 items-center gap-2 text-sm">
                               <div className="h-1.5 min-w-0 flex-1 rounded-full bg-bambu-dark-tertiary">
                                 <div
-                                  className={`${status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green'} h-1.5 rounded-full transition-all`}
+                                  className={`${status.state === 'PAUSE' ? 'bg-orange-500' : 'bg-bambu-green'} h-1.5 rounded-full transition-all`}
                                   style={{ width: `${progress}%` }}
                                 />
                               </div>

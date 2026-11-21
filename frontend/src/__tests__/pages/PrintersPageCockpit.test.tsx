@@ -238,6 +238,22 @@ describe('Cockpit print controls', () => {
     expect(await screen.findByText('Print stopped')).toBeInTheDocument();
   });
 
+  it('turns the cockpit progress bar orange when paused', async () => {
+    setup({ state: 'PAUSE', progress: 25 });
+    await openCockpit();
+
+    expect(document.querySelector('.from-orange-500')).not.toBeNull();
+    expect(document.querySelector('.from-bambu-green')).toBeNull();
+  });
+
+  it('keeps the cockpit progress bar green while running', async () => {
+    setup({ state: 'RUNNING', progress: 25 });
+    await openCockpit();
+
+    expect(document.querySelector('.from-bambu-green')).not.toBeNull();
+    expect(document.querySelector('.from-orange-500')).toBeNull();
+  });
+
   it('resumes a paused print only after confirmation', async () => {
     setup({ state: 'PAUSE', progress: 25 });
     const resumes = recordPost('*/api/v1/printers/1/print/resume');

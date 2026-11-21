@@ -150,6 +150,24 @@ describe('Print controls', () => {
     expect(pauses).toHaveLength(0);
   });
 
+  it('glows orange and turns the progress bar orange when paused', async () => {
+    setup({ state: 'PAUSE', progress: 40, current_print: 'Bracket.3mf' });
+    const card = await openCard();
+
+    expect(card.className).toContain('border-orange-500/60');
+    expect(card.querySelector('.bg-orange-500')).not.toBeNull();
+    expect(card.querySelector('.bg-bambu-green.h-1\\.5')).toBeNull();
+  });
+
+  it('keeps the green progress bar and no glow while running', async () => {
+    setup({ state: 'RUNNING', progress: 40, current_print: 'Bracket.3mf' });
+    const card = await openCard();
+
+    expect(card.className).not.toContain('border-orange-500/60');
+    expect(card.querySelector('.bg-orange-500')).toBeNull();
+    expect(card.querySelector('.bg-bambu-green.h-1\\.5')).not.toBeNull();
+  });
+
   it('resumes a paused print after confirmation', async () => {
     setup({ state: 'PAUSE', progress: 40 });
     const resumes = recordPost('*/api/v1/printers/1/print/resume');

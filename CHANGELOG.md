@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Printers: a paused print now turns its progress bar orange in the cards view and the single-printer view, and the paused printer's card gets an orange border and glow in the cards view (#335).
 - Queue: paused prints are now orange instead of sharing the yellow used for scheduled jobs, and the job card footer shows why the print paused (filament ran out, paused by user, front cover removed, nozzle or bed temperature fault) when the printer reports it (#335).
 - Stats: each print now records the filament it actually used. A job sliced for
   black PLA but overridden to blue PLA shows as blue, and a spool tracked in
