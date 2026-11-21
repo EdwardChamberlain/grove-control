@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -16,11 +17,15 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 from backend.app.utils.threemf_tools import extract_filament_usage_from_3mf
 
+_HEX_COLOR = re.compile(r"[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?")
+
 
 def _normalized_color(value: Any) -> str:
     """Use the six-digit CSS hex form expected by the color chart."""
     color = str(value or "").strip().lstrip("#")
-    return f"#{color[:6].upper()}" if color else ""
+    if not _HEX_COLOR.fullmatch(color):
+        return ""
+    return f"#{color[:6].upper()}"
 
 
 def _slot_id(slot: dict[str, Any]) -> int:
@@ -40,6 +45,8 @@ def effective_filament_metadata(
     The caller supplies only slots used on the dispatched plate. Overrides
     are requests: relaxed color matching and filament switches can consume a
     different spool. Keep every tracked color when a slot used several spools.
+    Usage results without a slot (the AMS remain%-delta fallback) cannot be
+    matched to a 3MF slot and are ignored; those runs keep the existing fallback.
     """
     if isinstance(filament_overrides, str):
         try:
@@ -57,6 +64,9 @@ def effective_filament_metadata(
 
     if not overrides and not actuals:
         return None, None
+    if not overrides:
+        # Tracked spools alone describe the run; no sliced slots are needed.
+        filament_slots = [{"slot_id": slot_id, "used_g": 1} for slot_id in actuals]
 
     types: list[str] = []
     colors: list[str] = []
@@ -117,7 +127,12 @@ async def resolve_run_filament_metadata(
     else:
         query = query.where(PrintQueueItem.dispatch_subtask_id == dispatch_subtask_id)
     item = (await db.execute(query.order_by(PrintQueueItem.id.desc()).limit(1))).scalars().first()
-    if item is None or not archive.file_path or not (item.filament_overrides or usage_results):
+    if item is None or not (item.filament_overrides or usage_results):
+        return fallback
+    if not item.filament_overrides:
+        material, color = effective_filament_metadata([], usage_results, None)
+        return (material, color) if material and color else fallback
+    if not archive.file_path:
         return fallback
 
     try:

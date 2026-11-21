@@ -123,3 +123,14 @@ def test_tracked_usage_applies_without_valid_overrides(overrides):
     slots = [{"slot_id": 1, "used_g": 10, "type": "PLA", "color": "#000000"}]
     usage = [{"slot_id": 1, "material": "PETG", "color": "#FF0000"}]
     assert effective_filament_metadata(slots, usage, overrides) == ("PETG", "#FF0000")
+
+
+@pytest.mark.parametrize("color", ["red", "#", "12345", "#GGGGGG"])
+def test_non_hex_colours_are_not_recorded(color):
+    slots = [{"slot_id": 1, "used_g": 10, "type": "PLA", "color": color}]
+    assert effective_filament_metadata(slots, [], [{"slot_id": 1, "type": "PLA", "color": color}]) == (None, None)
+
+
+def test_slotless_usage_is_ignored():
+    usage = [{"slot_id": None, "material": "PETG", "color": "#FF0000"}]
+    assert effective_filament_metadata([{"slot_id": 1, "used_g": 10}], usage, None) == (None, None)

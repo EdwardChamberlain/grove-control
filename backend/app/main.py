@@ -5153,19 +5153,21 @@ async def on_print_complete(printer_id: int, data: dict):
                 # Both Stats endpoints read PrintLogEntry. Resolve this run's
                 # selected plate and filament without changing its source.
                 run_queue_item_id = queue_item_id if queue_item_id is not None else stopped_queue_item_id
+                run_filament_type, run_filament_color = archive.filament_type, archive.filament_color
                 try:
-                    run_filament_type, run_filament_color = await resolve_run_filament_metadata(
-                        db,
-                        archive,
-                        printer_id,
-                        usage_results,
-                        queue_item_id=run_queue_item_id,
-                        dispatch_subtask_id=event_subtask_id,
-                    )
+                    # Own session: a failed read here must not poison the log write below.
+                    async with async_session() as resolver_db:
+                        run_filament_type, run_filament_color = await resolve_run_filament_metadata(
+                            resolver_db,
+                            archive,
+                            printer_id,
+                            usage_results,
+                            queue_item_id=run_queue_item_id,
+                            dispatch_subtask_id=event_subtask_id,
+                        )
                 except Exception as e:
                     # Attribution is best-effort: never lose the run's log entry.
                     logger.warning("Filament attribution failed for archive %s: %s", archive_id, e)
-                    run_filament_type, run_filament_color = archive.filament_type, archive.filament_color
 
                 # Back-fill created_by_id on reprint (#730): reprint reuses the
                 # source archive row rather than creating a new one, so an
