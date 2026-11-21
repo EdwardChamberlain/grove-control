@@ -288,16 +288,8 @@ function MaintenanceCard({
                 <Calendar className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
               </span>
             )}
-            {intervalType === 'jobs' && (
-              <span title={t('maintenance.jobBasedInterval')}>
-                <Printer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
-              </span>
-            )}
-            {intervalType === 'changes' && (
-              <span title={t('maintenance.changeBasedInterval')}>
-                <RefreshCw className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
-              </span>
-            )}
+            {intervalType === 'jobs' && <Printer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />}
+            {intervalType === 'changes' && <RefreshCw className="w-3.5 h-3.5 text-bambu-gray shrink-0" />}
             {/* Wiki link - next to name */}
             {(() => {
               // Use custom wiki_url from type if available, otherwise use computed URL
@@ -756,9 +748,6 @@ function SettingsSection({
                       <option value="jobs">{t('maintenance.printJobs')}</option>
                       <option value="changes">{t('maintenance.filamentChanges')}</option>
                     </ReactSelect>
-                    {newTypeIntervalType === 'changes' && (
-                      <p className="mt-1.5 text-xs text-bambu-gray">{t('maintenance.filamentChangesHint')}</p>
-                    )}
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1.5">

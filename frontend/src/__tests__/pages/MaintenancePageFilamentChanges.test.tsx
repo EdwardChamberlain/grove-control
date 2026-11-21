@@ -127,15 +127,6 @@ describe('change-based task cards', () => {
     expect(screen.getByText('13 changes left')).toBeInTheDocument();
   });
 
-  it('marks change-based tasks so they are not mistaken for other interval types', async () => {
-    const user = userEvent.setup();
-    await openPrinter(user);
-
-    expect(screen.getAllByTitle('Filament-change-based interval')).toHaveLength(4);
-    expect(screen.queryByTitle('Time-based interval')).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Print-job-based interval')).not.toBeInTheDocument();
-  });
-
   it('does not overflow the progress bar for an overdue task', async () => {
     const user = userEvent.setup();
     await openPrinter(user);
@@ -163,20 +154,18 @@ describe('change-based settings', () => {
     expect(screen.getAllByText('1 change').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('adds a custom type that counts filament changes and explains what is counted', async () => {
+  it('adds a custom type that counts filament changes', async () => {
     const user = userEvent.setup();
     await openSettings(user);
 
     await user.click(screen.getByRole('button', { name: /Add Custom Type/ }));
     await user.type(screen.getByPlaceholderText('e.g., Replace HEPA Filter'), 'Grease Cutter');
-    expect(screen.queryByText(/Cutter use and manual spool swaps are not tracked/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('combobox', { name: /Print Hours/ }));
     await user.click(await screen.findByRole('option', { name: 'Filament Changes' }));
 
-    // Switching the type swaps the unit label, a sensible default count, and shows the hint.
+    // Switching the type swaps the unit label and a sensible default count.
     expect(screen.getByText('Interval (filament changes)')).toBeInTheDocument();
     expect(screen.getByDisplayValue('20')).toBeInTheDocument();
-    expect(screen.getByText(/Cutter use and manual spool swaps are not tracked/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'P1S' }));
     await user.click(screen.getByRole('button', { name: 'Add Type' }));

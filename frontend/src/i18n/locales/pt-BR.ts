@@ -1588,12 +1588,9 @@ export default {
     printJobs: 'Trabalhos de impressão',
     job: '1 trabalho',
     jobs: '{{count}} trabalhos',
-    jobBasedInterval: 'Intervalo baseado em trabalhos',
     filamentChanges: 'Trocas de filamento',
     change: '1 troca',
     changes: '{{count}} trocas',
-    changeBasedInterval: 'Intervalo baseado em trocas de filamento',
-    filamentChangesHint: 'Conta os carregamentos de filamento no arquivo fatiado: o primeiro carregamento de cada trabalho mais cada troca de filamento. Uso do cortador e trocas manuais de carretel não são rastreados, então escolha um intervalo adequado à sua impressora.',
     // Interval overrides
     intervalOverrides: 'Substituições de Intervalo',
     intervalOverridesDescription: 'Personalize os intervalos para impressoras específicas',

@@ -1589,12 +1589,9 @@ export default {
     printJobs: 'Trabajos de impresión',
     job: '1 trabajo',
     jobs: '{{count}} trabajos',
-    jobBasedInterval: 'Intervalo basado en trabajos',
     filamentChanges: 'Cambios de filamento',
     change: '1 cambio',
     changes: '{{count}} cambios',
-    changeBasedInterval: 'Intervalo basado en cambios de filamento',
-    filamentChangesHint: 'Cuenta las cargas de filamento del archivo laminado: la primera carga de cada trabajo más cada cambio de filamento. No se registran el uso del cortador ni los cambios manuales de bobina, así que el intervalo debe ajustarse a la impresora.',
     // Interval overrides
     intervalOverrides: 'Anulaciones de intervalo',
     intervalOverridesDescription: 'Personalizar intervalos para impresoras concretas',

@@ -1610,12 +1610,9 @@ export default {
     printJobs: 'Print Jobs',
     job: '1 job',
     jobs: '{{count}} jobs',
-    jobBasedInterval: 'Print-job-based interval',
     filamentChanges: 'Filament Changes',
     change: '1 change',
     changes: '{{count}} changes',
-    changeBasedInterval: 'Filament-change-based interval',
-    filamentChangesHint: 'Counts the filament loads in the sliced file: the first load of each job plus every filament change. Cutter use and manual spool swaps are not tracked, so choose an interval that suits your printer.',
     // Interval overrides
     intervalOverrides: 'Interval Overrides',
     intervalOverridesDescription: 'Customize intervals for specific printers',

@@ -1588,12 +1588,9 @@ export default {
     printJobs: 'Druckaufträge',
     job: '1 Auftrag',
     jobs: '{{count}} Aufträge',
-    jobBasedInterval: 'Auftragsbasiertes Intervall',
     filamentChanges: 'Filamentwechsel',
     change: '1 Wechsel',
     changes: '{{count}} Wechsel',
-    changeBasedInterval: 'Filamentwechsel-basiertes Intervall',
-    filamentChangesHint: 'Zählt die Filament-Ladevorgänge in der geslicten Datei: das erste Laden jedes Auftrags plus jeden Filamentwechsel. Schneidereinsatz und manuelle Spulenwechsel werden nicht erfasst; das Intervall sollte zum Drucker passen.',
     // Interval overrides
     intervalOverrides: 'Intervall-Überschreibungen',
     intervalOverridesDescription: 'Intervalle für bestimmte Drucker anpassen',
