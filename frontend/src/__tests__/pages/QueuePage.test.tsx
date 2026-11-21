@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { QueuePage } from '../../pages/QueuePage';
@@ -11,6 +11,20 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { setAuthToken } from '../../api/client';
 import { formatDate } from '../../utils/date';
+
+// jsdom has no layout, so a real drag cannot cross rows. Expose the page's
+// onDragEnd handler so tests can drop one row onto another directly.
+const dnd = vi.hoisted(() => ({ onDragEnd: null as null | ((e: unknown) => void) }));
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/core')>();
+  return {
+    ...actual,
+    DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
+      dnd.onDragEnd = props.onDragEnd as typeof dnd.onDragEnd;
+      return <actual.DndContext {...props} />;
+    },
+  };
+});
 
 // Mock queue data
 const mockQueueItems = [
@@ -1136,6 +1150,63 @@ describe('QueuePage', () => {
 
       await waitFor(() => expect(card.className).toContain('opacity-50'));
       await user.keyboard('{Escape}');
+    });
+  });
+
+  describe('optimistic reorder', () => {
+    const twoPending = [
+      mockQueueItems[0],
+      { ...mockQueueItems[0], id: 5, position: 2, archive_name: 'Second Pending' },
+    ];
+    const order = () =>
+      screen
+        .getAllByLabelText(/Drag to reorder/)
+        .map((h) => (h.closest('.group') as HTMLElement).textContent ?? '')
+        .map((text) => (text.includes('Second Pending') ? 'second' : 'first'));
+
+    it('keeps the dropped order while the reorder request is in flight and the server still returns the old order', async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      let body: unknown = null;
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(twoPending)),
+        http.post('/api/v1/queue/reorder', async ({ request }) => {
+          body = await request.json();
+          await gate;
+          return HttpResponse.json({ message: 'ok' });
+        }),
+      );
+      render(<QueuePage />);
+
+      await screen.findByText('Second Pending');
+      expect(order()).toEqual(['first', 'second']);
+
+      act(() => dnd.onDragEnd!({ active: { id: 1 }, over: { id: 5 } }));
+
+      await waitFor(() => expect(body).not.toBeNull());
+      // Request still pending and the stale GET has not been refetched: the
+      // list must already show the new order rather than snapping back.
+      expect(order()).toEqual(['second', 'first']);
+      release();
+    });
+
+    it('rolls back to the previous order and shows an error when the reorder request fails', async () => {
+      let attempted = false;
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(twoPending)),
+        http.post('/api/v1/queue/reorder', () => {
+          attempted = true;
+          return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+        }),
+      );
+      render(<QueuePage />);
+
+      await screen.findByText('Second Pending');
+      act(() => dnd.onDragEnd!({ active: { id: 1 }, over: { id: 5 } }));
+
+      expect(await screen.findByText('Failed to reorder queue')).toBeInTheDocument();
+      expect(attempted).toBe(true);
+      expect(order()).toEqual(['first', 'second']);
     });
   });
 
