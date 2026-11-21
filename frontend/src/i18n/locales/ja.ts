@@ -1588,6 +1588,11 @@ export default {
     job: '1 ジョブ',
     jobs: '{{count}} ジョブ',
     jobBasedInterval: 'ジョブ数ベースのインターバル',
+    filamentChanges: 'フィラメント交換',
+    change: '1 回',
+    changes: '{{count}} 回',
+    changeBasedInterval: 'フィラメント交換回数ベースのインターバル',
+    filamentChangesHint: 'スライス済みファイル内のフィラメント装填数を数えます。各ジョブの最初の装填と、すべてのフィラメント交換が対象です。カッターの使用や手動でのスプール交換は記録されないため、プリンターに合った間隔を設定してください。',
     // Interval overrides
     intervalOverrides: 'インターバルのオーバーライド',
     intervalOverridesDescription: '特定のプリンターの間隔をカスタマイズ',

@@ -1589,6 +1589,11 @@ export default {
     job: '1 lavoro',
     jobs: '{{count}} lavori',
     jobBasedInterval: 'Intervallo basato sui lavori',
+    filamentChanges: 'Cambi di filamento',
+    change: '1 cambio',
+    changes: '{{count}} cambi',
+    changeBasedInterval: 'Intervallo basato sui cambi di filamento',
+    filamentChangesHint: 'Conta i caricamenti di filamento nel file elaborato: il primo caricamento di ogni lavoro più ogni cambio di filamento. Taglierina e cambi manuali di bobina non vengono tracciati, quindi scegli un intervallo adatto alla stampante.',
     // Interval overrides
     intervalOverrides: 'Override intervallo',
     intervalOverridesDescription: 'Personalizza intervalli per stampanti specifiche',

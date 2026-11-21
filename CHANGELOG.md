@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Maintenance: tasks can now be due after a number of filament changes (#337).
+  Pick "Filament Changes" as the interval type when adding or editing a task, or
+  override a single printer's interval. A filament change is a filament load
+  defined in the sliced file: the first load of each job plus every change
+  after it, including colour changes painted within a layer. Cutter use and
+  manual spool swaps are not tracked, so choose an interval that suits your
+  printer. Each card shows the changes left (or overdue), and completing a task
+  records the printer's change count in its history and the maintenance log. A
+  print that stops early counts only the loads it reached. Changes are read
+  from the archived print's 3MF, so a job whose file can't be read isn't
+  counted. Existing printers start from their archived prints (an estimate: a
+  completed run counts every load, any other run counts its initial load only).
 - Maintenance: tasks can now be due after a number of finished print jobs, not
   just print hours or calendar days (#337). Pick "Print Jobs" as the interval
   type when adding or editing a task, or override a single printer's interval.

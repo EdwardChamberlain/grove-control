@@ -1589,6 +1589,11 @@ export default {
     job: '1 impression',
     jobs: '{{count}} impressions',
     jobBasedInterval: 'Intervalle basé sur les impressions',
+    filamentChanges: 'Changements de filament',
+    change: '1 changement',
+    changes: '{{count}} changements',
+    changeBasedInterval: 'Intervalle basé sur les changements de filament',
+    filamentChangesHint: 'Compte les chargements de filament du fichier tranché : le premier chargement de chaque impression plus chaque changement de filament. Le coupe-filament et les changements de bobine manuels ne sont pas suivis ; choisissez un intervalle adapté à votre imprimante.',
     // Interval overrides
     intervalOverrides: 'Exceptions d\'intervalle',
     intervalOverridesDescription: 'Intervalles spécifiques par imprimante',

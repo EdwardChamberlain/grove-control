@@ -1589,6 +1589,11 @@ export default {
     job: '1 個工作',
     jobs: '{{count}} 個工作',
     jobBasedInterval: '依列印工作數的間隔',
+    filamentChanges: '換料次數',
+    change: '1 次',
+    changes: '{{count}} 次',
+    changeBasedInterval: '依換料次數的間隔',
+    filamentChangesHint: '統計切片檔案中的耗材載入次數：每個工作的首次載入加上每一次換料。不會追蹤切刀使用與手動更換料盤，請選擇適合你的印表機的間隔。',
     // Interval overrides
     intervalOverrides: '間隔覆蓋',
     intervalOverridesDescription: '為特定印表機自訂間隔',

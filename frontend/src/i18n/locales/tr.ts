@@ -1591,6 +1591,11 @@ export default {
     job: '1 iş',
     jobs: '{{count}} iş',
     jobBasedInterval: 'İş sayısına dayalı aralık',
+    filamentChanges: 'Filament Değişimleri',
+    change: '1 değişim',
+    changes: '{{count}} değişim',
+    changeBasedInterval: 'Filament değişimine dayalı aralık',
+    filamentChangesHint: 'Dilimlenmiş dosyadaki filament yüklemelerini sayar: her işin ilk yüklemesi ve her filament değişimi. Kesici kullanımı ve elle yapılan makara değişimleri izlenmez, bu yüzden yazıcınıza uygun bir aralık seçin.',
     // Aralık geçersiz kılma
     intervalOverrides: 'Aralık Geçersiz Kılmaları',
     intervalOverridesDescription: 'Belirli yazıcılar için aralıkları özelleştir',
