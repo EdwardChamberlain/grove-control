@@ -34,12 +34,12 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) to keep our com
 
 **No assigned issue = no PR.** Pull requests without a corresponding assigned issue will be closed.
 
+This keeps everyone on the same page, avoids wasted effort on changes that may not fit the project's direction, and prevents multiple contributors from working on the same thing.
+
 **GitHub is the source of truth.** The issue captures intent (the problem, the
 scope and the decisions made) and the PR captures the implementation. Keep
 status, decisions and follow-ups in issue and PR threads rather than in chat or
 local notes, and open a new issue for anything you find that is out of scope.
-
-This keeps everyone on the same page, avoids wasted effort on changes that may not fit the project's direction, and prevents multiple contributors from working on the same thing.
 
 ## Product Direction
 
@@ -122,7 +122,9 @@ The frontend will be available at `http://localhost:5173` and will proxy API req
 
 ## Making Changes
 
-1. **Create a branch** from `origin/dev` (see [Branching](#branching)):
+1. **Create a branch** from `origin/dev` (see [Branching](#branching)). The
+   commands in this guide use `origin` for the main repository's remote; if you
+   work from a fork, use `upstream` in its place and push to your fork:
    ```bash
    git fetch origin
    git checkout -b feat/spool-usage-chart origin/dev

@@ -13,8 +13,9 @@ adds what is specific to agents.
 - **Work to an issue.** The issue captures intent and the PR captures the
   implementation, so find the issue before you start and link it from the PR
   (`Fixes #123`). If you are asked to do a task that has no issue, raise one
-  first (the problem, the scope and what done looks like) so the work is
-  tracked, and tell the user.
+  first (the problem, the scope and what done looks like), assign it to the
+  user, and tell them, so the work is tracked and meets the assigned-issue
+  rule in [Before You Start](CONTRIBUTING.md#before-you-start).
 - **Keep state on GitHub.** Decisions, findings and follow-ups belong in the
   issue, the PR description or PR comments, not only in chat or local files,
   which are lost when the session ends. Raise an issue for anything out of scope
