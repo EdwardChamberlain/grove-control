@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- UI: dropdowns in forms now match the height of the text fields beside them.
+  They were forced to the compact toolbar height (32px) and sat visibly shorter
+  than neighbouring inputs. Dropdowns that don't set their own padding, such as
+  those in toolbars, keep the compact size.
 - Maintenance: tasks can now be due after a number of filament changes (#337).
   Pick "Filament Changes" as the interval type when adding or editing a task, or
   override a single printer's interval. A filament change is a filament load
