@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Printers and Queue: counts now pluralise properly (#370). A printer's queue
+  line reads "3 prints in queue" rather than "3 print in queue", and the Queue
+  page reads "3 items" and "Edit 3 Items", and plate objects read "3 objects",
+  rather than the singular form for every count. The i18n check now rejects the
+  `_plural` suffix, which the installed i18next ignores.
 - Maintenance: the Status tab now has a machine rail on the left with **All
   machines** at the top (#368). All machines is one to-do list across every
   printer, ordered by how close each task is to being due and split into

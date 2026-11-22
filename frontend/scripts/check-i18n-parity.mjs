@@ -1,9 +1,10 @@
 // Verifies parity across locale files (en / de / fr / it / ja / pt-BR / zh-CN / zh-TW):
 //   1. Leaf-key sets are identical
 //   2. Each leaf's {{placeholder}} set is identical
-//   3. Plural suffixes: every en key ending in _plural / _one / _other must
-//      exist in every other locale, and other locales must not introduce an
-//      _one key that en does not have.
+//   3. Plural suffixes: every en key ending in _one / _other must exist in
+//      every other locale, other locales must not introduce an _one key that
+//      en does not have, and no locale may use the legacy _plural suffix, which
+//      i18next 25 ignores.
 //   4. NEW: leaves in a non-English locale must not be identical to en, unless
 //      the value is a brand name / technical token / pure punctuation, OR the
 //      key+locale pair is explicitly listed in IDENTICAL_TO_EN_ALLOWED below.
@@ -418,12 +419,18 @@ export function compareLocales(locales) {
     add(`${code}: placeholder mismatch vs en`, mismatches);
   }
 
-  // Check 3: plural suffix presence + reverse _one guard
+  // Check 3: plural suffix presence + reverse _one guard. i18next 25 resolves
+  // plurals through _one / _other (and the other CLDR categories) only, so the
+  // legacy _plural suffix is rejected in every locale, en included: it is
+  // ignored at runtime and every count falls back to the singular string.
+  for (const [code, map] of Object.entries(locales)) {
+    const legacy = [...map.keys()].filter((key) => key.endsWith('_plural')).sort();
+    add(`${code}: legacy _plural keys (rename to _one / _other)`, legacy);
+  }
   for (const [code, map] of Object.entries(locales)) {
     if (code === 'en') continue;
     const pluralIssues = [];
     for (const key of enKeys) {
-      if (key.endsWith('_plural') && !map.has(key)) pluralIssues.push(`missing _plural key: ${key}`);
       if (key.endsWith('_one') && !map.has(key)) pluralIssues.push(`missing _one key: ${key}`);
       if (key.endsWith('_other') && !map.has(key)) pluralIssues.push(`missing _other key: ${key}`);
     }

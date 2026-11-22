@@ -187,10 +187,10 @@ export default {
     timeRemaining: 'Noch {{time}}',
     deleteConfirm: 'Möchten Sie "{{name}}" wirklich löschen?',
     maintenanceOk: 'Wartung OK',
-    maintenanceWarning: '{{count}} Warnung',
-    maintenanceWarning_plural: '{{count}} Warnungen',
-    maintenanceDue: '{{count}} fällig',
-    maintenanceDue_plural: '{{count}} fällig',
+    maintenanceWarning_one: '{{count}} Warnung',
+    maintenanceWarning_other: '{{count}} Warnungen',
+    maintenanceDue_one: '{{count}} fällig',
+    maintenanceDue_other: '{{count}} fällig',
     // Sort options
     sort: {
       name: 'Name',
@@ -402,8 +402,8 @@ export default {
     },
     // Queue info
     queue: {
-      inQueue: '{{count}} Druck in Warteschlange',
-      inQueue_plural: '{{count}} Drucke in Warteschlange',
+      inQueue_one: '{{count}} Druck in Warteschlange',
+      inQueue_other: '{{count}} Drucke in Warteschlange',
     },
     // Controls section
     controls: 'Steuerung',
@@ -947,8 +947,8 @@ export default {
       title: 'Platte zur Vorschau auswählen',
       hint: 'Dieses Archiv enthält mehrere Platten. Wähle eine, um sie im GCode-Viewer zu öffnen.',
       plateLabel: 'Platte {{index}}',
-      objectCount: '{{count}} Objekt',
-      objectCount_plural: '{{count}} Objekte',
+      objectCount_one: '{{count}} Objekt',
+      objectCount_other: '{{count}} Objekte',
       noGcode: 'Dieses Archiv enthält keinen geschnittenen G-Code zur Vorschau. Öffne es zuerst in Bambu Studio zum Slicen.',
     },
     card: {
@@ -1156,8 +1156,8 @@ export default {
     printingInProgress: 'Druck läuft...',
     viewArchive: 'Archiv anzeigen',
     viewInFileManager: 'Im Dateimanager anzeigen',
-    itemCount: '{{count}} Element',
-    itemCount_plural: '{{count}} Elemente',
+    itemCount_one: '{{count}} Element',
+    itemCount_other: '{{count}} Elemente',
     dragToReorder: 'Ziehen zum Neuordnen (nur Sofort)',
     addedBy: 'Hinzugefügt von {{name}}',
     selectJob: '{{name}} auswählen',
@@ -1188,8 +1188,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} Einträge',
-      batch: '{{name}} ({{count}} Kopie)',
-      batch_plural: '{{name}} ({{count}} Kopien)',
+      batch_one: '{{name}} ({{count}} Kopie)',
+      batch_other: '{{name}} ({{count}} Kopien)',
     },
     // Sections
     sections: {
@@ -1275,8 +1275,8 @@ export default {
     },
     // Bulk edit
     bulkEdit: {
-      title: '{{count}} Element bearbeiten',
-      title_plural: '{{count}} Elemente bearbeiten',
+      title_one: '{{count}} Element bearbeiten',
+      title_other: '{{count}} Elemente bearbeiten',
       description: 'Nur geänderte Einstellungen werden auf ausgewählte Elemente angewendet.',
       printer: 'Drucker',
       noChange: '— Keine Änderung —',
