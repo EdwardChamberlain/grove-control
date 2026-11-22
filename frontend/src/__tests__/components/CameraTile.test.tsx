@@ -100,6 +100,29 @@ describe('CameraTile', () => {
     expect(screen.getByRole('img', { name: 'Paused' })).toBeInTheDocument();
   });
 
+  it('does not show a printer in maintenance mode as paused', async () => {
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="Maintenance-Printer"
+        mode="snapshot"
+        snapshotIntervalMs={5000}
+        connected
+        printerState="PAUSE"
+        isMaintenanceMode
+        progress={40}
+      />,
+    );
+    await flushMicrotasks();
+
+    const bar = screen.getByRole('progressbar');
+    const tile = bar.parentElement as HTMLElement;
+    expect(tile).not.toHaveAttribute('data-paused');
+    expect(tile).not.toHaveClass('border-orange-500/60');
+    expect(bar.firstElementChild).not.toHaveClass('bg-orange-500');
+    expect(screen.queryByRole('img', { name: 'Paused' })).not.toBeInTheDocument();
+  });
+
   it('has no orange glow or paused icon while the printer is running', async () => {
     render(
       <CameraTile

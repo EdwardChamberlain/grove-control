@@ -18,6 +18,8 @@ interface CameraTileProps {
   onClick?: () => void;
   onOpenFullscreen?: () => void;
   printerState?: string | null;
+  /** A printer in maintenance mode is out of service, so it never shows as paused. */
+  isMaintenanceMode?: boolean;
   progress?: number | null;
   etaLabel?: string | null;
   showClearPlate?: boolean;
@@ -62,6 +64,7 @@ export function CameraTile({
   onClick,
   onOpenFullscreen,
   printerState = null,
+  isMaintenanceMode = false,
   progress = null,
   etaLabel = null,
   showClearPlate = false,
@@ -124,6 +127,7 @@ export function CameraTile({
 
   const bucket = classifyState(printerState);
   const isPrintingOrPaused = bucket === 'printing' || bucket === 'paused';
+  const showPaused = bucket === 'paused' && !isMaintenanceMode;
   const progressPct = progress != null ? Math.round(progress) : null;
   const displayedProgress = isPrintingOrPaused && progressPct != null
     ? Math.max(0, Math.min(100, progressPct))
@@ -131,9 +135,9 @@ export function CameraTile({
 
   return (
     <div
-      data-paused={bucket === 'paused' ? 'true' : undefined}
+      data-paused={showPaused ? 'true' : undefined}
       className={`group relative aspect-video w-full overflow-hidden rounded-lg border bg-black text-left ${
-        bucket === 'paused'
+        showPaused
           ? 'border-orange-500/60 shadow-[0_0_18px_2px_rgba(249,115,22,0.45)]'
           : 'border-bambu-dark-tertiary'
       }`}
@@ -225,7 +229,7 @@ export function CameraTile({
       {/* Printer name */}
       <div className={`pointer-events-none absolute inset-x-0 bottom-1.5 z-20 flex items-end justify-between gap-2 px-2 pb-1.5 pt-3 text-white ${showClearPlate ? 'pr-12' : ''}`}>
         <span className="flex min-w-0 items-center gap-1 text-xs font-medium">
-          {bucket === 'paused' && (
+          {showPaused && (
             <span role="img" aria-label={t('printers.status.paused', 'Paused')} title={t('printers.status.paused', 'Paused')} className="inline-flex shrink-0 text-orange-400">
               <Pause className="h-3 w-3 fill-current" aria-hidden="true" />
             </span>
@@ -248,7 +252,7 @@ export function CameraTile({
         className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-1.5 overflow-hidden bg-bambu-dark-tertiary"
       >
         <div
-          className={`h-full rounded-r-full transition-all ${bucket === 'paused' ? 'bg-orange-500' : 'bg-bambu-green'}`}
+          className={`h-full rounded-r-full transition-all ${showPaused ? 'bg-orange-500' : 'bg-bambu-green'}`}
           style={{ width: `${displayedProgress}%` }}
         />
       </div>

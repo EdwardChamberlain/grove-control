@@ -1113,7 +1113,7 @@ function SinglePrinterSwitcherItem({
       />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-white">
-          {status?.state === 'PAUSE' && <PausedIcon className="h-3 w-3" />}
+          {printer.is_active !== false && status?.state === 'PAUSE' && <PausedIcon className="h-3 w-3" />}
           <span className="truncate">{printer.name}</span>
         </div>
         <div className="mt-0.5 truncate text-[11px] text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
@@ -2623,7 +2623,7 @@ function SinglePrinterCockpit({
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
                   <h2 className="flex min-w-0 flex-1 items-center gap-2 text-3xl font-semibold leading-none text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
-                    {isPaused && <PausedIcon className="h-6 w-6 drop-shadow-[0_2px_5px_rgba(0,0,0,0.9)]" />}
+                    {isPaused && !isMaintenanceMode && <PausedIcon className="h-6 w-6 drop-shadow-[0_2px_5px_rgba(0,0,0,0.9)]" />}
                     <span className="truncate">{printer.name}</span>
                   </h2>
                   {printerActionsMenu}
@@ -2694,7 +2694,7 @@ function SinglePrinterCockpit({
                   </span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-black/60 shadow-[0_1px_8px_rgba(0,0,0,0.45)] ring-1 ring-white/15">
-                  <div data-testid="cockpit-progress-bar" className={`h-full rounded-full bg-gradient-to-r transition-all ${isPaused ? 'from-orange-500 to-orange-300' : 'from-bambu-green to-emerald-300'}`} style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+                  <div data-testid="cockpit-progress-bar" className={`h-full rounded-full bg-gradient-to-r transition-all ${isPaused && !isMaintenanceMode ? 'from-orange-500 to-orange-300' : 'from-bambu-green to-emerald-300'}`} style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
                 </div>
               </div>
             </div>
@@ -3345,7 +3345,9 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const isPrinterPaused = status?.state === 'PAUSE';
+  // A printer in maintenance mode is out of service and shows no print status, so
+  // its (stale) PAUSE state must not light up the card.
+  const isPrinterPaused = printer.is_active !== false && status?.state === 'PAUSE';
   const hasQueuedWork = isPrintingOrPaused || !!(queueWork?.[printer.id] ?? status?.has_queued_work);
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
@@ -4257,7 +4259,6 @@ function PrinterCard({
                     ) : (
                       <h3 className="text-lg font-semibold text-white">{printer.name}</h3>
                     )}
-                    {isPrinterPaused && <PausedIcon className="h-4 w-4" />}
                   </div>
                 </div>
                 <p className="text-sm text-bambu-gray">
