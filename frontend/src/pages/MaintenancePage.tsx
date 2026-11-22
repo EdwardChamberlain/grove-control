@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -18,7 +18,6 @@ import {
   Square,
   Cable,
   Edit3,
-  RotateCcw,
   Calendar,
   CalendarCheck,
   Timer,
@@ -37,6 +36,7 @@ import {
   ScanLine,
   Printer,
   ExternalLink,
+  ListChecks,
 } from 'lucide-react';
 import { api } from '../api/client';
 import type {
@@ -50,7 +50,7 @@ import type {
   Permission,
 } from '../api/client';
 import { getMaintenanceWikiUrl } from '../utils/maintenanceWikiUrls';
-import { parseUTCDate, type DateFormat } from '../utils/date';
+import { parseUTCDate, formatDateOnly, type DateFormat } from '../utils/date';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
@@ -86,6 +86,9 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   ScanLine,
 };
 
+const logGridClass =
+  'grid grid-cols-[110px_minmax(0,1fr)_150px_140px_130px_100px_100px] items-center gap-x-4 px-5';
+
 const maintenanceFieldClass =
   'w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none';
 
@@ -116,41 +119,6 @@ function formatJobs(value: number, t?: TFunction): string {
   return t ? t('maintenance.jobs', { count: jobs }) : `${jobs} jobs`;
 }
 
-function formatDuration(value: number, type: MaintenanceIntervalType, t?: TFunction): string {
-  if (type === 'jobs') return formatJobs(value, t);
-  if (type === 'changes') return formatChanges(value, t);
-  if (type === 'days') {
-    if (value < 1) return t ? t('common.today') : 'Today';
-    if (value === 1) return t ? t('maintenance.day') : '1 day';
-    if (value < 7) {
-      const days = Math.round(value);
-      return t ? t('maintenance.days', { count: days }) : `${days} days`;
-    }
-    // Show weeks for anything under 6 months for better precision
-    if (value < 180) {
-      const weeks = Math.round(value / 7);
-      if (weeks === 1) return t ? t('maintenance.week') : '1 week';
-      return t ? t('maintenance.weeks', { count: weeks }) : `${weeks} weeks`;
-    }
-    // 6+ months show as months
-    const months = Math.round(value / 30);
-    if (months === 1) return t ? t('maintenance.month') : '1 month';
-    return t ? t('maintenance.months', { count: months }) : `${months} months`;
-  } else {
-    // Print hours - convert to readable units
-    if (value < 1) return `${Math.round(value * 60)}m`;
-    if (value < 24) return `${value < 10 ? value.toFixed(1) : Math.round(value)}h`;
-    // 24+ hours: show as days of print time
-    const days = value / 24;
-    if (days < 7) return `${days < 2 ? days.toFixed(1) : Math.round(days)}d`;
-    // 7+ days: show as weeks of print time
-    const weeks = days / 7;
-    if (weeks < 12) return `${weeks < 2 ? weeks.toFixed(1) : Math.round(weeks)}w`;
-    // 12+ weeks: show as months of print time
-    return `${Math.round(weeks / 4)}mo`;
-  }
-}
-
 function formatIntervalLabel(value: number, type: MaintenanceIntervalType, t?: TFunction): string {
   if (type === 'jobs') return formatJobs(value, t);
   if (type === 'changes') return formatChanges(value, t);
@@ -176,190 +144,442 @@ function toDateTimeLocal(value: string | Date = new Date()): string {
 }
 
 
-// Maintenance item card - cleaner, more visual design
-function MaintenanceCard({
+// ---------------------------------------------------------------------------
+// Status tab: a machine rail on the left and either the fleet-wide to-do list
+// ("All machines") or the detail for one printer on the right.
+// ---------------------------------------------------------------------------
+
+type TaskStatus = 'overdue' | 'soon' | 'ok' | 'off';
+
+interface TaskMetrics {
+  status: TaskStatus;
+  intervalType: MaintenanceIntervalType;
+  /** Units left until due; negative once overdue. */
+  remaining: number;
+  used: number;
+  interval: number;
+  /** Share of the interval used, 0-100 for drawing the meter. */
+  percent: number;
+  /** Unclamped share of the interval used, so a task twice overdue sorts first. */
+  ratio: number;
+}
+
+function getTaskMetrics(item: MaintenanceStatus): TaskMetrics {
+  const intervalType = item.interval_type || 'hours';
+  const interval = item.interval_hours;
+  let used: number;
+  let remaining: number;
+  if (intervalType === 'jobs') {
+    used = item.jobs_since_maintenance ?? 0;
+    remaining = item.jobs_until_due ?? 0;
+  } else if (intervalType === 'changes') {
+    used = item.changes_since_maintenance ?? 0;
+    remaining = item.changes_until_due ?? 0;
+  } else if (intervalType === 'days') {
+    used = item.days_since_maintenance ?? 0;
+    remaining = item.days_until_due ?? 0;
+  } else {
+    used = interval - item.hours_until_due;
+    remaining = item.hours_until_due;
+  }
+  const ratio = interval > 0 ? used / interval : 0;
+  const status: TaskStatus = !item.enabled ? 'off' : item.is_due ? 'overdue' : item.is_warning ? 'soon' : 'ok';
+  return {
+    status,
+    intervalType,
+    remaining,
+    used,
+    interval,
+    percent: Math.max(0, Math.min(100, ratio * 100)),
+    ratio,
+  };
+}
+
+/** Time left on an hours interval; under an hour reads in minutes. */
+function formatRemainingHours(value: number): string {
+  if (value < 1) return `${Math.round(value * 60)}m`;
+  return `${Math.round(value)}h`;
+}
+
+/** Plain amount in an interval's own unit, e.g. "214h", "27 jobs". */
+function formatAmount(value: number, type: MaintenanceIntervalType, t: TFunction): string {
+  const amount = Math.max(0, Math.round(value));
+  if (type === 'jobs') return formatJobs(amount, t);
+  if (type === 'changes') return formatChanges(amount, t);
+  if (type === 'days') return amount === 1 ? t('maintenance.day') : t('maintenance.days', { count: amount });
+  return `${amount}h`;
+}
+
+const STATUS_STYLES: Record<TaskStatus, { text: string; bar: string; chip: string; border: string }> = {
+  overdue: { text: 'text-red-400', bar: 'bg-red-400', chip: 'bg-red-500/15 text-red-400', border: 'border-red-500/40' },
+  soon: { text: 'text-amber-400', bar: 'bg-amber-400', chip: 'bg-amber-500/15 text-amber-400', border: 'border-bambu-dark-tertiary' },
+  ok: { text: 'text-bambu-green', bar: 'bg-bambu-green', chip: 'bg-bambu-green/15 text-bambu-green', border: 'border-bambu-dark-tertiary' },
+  off: { text: 'text-bambu-gray-light', bar: 'bg-bambu-gray', chip: 'bg-bambu-dark-tertiary text-bambu-gray-light', border: 'border-bambu-dark-tertiary' },
+};
+
+function summariseTasks(items: MaintenanceStatus[]) {
+  const counts = { overdue: 0, soon: 0, ok: 0, off: 0 };
+  for (const item of items) counts[getTaskMetrics(item).status] += 1;
+  return counts;
+}
+
+function statusLabel(status: TaskStatus, t: TFunction): string {
+  if (status === 'overdue') return t('common.overdue');
+  if (status === 'soon') return t('maintenance.dueSoon');
+  if (status === 'ok') return t('maintenance.onTrack');
+  return t('common.disabled');
+}
+
+function HealthBar({ overdue, soon, ok }: { overdue: number; soon: number; ok: number }) {
+  const segment = (count: number, color: string) =>
+    count > 0 ? <span className={`h-full rounded-full ${color}`} style={{ flexGrow: count, flexBasis: 0 }} /> : null;
+  return (
+    <span aria-hidden="true" className="flex h-1.5 w-full gap-0.5 overflow-hidden rounded-full bg-bambu-dark-tertiary">
+      {segment(overdue, 'bg-red-400')}
+      {segment(soon, 'bg-amber-400')}
+      {segment(ok, 'bg-bambu-green')}
+    </span>
+  );
+}
+
+function HealthSummary({ counts, t }: { counts: { overdue: number; soon: number; ok: number }; t: TFunction }) {
+  const parts: string[] = [];
+  if (counts.overdue > 0) parts.push(t('maintenance.overdueCount', { count: counts.overdue }));
+  if (counts.soon > 0) parts.push(t('maintenance.dueSoonCount', { count: counts.soon }));
+  if (counts.overdue === 0 && counts.soon === 0) {
+    parts.push(counts.ok > 0 ? t('maintenance.allOnTrack') : t('maintenance.noTasks'));
+  } else if (counts.ok > 0) {
+    parts.push(t('maintenance.onTrackCount', { count: counts.ok }));
+  }
+  return <>{parts.join(' · ')}</>;
+}
+
+function MachineRail({
+  overview,
+  selected,
+  onSelect,
+  t,
+}: {
+  overview: PrinterMaintenanceOverview[];
+  selected: number | 'all';
+  onSelect: (selection: number | 'all') => void;
+  t: TFunction;
+}) {
+  const printers = [...overview]
+    .map((printer) => ({ printer, counts: summariseTasks(printer.maintenance_items) }))
+    .sort((a, b) => {
+      const aScore = a.counts.overdue * 10 + a.counts.soon;
+      const bScore = b.counts.overdue * 10 + b.counts.soon;
+      if (aScore !== bScore) return bScore - aScore;
+      return a.printer.printer_name.localeCompare(b.printer.printer_name);
+    });
+  const fleet = printers.reduce(
+    (sum, { counts }) => ({ overdue: sum.overdue + counts.overdue, soon: sum.soon + counts.soon, ok: sum.ok + counts.ok }),
+    { overdue: 0, soon: 0, ok: 0 },
+  );
+
+  const itemClass = (isSelected: boolean) =>
+    `flex min-w-[230px] shrink-0 flex-col gap-2.5 rounded-xl border p-4 text-left transition-colors lg:min-w-0 ${
+      isSelected
+        ? 'border-bambu-green bg-bambu-dark-secondary'
+        : 'border-bambu-dark-tertiary hover:bg-bambu-dark-secondary/60'
+    }`;
+
+  return (
+    <nav aria-label={t('maintenance.machinesNav')} className="flex gap-2 overflow-x-auto pb-1 lg:w-72 lg:shrink-0 lg:flex-col lg:overflow-visible lg:pb-0">
+      <button
+        type="button"
+        aria-current={selected === 'all' ? 'true' : undefined}
+        onClick={() => onSelect('all')}
+        className={itemClass(selected === 'all')}
+      >
+        <span className="flex items-center gap-2.5 font-semibold text-white">
+          <ListChecks className="h-[18px] w-[18px]" aria-hidden="true" />
+          {t('maintenance.allMachines')}
+        </span>
+        <HealthBar {...fleet} />
+        <span className="text-xs text-bambu-gray-light"><HealthSummary counts={fleet} t={t} /></span>
+      </button>
+      <div aria-hidden="true" className="my-1 hidden h-px bg-bambu-dark-tertiary lg:block" />
+      {printers.map(({ printer, counts }) => {
+        const isSelected = selected === printer.printer_id;
+        return (
+          <button
+            key={printer.printer_id}
+            type="button"
+            aria-current={isSelected ? 'true' : undefined}
+            onClick={() => onSelect(printer.printer_id)}
+            className={itemClass(isSelected)}
+          >
+            <span className="flex items-baseline justify-between gap-2">
+              <span className="truncate font-semibold text-white">{printer.printer_name}</span>
+              {printer.printer_model && <span className="shrink-0 text-xs text-bambu-gray-light">{printer.printer_model}</span>}
+            </span>
+            <HealthBar {...counts} />
+            <span className="flex items-center justify-between gap-2 text-xs text-bambu-gray-light">
+              <span><HealthSummary counts={counts} t={t} /></span>
+              {printer.is_active === false && (
+                <span className="shrink-0 font-semibold text-blue-400">{t('printers.maintenance.modeLabel')}</span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function TaskRow({
   item,
+  printerName,
   onPerform,
   onToggle,
   hasPermission,
   t,
 }: {
   item: MaintenanceStatus;
+  /** Set on the all-machines list, where rows from every printer are mixed. */
+  printerName?: string;
   onPerform: (id: number) => void;
-  onToggle: (id: number, enabled: boolean) => void;
+  onToggle?: (id: number, enabled: boolean) => void;
   hasPermission: (permission: Permission) => boolean;
   t: TFunction;
 }) {
-  const Icon = getIcon(item.maintenance_type_icon);
-  const intervalType = item.interval_type || 'hours';
+  const metrics = getTaskMetrics(item);
+  const styles = STATUS_STYLES[metrics.status];
+  const canUpdate = hasPermission('maintenance:update');
+  const wikiUrl = item.maintenance_type_wiki_url || getMaintenanceWikiUrl(item.maintenance_type_name, item.printer_model);
 
-  // Calculate progress based on interval type
-  const getProgress = () => {
-    if (intervalType === 'jobs') {
-      const jobsSince = item.jobs_since_maintenance ?? 0;
-      return Math.max(0, Math.min(100, (jobsSince / item.interval_hours) * 100));
-    }
-    if (intervalType === 'changes') {
-      const changesSince = item.changes_since_maintenance ?? 0;
-      return Math.max(0, Math.min(100, (changesSince / item.interval_hours) * 100));
-    }
-    if (intervalType === 'days') {
-      const daysSince = item.days_since_maintenance ?? 0;
-      return Math.max(0, Math.min(100, (daysSince / item.interval_hours) * 100));
-    }
-    return Math.max(0, Math.min(100,
-      ((item.interval_hours - item.hours_until_due) / item.interval_hours) * 100
-    ));
-  };
+  const magnitude = Math.abs(metrics.remaining);
+  const isToday = metrics.intervalType === 'days' && metrics.status !== 'overdue' && magnitude < 1;
+  const countdown = metrics.status === 'off'
+    ? '—'
+    : isToday
+      ? t('common.today')
+      : metrics.intervalType === 'hours'
+        ? formatRemainingHours(magnitude)
+        : formatAmount(metrics.status === 'overdue' && metrics.intervalType === 'days' ? Math.max(1, magnitude) : magnitude, metrics.intervalType, t);
+  const caption = metrics.status === 'off'
+    ? t('common.disabled')
+    : isToday
+      ? ''
+      : metrics.status === 'overdue'
+        ? t('maintenance.countdownOverdue')
+        : t('maintenance.countdownLeft');
 
-  const progressPercent = getProgress();
-
-  const getStatusColor = () => {
-    if (!item.enabled) return 'text-bambu-gray';
-    if (item.is_due) return 'text-red-400';
-    if (item.is_warning) return 'text-amber-400';
-    return 'text-bambu-green';
-  };
-
-  const getProgressColor = () => {
-    if (!item.enabled) return 'bg-bambu-gray/30';
-    if (item.is_due) return 'bg-red-500';
-    if (item.is_warning) return 'bg-amber-500';
-    return 'bg-bambu-green';
-  };
-
-  const getBgColor = () => {
-    if (!item.enabled) return 'bg-bambu-dark-secondary/50';
-    if (item.is_due) return 'bg-red-500/5 border-red-500/20';
-    if (item.is_warning) return 'bg-amber-500/5 border-amber-500/20';
-    return 'bg-bambu-dark-secondary border-bambu-dark-tertiary';
-  };
-
-  const getStatusText = () => {
-    if (!item.enabled) return t('common.disabled');
-
-    if (intervalType === 'changes') {
-      const changesUntil = item.changes_until_due ?? 0;
-      if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(changesUntil), 'changes', t) });
-      if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(changesUntil, 'changes', t) });
-      return t('maintenance.timeLeft', { duration: formatDuration(changesUntil, 'changes', t) });
-    } else if (intervalType === 'jobs') {
-      const jobsUntil = item.jobs_until_due ?? 0;
-      if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(jobsUntil), 'jobs', t) });
-      if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(jobsUntil, 'jobs', t) });
-      return t('maintenance.timeLeft', { duration: formatDuration(jobsUntil, 'jobs', t) });
-    } else if (intervalType === 'days') {
-      const daysUntil = item.days_until_due ?? 0;
-      if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(daysUntil), 'days', t) });
-      if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(daysUntil, 'days', t) });
-      return t('maintenance.timeLeft', { duration: formatDuration(daysUntil, 'days', t) });
-    } else {
-      if (item.is_due) return t('maintenance.overdueBy', { duration: formatDuration(Math.abs(item.hours_until_due), 'hours', t) });
-      if (item.is_warning) return t('maintenance.dueIn', { duration: formatDuration(item.hours_until_due, 'hours', t) });
-      return t('maintenance.timeLeft', { duration: formatDuration(item.hours_until_due, 'hours', t) });
-    }
-  };
+  const lastDone = item.last_performed_at
+    ? t('maintenance.lastDone', { date: formatDateOnly(item.last_performed_at) })
+    : t('maintenance.neverDone');
+  const rule = t('maintenance.everyInterval', { interval: formatIntervalLabel(metrics.interval, metrics.intervalType, t) });
+  const actionLabel = `${t('maintenance.markDone')}: ${item.maintenance_type_name}${printerName ? ` (${printerName})` : ''}`;
 
   return (
-    <div className={`rounded-xl border p-4 transition-all ${getBgColor()}`}>
-      <div className="flex items-start gap-3 max-[550px]:flex-wrap">
-        {/* Icon with status indicator */}
-        <div className={`relative p-2.5 rounded-lg shrink-0 ${
-          item.is_due ? 'bg-red-500/20' :
-          item.is_warning ? 'bg-amber-500/20' :
-          item.enabled ? 'bg-bambu-dark' : 'bg-bambu-dark/50'
-        }`}>
-          <Icon className={`w-5 h-5 ${getStatusColor()}`} />
-          {item.enabled && (item.is_due || item.is_warning) && (
-            <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${
-              item.is_due ? 'bg-red-500' : 'bg-amber-500'
-            } animate-pulse`} />
+    <div
+      role="group"
+      aria-label={printerName ? `${item.maintenance_type_name} (${printerName})` : item.maintenance_type_name}
+      className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-bambu-dark-tertiary/60 px-5 py-3.5 last:border-b-0"
+    >
+      <div className="w-28 shrink-0">
+        <div className={`whitespace-nowrap text-xl font-bold leading-tight tabular-nums ${metrics.status === 'ok' || metrics.status === 'soon' ? 'text-white' : styles.text}`}>
+          {countdown}
+        </div>
+        {caption && <div className="text-xs text-bambu-gray-light">{caption}</div>}
+      </div>
+
+      <div className="min-w-[200px] flex-1">
+        <div className="flex items-center gap-2">
+          <h3 className={`font-semibold ${item.enabled ? 'text-white' : 'text-bambu-gray-light'}`}>{item.maintenance_type_name}</h3>
+          {wikiUrl && (
+            <a
+              href={wikiUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-bambu-gray-light transition-colors hover:text-bambu-green"
+              title={t('maintenance.viewDocumentation')}
+              aria-label={t('maintenance.viewDocumentation')}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
           )}
         </div>
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className={`font-medium truncate ${item.enabled ? 'text-white' : 'text-bambu-gray'}`}>
-              {item.maintenance_type_name}
-            </h3>
-            {intervalType === 'days' && (
-              <span title={t('maintenance.timeBasedInterval')}>
-                <Calendar className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
-              </span>
-            )}
-            {intervalType === 'jobs' && <Printer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />}
-            {intervalType === 'changes' && <RefreshCw className="w-3.5 h-3.5 text-bambu-gray shrink-0" />}
-            {/* Wiki link - next to name */}
-            {(() => {
-              // Use custom wiki_url from type if available, otherwise use computed URL
-              const wikiUrl = item.maintenance_type_wiki_url || getMaintenanceWikiUrl(item.maintenance_type_name, item.printer_model);
-              return wikiUrl ? (
-                <a
-                  href={wikiUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-bambu-gray hover:text-bambu-green transition-colors shrink-0"
-                  title={t('maintenance.viewDocumentation')}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              ) : null;
-            })()}
-          </div>
-
-          {/* Progress bar */}
-          <div className="mt-2 mb-1.5">
-            <div className="w-full h-1.5 bg-bambu-dark rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${getProgressColor()}`}
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Status text */}
-          <div className={`text-xs flex items-center gap-1 ${getStatusColor()}`}>
-            {item.is_due && <AlertTriangle className="w-3 h-3" />}
-            {item.is_warning && !item.is_due && <Clock className="w-3 h-3" />}
-            {!item.is_due && !item.is_warning && item.enabled && <Check className="w-3 h-3" />}
-            {getStatusText()}
-          </div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-bambu-gray-light">
+          {printerName && (
+            <span className="rounded-md bg-bambu-dark-tertiary px-2 py-0.5 text-xs font-medium text-white">{printerName}</span>
+          )}
+          <span>{printerName ? rule : `${rule} · ${lastDone}`}</span>
         </div>
+      </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 shrink-0 max-[550px]:w-full max-[550px]:justify-end max-[550px]:mt-1">
-          <span title={!hasPermission('maintenance:update') ? t('maintenance.noPermissionUpdate') : undefined}>
-            <Toggle
-              checked={item.enabled}
-              onChange={(checked) => onToggle(item.id, checked)}
-              disabled={!hasPermission('maintenance:update')}
-            />
+      <div className="min-w-[150px] flex-[0_1_200px]">
+        <div className="mb-1.5 text-xs tabular-nums text-bambu-gray-light">
+          {formatAmount(metrics.used, metrics.intervalType, t)} / {formatAmount(metrics.interval, metrics.intervalType, t)}
+        </div>
+        <div
+          role="progressbar"
+          aria-label={item.maintenance_type_name}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(metrics.percent)}
+          className="h-1.5 overflow-hidden rounded-full bg-bambu-dark-tertiary"
+        >
+          <div className={`h-full rounded-full transition-all duration-500 ${styles.bar}`} style={{ width: `${metrics.percent}%` }} />
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        {onToggle && (
+          <span title={!canUpdate ? t('maintenance.noPermissionUpdate') : undefined}>
+            <Toggle checked={item.enabled} onChange={(checked) => onToggle(item.id, checked)} disabled={!canUpdate} />
           </span>
-          <Button
-            size="sm"
-            variant={item.is_due ? 'primary' : 'secondary'}
-            onClick={() => onPerform(item.id)}
-            disabled={!item.enabled || !hasPermission('maintenance:update')}
-            title={!hasPermission('maintenance:update') ? t('maintenance.noPermissionPerform') : undefined}
-            className="!px-3"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            {t('common.reset')}
-          </Button>
-        </div>
+        )}
+        <Button
+          size="sm"
+          variant={metrics.status === 'overdue' ? 'primary' : 'secondary'}
+          onClick={() => onPerform(item.id)}
+          disabled={!item.enabled || !canUpdate}
+          title={!canUpdate ? t('maintenance.noPermissionPerform') : undefined}
+          aria-label={actionLabel}
+        >
+          <Check className="h-4 w-4" />
+          {t('maintenance.markDone')}
+        </Button>
       </div>
     </div>
   );
 }
 
-// Printer section with improved visual hierarchy
-function PrinterSection({
+const MAX_ON_TRACK_COLLAPSED = 8;
+
+function AllMachinesView({
+  overview,
+  onPerform,
+  hasPermission,
+  t,
+}: {
+  overview: PrinterMaintenanceOverview[];
+  onPerform: (id: number) => void;
+  hasPermission: (permission: Permission) => boolean;
+  t: TFunction;
+}) {
+  const [filter, setFilter] = useState<'all' | 'attention'>('all');
+  const [showAllOnTrack, setShowAllOnTrack] = useState(false);
+
+  const tasks = useMemo(() => {
+    return overview
+      .flatMap((printer) =>
+        printer.maintenance_items
+          .filter((item) => item.enabled)
+          .map((item) => ({ item, printerName: printer.printer_name, metrics: getTaskMetrics(item) })),
+      )
+      .sort((a, b) => {
+        const rank = (status: TaskStatus) => (status === 'overdue' ? 0 : status === 'soon' ? 1 : 2);
+        if (rank(a.metrics.status) !== rank(b.metrics.status)) return rank(a.metrics.status) - rank(b.metrics.status);
+        if (a.metrics.ratio !== b.metrics.ratio) return b.metrics.ratio - a.metrics.ratio;
+        return a.item.maintenance_type_name.localeCompare(b.item.maintenance_type_name);
+      });
+  }, [overview]);
+
+  const overdue = tasks.filter((task) => task.metrics.status === 'overdue');
+  const soon = tasks.filter((task) => task.metrics.status === 'soon');
+  const onTrack = tasks.filter((task) => task.metrics.status === 'ok');
+  const attentionCount = overdue.length + soon.length;
+  const visibleOnTrack = filter === 'attention' ? [] : showAllOnTrack ? onTrack : onTrack.slice(0, MAX_ON_TRACK_COLLAPSED);
+  const hiddenOnTrack = filter === 'attention' ? 0 : onTrack.length - visibleOnTrack.length;
+
+  const bands: { status: TaskStatus; rows: typeof tasks }[] = [
+    { status: 'overdue', rows: overdue },
+    { status: 'soon', rows: soon },
+    { status: 'ok', rows: visibleOnTrack },
+  ];
+
+  const segment = (value: 'all' | 'attention', label: string) => (
+    <button
+      type="button"
+      aria-pressed={filter === value}
+      onClick={() => setFilter(value)}
+      className={`min-h-[36px] rounded-md px-3.5 text-sm font-medium transition-colors ${
+        filter === value ? 'bg-bambu-dark-tertiary text-white' : 'text-bambu-gray-light hover:text-white'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="min-w-0 flex-1 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-white">{t('maintenance.allMachines')}</h2>
+          <p className="text-sm text-bambu-gray-light">{t('maintenance.allMachinesDescription')}</p>
+        </div>
+        <div role="group" aria-label={t('maintenance.taskFilter')} className="flex rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-0.5">
+          {segment('attention', t('maintenance.needsAttentionCount', { count: attentionCount }))}
+          {segment('all', t('maintenance.allTasksCount', { count: tasks.length }))}
+        </div>
+      </div>
+
+      {tasks.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Wrench className="mx-auto mb-3 h-12 w-12 text-bambu-gray/30" />
+            <p className="font-medium text-white">{t('maintenance.noTasks')}</p>
+            <p className="mt-1 text-sm text-bambu-gray-light">{t('maintenance.configureSettings')}</p>
+          </CardContent>
+        </Card>
+      ) : filter === 'attention' && attentionCount === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Check className="mx-auto mb-3 h-12 w-12 text-bambu-green" />
+            <p className="font-medium text-white">{t('maintenance.nothingNeedsAttention')}</p>
+            <p className="mt-1 text-sm text-bambu-gray-light">{t('maintenance.nothingNeedsAttentionDescription')}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary">
+          {bands.filter((band) => band.rows.length > 0).map((band) => (
+            <section key={band.status} aria-label={statusLabel(band.status, t)}>
+              <h3 className={`flex h-9 items-center gap-2 border-b border-bambu-dark-tertiary/60 bg-bambu-dark/40 px-5 text-xs font-semibold uppercase tracking-wide ${STATUS_STYLES[band.status].text}`}>
+                {statusLabel(band.status, t)}
+                <span className="font-medium normal-case tracking-normal text-bambu-gray-light">
+                  {band.status === 'ok' && hiddenOnTrack > 0 ? `${band.rows.length} / ${onTrack.length}` : band.rows.length}
+                </span>
+              </h3>
+              {band.rows.map(({ item, printerName }) => (
+                <TaskRow
+                  key={item.id}
+                  item={item}
+                  printerName={printerName}
+                  onPerform={onPerform}
+                  hasPermission={hasPermission}
+                  t={t}
+                />
+              ))}
+            </section>
+          ))}
+          {filter === 'all' && onTrack.length > MAX_ON_TRACK_COLLAPSED && (
+            <button
+              type="button"
+              onClick={() => setShowAllOnTrack((value) => !value)}
+              className="flex min-h-[52px] w-full items-center justify-center gap-2 text-sm font-medium text-bambu-gray-light transition-colors hover:text-white"
+            >
+              {showAllOnTrack
+                ? t('maintenance.showFewerOnTrack')
+                : t('maintenance.showMoreOnTrack', { count: hiddenOnTrack })}
+              {showAllOnTrack ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrinterView({
   overview,
   onPerform,
   onToggle,
   onSetHours,
+  onLogRepair,
   hasPermission,
   t,
 }: {
@@ -367,23 +587,28 @@ function PrinterSection({
   onPerform: (id: number) => void;
   onToggle: (id: number, enabled: boolean) => void;
   onSetHours: (printerId: number, hours: number) => void;
+  onLogRepair: (printerId: number) => void;
   hasPermission: (permission: Permission) => boolean;
   t: TFunction;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const [editingHours, setEditingHours] = useState(false);
   const [hoursInput, setHoursInput] = useState(overview.total_print_hours.toFixed(1));
+  const canUpdate = hasPermission('maintenance:update');
 
-  const sortedItems = [...overview.maintenance_items].sort((a, b) => {
-    // Sort by urgency first, then by type
-    if (a.is_due && !b.is_due) return -1;
-    if (!a.is_due && b.is_due) return 1;
-    if (a.is_warning && !b.is_warning) return -1;
-    if (!a.is_warning && b.is_warning) return 1;
-    return a.maintenance_type_id - b.maintenance_type_id;
-  });
+  const sections = useMemo(() => {
+    const decorated = overview.maintenance_items.map((item) => ({ item, metrics: getTaskMetrics(item) }));
+    decorated.sort((a, b) => {
+      if (a.metrics.ratio !== b.metrics.ratio && a.metrics.status !== 'off' && b.metrics.status !== 'off') {
+        return b.metrics.ratio - a.metrics.ratio;
+      }
+      return a.item.maintenance_type_id - b.item.maintenance_type_id;
+    });
+    return (['overdue', 'soon', 'ok', 'off'] as TaskStatus[])
+      .map((status) => ({ status, rows: decorated.filter((task) => task.metrics.status === status) }))
+      .filter((section) => section.rows.length > 0);
+  }, [overview.maintenance_items]);
 
-  const nextTask = sortedItems.find(item => item.enabled && (item.is_due || item.is_warning));
+  const counts = summariseTasks(overview.maintenance_items);
 
   const handleSaveHours = () => {
     const hours = parseFloat(hoursInput);
@@ -393,139 +618,190 @@ function PrinterSection({
     }
   };
 
-  return (
-    <Card className="overflow-hidden">
-      {/* Header */}
-      <div className="p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h2 className="text-xl font-semibold text-white">{overview.printer_name}</h2>
-            <div className="flex items-center gap-2">
-              {overview.is_active === false && (
-                <span className="px-2.5 py-1 bg-blue-500/20 text-blue-400 text-xs font-medium rounded-full flex items-center gap-1.5">
-                  <Wrench className="w-3 h-3" />
-                  {t('printers.maintenance.modeLabel')}
-                </span>
-              )}
-              {overview.due_count > 0 && (
-                <span className="px-2.5 py-1 bg-red-500/20 text-red-400 text-xs font-medium rounded-full flex items-center gap-1.5">
-                  <AlertTriangle className="w-3 h-3" />
-                  {t('maintenance.overdueCount', { count: overview.due_count })}
-                </span>
-              )}
-              {overview.warning_count > 0 && (
-                <span className="px-2.5 py-1 bg-amber-500/20 text-amber-400 text-xs font-medium rounded-full flex items-center gap-1.5">
-                  <Clock className="w-3 h-3" />
-                  {t('maintenance.dueSoonCount', { count: overview.warning_count })}
-                </span>
-              )}
-              {overview.due_count === 0 && overview.warning_count === 0 && (
-                <span className="px-2.5 py-1 bg-bambu-green/20 text-bambu-green text-xs font-medium rounded-full flex items-center gap-1.5">
-                  <Check className="w-3 h-3" />
-                  {t('maintenance.allGood')}
-                </span>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-bambu-gray hover:text-white hover:bg-bambu-dark rounded-lg transition-colors"
-          >
-            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            {expanded ? t('common.collapse') : t('common.expand')}
-          </button>
-        </div>
+  const tile = 'flex items-center justify-between gap-3 rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary px-4 py-3';
 
-        {/* Quick stats row */}
-        <div className="flex items-center gap-6 mt-4">
-          {/* Print Hours */}
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-bambu-dark/50 rounded-lg">
-              <Timer className="w-4 h-4 text-bambu-gray" />
-            </div>
+  return (
+    <div className="min-w-0 flex-1 space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-xl font-bold text-white">{overview.printer_name}</h2>
+          {overview.printer_model && <span className="text-sm text-bambu-gray-light">{overview.printer_model}</span>}
+          {overview.is_active === false && (
+            <span className="flex items-center gap-1.5 rounded-full bg-blue-500/20 px-2.5 py-1 text-xs font-medium text-blue-400">
+              <Wrench className="h-3 w-3" />
+              {t('printers.maintenance.modeLabel')}
+            </span>
+          )}
+          {overview.due_count > 0 && (
+            <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-1 text-xs font-medium text-red-400">
+              <AlertTriangle className="h-3 w-3" />
+              {t('maintenance.overdueCount', { count: overview.due_count })}
+            </span>
+          )}
+          {overview.warning_count > 0 && (
+            <span className="flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-400">
+              <Clock className="h-3 w-3" />
+              {t('maintenance.dueSoonCount', { count: overview.warning_count })}
+            </span>
+          )}
+          {overview.due_count === 0 && overview.warning_count === 0 && (
+            <span className="flex items-center gap-1.5 rounded-full bg-bambu-green/20 px-2.5 py-1 text-xs font-medium text-bambu-green">
+              <Check className="h-3 w-3" />
+              {t('maintenance.allGood')}
+            </span>
+          )}
+        </div>
+        {hasPermission('maintenance:create') && (
+          <Button variant="secondary" onClick={() => onLogRepair(overview.printer_id)}>
+            <Wrench className="h-4 w-4" />
+            {t('maintenance.logRepair')}
+          </Button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className={tile}>
+          <div>
+            <div className="text-xs text-bambu-gray-light">{t('maintenance.totalPrintTime')}</div>
             {editingHours ? (
-              <div className="flex items-center gap-2">
+              <div className="mt-1 flex flex-wrap items-center gap-2">
                 <input
                   type="number"
+                  aria-label={t('maintenance.editPrintHours')}
                   value={hoursInput}
                   onChange={(e) => setHoursInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleSaveHours();
                     if (e.key === 'Escape') setEditingHours(false);
                   }}
-                  className="w-24 px-2 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm"
+                  className="w-24 rounded border border-bambu-dark-tertiary bg-bambu-dark px-2 py-1 text-sm text-white"
                   min="0"
                   step="1"
                   autoFocus
                 />
-                <span className="text-xs text-bambu-gray">{t('common.hours')}</span>
+                <span className="text-xs text-bambu-gray-light">{t('common.hours')}</span>
                 <Button size="sm" onClick={handleSaveHours}>{t('common.save')}</Button>
                 <Button size="sm" variant="secondary" onClick={() => setEditingHours(false)}>{t('common.cancel')}</Button>
               </div>
             ) : (
               <button
+                type="button"
                 onClick={() => {
-                  if (!hasPermission('maintenance:update')) return;
+                  if (!canUpdate) return;
                   setHoursInput(Math.round(overview.total_print_hours).toString());
                   setEditingHours(true);
                 }}
-                className={`group ${!hasPermission('maintenance:update') ? 'cursor-not-allowed opacity-60' : ''}`}
-                title={!hasPermission('maintenance:update') ? t('maintenance.noPermissionEditHours') : undefined}
+                className={`group mt-0.5 flex items-center gap-2 text-2xl font-bold tabular-nums text-white ${canUpdate ? '' : 'cursor-not-allowed opacity-60'}`}
+                title={!canUpdate ? t('maintenance.noPermissionEditHours') : t('maintenance.editPrintHours')}
               >
-                <div className={`text-sm font-medium text-white ${hasPermission('maintenance:update') ? 'group-hover:text-bambu-green' : ''} transition-colors flex items-center gap-1`}>
-                  {Math.round(overview.total_print_hours)} {t('common.hours')}
-                  <Edit3 className={`w-3 h-3 text-bambu-gray ${hasPermission('maintenance:update') ? 'group-hover:text-bambu-green' : ''}`} />
-                </div>
-                <div className="text-xs text-bambu-gray">{t('maintenance.totalPrintTime')}</div>
+                <span>{Math.round(overview.total_print_hours).toLocaleString()} {t('common.hours')}</span>
+                <Edit3 className={`h-3.5 w-3.5 text-bambu-gray-light ${canUpdate ? 'group-hover:text-bambu-green' : ''}`} />
               </button>
             )}
           </div>
-
-          {/* Divider */}
-          <div className="w-px h-10 bg-bambu-dark-tertiary" />
-
-          {/* Next Maintenance */}
-          {nextTask && (
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${
-                nextTask.is_due ? 'bg-red-500/20' : 'bg-amber-500/20'
-              }`}>
-                {(() => {
-                  const Icon = getIcon(nextTask.maintenance_type_icon);
-                  return <Icon className={`w-4 h-4 ${nextTask.is_due ? 'text-red-400' : 'text-amber-400'}`} />;
-                })()}
-              </div>
-              <div>
-                <div className={`text-sm font-medium ${nextTask.is_due ? 'text-red-400' : 'text-amber-400'}`}>
-                  {nextTask.maintenance_type_name}
-                </div>
-                <div className={`text-xs ${nextTask.is_due ? 'text-red-400/70' : 'text-amber-400/70'}`}>
-                  {nextTask.is_due ? t('common.overdue') : t('maintenance.dueSoon')}
-                </div>
-              </div>
-            </div>
-          )}
+        </div>
+        <div className={tile}>
+          <div>
+            <div className="text-xs text-bambu-gray-light">{t('maintenance.printJobs')}</div>
+            <div className="mt-0.5 text-2xl font-bold tabular-nums text-white">{overview.total_print_jobs ?? 0}</div>
+          </div>
+        </div>
+        <div className={tile}>
+          <div>
+            <div className="text-xs text-bambu-gray-light">{t('maintenance.filamentChanges')}</div>
+            <div className="mt-0.5 text-2xl font-bold tabular-nums text-white">{overview.total_filament_changes ?? 0}</div>
+          </div>
         </div>
       </div>
 
-      {/* Maintenance items */}
-      {expanded && (
-        <CardContent className="pt-0 border-t border-bambu-dark-tertiary">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-4">
-            {sortedItems.map((item) => (
-              <MaintenanceCard
-                key={item.id}
-                item={item}
-                onPerform={onPerform}
-                onToggle={onToggle}
-                hasPermission={hasPermission}
-                t={t}
-              />
-            ))}
-          </div>
-        </CardContent>
+      {sections.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Wrench className="mx-auto mb-3 h-12 w-12 text-bambu-gray/30" />
+            <p className="font-medium text-white">{t('maintenance.noTasks')}</p>
+            <p className="mt-1 text-sm text-bambu-gray-light">{t('maintenance.noTasksAssigned')}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        sections.map((section) => (
+          <section key={section.status} aria-label={statusLabel(section.status, t)} className="space-y-2.5">
+            <h3 className={`flex items-center gap-2 text-sm font-semibold ${STATUS_STYLES[section.status].text}`}>
+              {statusLabel(section.status, t)}
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${STATUS_STYLES[section.status].chip}`}>
+                {counts[section.status]}
+              </span>
+            </h3>
+            <div className={`overflow-hidden rounded-xl border bg-bambu-dark-secondary ${STATUS_STYLES[section.status].border}`}>
+              {section.rows.map(({ item }) => (
+                <TaskRow
+                  key={item.id}
+                  item={item}
+                  onPerform={onPerform}
+                  onToggle={onToggle}
+                  hasPermission={hasPermission}
+                  t={t}
+                />
+              ))}
+            </div>
+          </section>
+        ))
       )}
-    </Card>
+    </div>
+  );
+}
+
+function StatusTab({
+  overview,
+  onPerform,
+  onToggle,
+  onSetHours,
+  onLogRepair,
+  hasPermission,
+  t,
+}: {
+  overview: PrinterMaintenanceOverview[] | undefined;
+  onPerform: (id: number) => void;
+  onToggle: (id: number, enabled: boolean) => void;
+  onSetHours: (printerId: number, hours: number) => void;
+  onLogRepair: (printerId: number) => void;
+  hasPermission: (permission: Permission) => boolean;
+  t: TFunction;
+}) {
+  const [selection, setSelection] = useState<number | 'all'>('all');
+
+  if (!overview || overview.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center">
+          <Wrench className="mx-auto mb-4 h-16 w-16 text-bambu-gray/30" />
+          <p className="mb-2 text-lg font-medium text-white">{t('common.noPrinters')}</p>
+          <p className="text-bambu-gray">{t('maintenance.configureSettings')}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // A printer that disappears (removed, or no longer in the overview) falls back to the fleet list.
+  const selectedPrinter = selection === 'all' ? undefined : overview.find((printer) => printer.printer_id === selection);
+
+  return (
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <MachineRail overview={overview} selected={selectedPrinter ? selection : 'all'} onSelect={setSelection} t={t} />
+      {selectedPrinter ? (
+        <PrinterView
+          key={selectedPrinter.printer_id}
+          overview={selectedPrinter}
+          onPerform={onPerform}
+          onToggle={onToggle}
+          onSetHours={onSetHours}
+          onLogRepair={onLogRepair}
+          hasPermission={hasPermission}
+          t={t}
+        />
+      ) : (
+        <AllMachinesView overview={overview} onPerform={onPerform} hasPermission={hasPermission} t={t} />
+      )}
+    </div>
   );
 }
 
@@ -1182,6 +1458,8 @@ function MaintenanceLogSection({
   selectedEntryType,
   onSelectPrinter,
   onSelectEntryType,
+  composePrinterId,
+  onComposeHandled,
   onLoadMore,
   onCreate,
   onUpdate,
@@ -1200,6 +1478,9 @@ function MaintenanceLogSection({
   selectedEntryType: MaintenanceLogFilter;
   onSelectPrinter: (printerId: number | null) => void;
   onSelectEntryType: (entryType: MaintenanceLogFilter) => void;
+  /** A printer whose "Log a repair" button was used; opens the form for it once. */
+  composePrinterId: number | null;
+  onComposeHandled: () => void;
   onLoadMore: () => void;
   onCreate: (data: MaintenanceLogEntryInput) => Promise<MaintenanceLogEntry>;
   onUpdate: (id: number, data: MaintenanceLogEntryInput) => Promise<MaintenanceLogEntry>;
@@ -1223,16 +1504,24 @@ function MaintenanceLogSection({
   });
   const [pendingDelete, setPendingDelete] = useState<MaintenanceLogEntry | null>(null);
 
-  const openCreate = () => {
+  const openCreate = (printerId?: number) => {
     setEditingEntry(null);
     setForm({
-      printerId: selectedPrinterId?.toString() || printers[0]?.printer_id.toString() || '',
+      printerId: printerId?.toString() || selectedPrinterId?.toString() || printers[0]?.printer_id.toString() || '',
       title: '',
       notes: '',
       occurredAt: toDateTimeLocal(),
       hours: '',
     });
   };
+
+  useEffect(() => {
+    if (composePrinterId === null) return;
+    openCreate(composePrinterId);
+    onComposeHandled();
+    // openCreate only reads state that is current on the render this effect runs in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composePrinterId]);
 
   const openEdit = (entry: MaintenanceLogEntry) => {
     setEditingEntry(entry);
@@ -1269,6 +1558,21 @@ function MaintenanceLogSection({
     setEditingEntry(undefined);
   };
 
+  // Entries arrive newest first, so each month's group is contiguous.
+  const groupedEntries = useMemo(() => {
+    const groups: { key: string; label: string; entries: MaintenanceLogEntry[] }[] = [];
+    for (const entry of entries) {
+      const date = parseUTCDate(entry.occurred_at);
+      const valid = date && !Number.isNaN(date.getTime()) ? date : null;
+      const key = valid ? `${valid.getFullYear()}-${valid.getMonth()}` : 'unknown';
+      const label = valid ? valid.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : entry.occurred_at;
+      const last = groups[groups.length - 1];
+      if (last && last.key === key) last.entries.push(entry);
+      else groups.push({ key, label, entries: [entry] });
+    }
+    return groups;
+  }, [entries]);
+
   const authorLine = (entry: MaintenanceLogEntry) => {
     const created = entry.created_by_username
       ? `${t('maintenance.recordedBy')} ${entry.created_by_username}`
@@ -1294,19 +1598,28 @@ function MaintenanceLogSection({
               <option key={printer.printer_id} value={printer.printer_id}>{printer.printer_name}</option>
             ))}
           </ReactSelect>
-          <ReactSelect
-            aria-label={t('maintenance.filterByType')}
-            value={selectedEntryType || ''}
-            onChange={(event) => onSelectEntryType((event.target.value || null) as MaintenanceLogFilter)}
-            className="min-w-40"
-          >
-            <option value="">{t('maintenance.allLogEntries')}</option>
-            <option value="scheduled">{t('maintenance.scheduledLogs')}</option>
-            <option value="manual">{t('maintenance.unscheduledLogs')}</option>
-          </ReactSelect>
+          <div role="group" aria-label={t('maintenance.filterByType')} className="flex rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-0.5">
+            {([
+              [null, t('maintenance.allLogEntries')],
+              ['scheduled', t('maintenance.scheduledLogs')],
+              ['manual', t('maintenance.unscheduledLogs')],
+            ] as [MaintenanceLogFilter, string][]).map(([value, label]) => (
+              <button
+                key={value ?? 'all'}
+                type="button"
+                aria-pressed={selectedEntryType === value}
+                onClick={() => onSelectEntryType(value)}
+                className={`min-h-[36px] rounded-md px-3.5 text-sm font-medium transition-colors ${
+                  selectedEntryType === value ? 'bg-bambu-dark-tertiary text-white' : 'text-bambu-gray-light hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         {hasPermission('maintenance:create') && (
-          <Button onClick={openCreate} disabled={printers.length === 0}>
+          <Button onClick={() => openCreate()} disabled={printers.length === 0}>
             <Plus className="w-4 h-4 mr-2" />
             {t('maintenance.addLogEntry')}
           </Button>
@@ -1324,73 +1637,80 @@ function MaintenanceLogSection({
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {entries.map((entry) => {
-            const isManual = entry.entry_type === 'manual';
-            const author = authorLine(entry);
-            const occurredAt = parseUTCDate(entry.occurred_at);
-            const occurredAtLabel = occurredAt && !Number.isNaN(occurredAt.getTime())
-              ? occurredAt.toLocaleString()
-              : entry.occurred_at;
-            return (
-              <Card key={entry.id} className="border-bambu-dark-tertiary">
-                <CardContent className="p-4">
-                  <div className="flex gap-3">
-                    <div className={`flex w-9 shrink-0 self-stretch items-center justify-center rounded-lg ${isManual ? 'bg-blue-500/10 text-blue-300' : 'bg-bambu-green/10 text-bambu-green'}`}>
-                      {isManual ? <Wrench className="h-5 w-5" /> : <CalendarCheck className="h-5 w-5" />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-medium text-white">{entry.title}</h3>
-                      {entry.notes && <p className="whitespace-pre-wrap text-sm text-bambu-gray-light">{entry.notes}</p>}
-                      <div className="mt-1 space-y-0.5 text-xs text-bambu-gray">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span>{occurredAtLabel}</span>
-                          {entry.hours_at_maintenance !== null && (
-                            <>
-                              <span aria-hidden="true">•</span>
-                              <span>{entry.hours_at_maintenance.toFixed(1)}h</span>
-                            </>
-                          )}
-                          {entry.jobs_at_maintenance != null && (
-                            <>
-                              <span aria-hidden="true">•</span>
-                              <span>{formatJobs(entry.jobs_at_maintenance, t)}</span>
-                            </>
-                          )}
-                          {entry.changes_at_maintenance != null && (
-                            <>
-                              <span aria-hidden="true">•</span>
-                              <span>{formatChanges(entry.changes_at_maintenance, t)}</span>
-                            </>
-                          )}
+        <div className="overflow-x-auto rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary/60">
+          <div className="min-w-[960px]">
+            <div className={`${logGridClass} h-11 border-b border-bambu-dark-tertiary bg-bambu-dark-secondary text-xs font-semibold uppercase tracking-wide text-bambu-gray-light`}>
+              <div>{t('maintenance.logDate')}</div>
+              <div>{t('maintenance.logEntry')}</div>
+              <div>{t('maintenance.printer')}</div>
+              <div>{t('maintenance.logType')}</div>
+              <div>{t('maintenance.logRecordedAt')}</div>
+              <div>{t('maintenance.logBy')}</div>
+              <div />
+            </div>
+            {groupedEntries.map((group) => (
+              <section key={group.key} aria-label={group.label}>
+                <h3 className="flex h-9 items-center justify-between border-b border-bambu-dark-tertiary/60 bg-bambu-dark/40 px-5 text-xs font-semibold uppercase tracking-wide text-bambu-gray-light">
+                  {group.label}
+                  <span className="font-medium normal-case tracking-normal">{t('maintenance.logEntryCount', { count: group.entries.length })}</span>
+                </h3>
+                {group.entries.map((entry) => {
+                  const isManual = entry.entry_type === 'manual';
+                  const author = authorLine(entry);
+                  const occurredAt = parseUTCDate(entry.occurred_at);
+                  const validDate = occurredAt && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null;
+                  const recordedAt = [
+                    entry.hours_at_maintenance !== null ? `${entry.hours_at_maintenance.toFixed(1)}h` : null,
+                    entry.jobs_at_maintenance != null ? formatJobs(entry.jobs_at_maintenance, t) : null,
+                    entry.changes_at_maintenance != null ? formatChanges(entry.changes_at_maintenance, t) : null,
+                  ].filter(Boolean).join(' · ');
+                  return (
+                    <div key={entry.id} className={`${logGridClass} min-h-[60px] border-b border-bambu-dark-tertiary/60 py-2 last:border-b-0`}>
+                      <div>
+                        <div className="text-sm font-semibold text-white">
+                          {validDate ? validDate.toLocaleDateString(undefined, { day: '2-digit', month: 'short' }) : entry.occurred_at}
                         </div>
-                        <div>
-                          <span>{entry.printer_name}</span>
-                          <span aria-hidden="true"> • </span>
-                          <span>{isManual ? t('maintenance.unscheduledLogs') : t('maintenance.scheduledLogs')}</span>
-                        </div>
-                        {author && <div>{author}</div>}
+                        {validDate && (
+                          <div className="text-xs text-bambu-gray-light">
+                            {validDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    {isManual && (hasPermission('maintenance:update') || hasPermission('maintenance:delete')) && (
-                      <div className="flex gap-1">
-                        {hasPermission('maintenance:update') && (
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-white" title={entry.title}>{entry.title}</div>
+                        {entry.notes && (
+                          <div className="truncate text-sm text-bambu-gray-light" title={entry.notes}>{entry.notes}</div>
+                        )}
+                      </div>
+                      <div className="truncate text-sm text-bambu-gray-light">{entry.printer_name}</div>
+                      <div>
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${isManual ? 'bg-blue-500/15 text-blue-300' : 'bg-bambu-green/15 text-bambu-green'}`}>
+                          {isManual ? <Wrench className="h-3.5 w-3.5" /> : <CalendarCheck className="h-3.5 w-3.5" />}
+                          {isManual ? t('maintenance.unscheduledLogs') : t('maintenance.scheduledLogs')}
+                        </span>
+                      </div>
+                      <div className="text-sm tabular-nums text-bambu-gray-light">{recordedAt}</div>
+                      <div className="truncate text-sm text-bambu-gray-light" title={author || undefined}>
+                        {entry.created_by_username ?? ''}
+                      </div>
+                      <div className="flex justify-end">
+                        {isManual && hasPermission('maintenance:update') && (
                           <Button variant="ghost" size="sm" onClick={() => openEdit(entry)} aria-label={t('common.edit')}>
                             <Edit3 className="h-4 w-4" />
                           </Button>
                         )}
-                        {hasPermission('maintenance:delete') && (
+                        {isManual && hasPermission('maintenance:delete') && (
                           <Button variant="ghost" size="sm" onClick={() => setPendingDelete(entry)} aria-label={t('common.delete')}>
                             <Trash2 className="h-4 w-4 text-red-400" />
                           </Button>
                         )}
                       </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+                    </div>
+                  );
+                })}
+              </section>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1511,6 +1831,8 @@ export function MaintenancePage() {
   const [activeTab, setActiveTab] = useState<TabType>('status');
   const [logPrinterId, setLogPrinterId] = useState<number | null>(null);
   const [logEntryType, setLogEntryType] = useState<MaintenanceLogFilter>(null);
+  // Set by "Log a repair" on a printer's Status view; the Log tab opens its form for that printer.
+  const [logComposePrinterId, setLogComposePrinterId] = useState<number | null>(null);
 
   const { data: overview, isLoading } = useQuery({
     queryKey: ['maintenanceOverview'],
@@ -1720,9 +2042,9 @@ export function MaintenancePage() {
         <p className="text-bambu-gray mt-1">
           {activeTab === 'status' ? (
             <>
-              {totalDue > 0 && <span className="text-red-400">{t('maintenance.dueCount', { count: totalDue })}</span>}
+              {totalDue > 0 && <span className="text-red-400">{t('maintenance.overdueCount', { count: totalDue })}</span>}
               {totalDue > 0 && totalWarning > 0 && ' · '}
-              {totalWarning > 0 && <span className="text-amber-400">{t('maintenance.warningCount', { count: totalWarning })}</span>}
+              {totalWarning > 0 && <span className="text-amber-400">{t('maintenance.dueSoonCount', { count: totalWarning })}</span>}
               {totalDue === 0 && totalWarning === 0 && <span className="text-bambu-green">{t('maintenance.allOk')}</span>}
             </>
           ) : activeTab === 'log' ? (
@@ -1769,35 +2091,18 @@ export function MaintenancePage() {
 
       {/* Tab content */}
       {activeTab === 'status' ? (
-        <div className="space-y-6">
-          {overview && overview.length > 0 ? (
-            [...overview].sort((a, b) => {
-              // Sort printers with issues first
-              const aScore = a.due_count * 10 + a.warning_count;
-              const bScore = b.due_count * 10 + b.warning_count;
-              if (aScore !== bScore) return bScore - aScore;
-              return a.printer_name.localeCompare(b.printer_name);
-            }).map((printerOverview) => (
-              <PrinterSection
-                key={printerOverview.printer_id}
-                overview={printerOverview}
-                onPerform={handlePerform}
-                onToggle={handleToggle}
-                onSetHours={handleSetHours}
-                hasPermission={hasPermission}
-                t={t}
-              />
-            ))
-          ) : (
-            <Card>
-              <CardContent className="text-center py-16">
-                <Wrench className="w-16 h-16 mx-auto mb-4 text-bambu-gray/30" />
-                <p className="text-lg font-medium text-white mb-2">{t('common.noPrinters')}</p>
-                <p className="text-bambu-gray">{t('maintenance.configureSettings')}</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        <StatusTab
+          overview={overview}
+          onPerform={handlePerform}
+          onToggle={handleToggle}
+          onSetHours={handleSetHours}
+          onLogRepair={(printerId) => {
+            setLogComposePrinterId(printerId);
+            setActiveTab('log');
+          }}
+          hasPermission={hasPermission}
+          t={t}
+        />
       ) : activeTab === 'log' ? (
         <MaintenanceLogSection
           overview={overview}
@@ -1809,6 +2114,8 @@ export function MaintenancePage() {
           selectedEntryType={logEntryType}
           onSelectPrinter={setLogPrinterId}
           onSelectEntryType={setLogEntryType}
+          composePrinterId={logComposePrinterId}
+          onComposeHandled={() => setLogComposePrinterId(null)}
           onLoadMore={() => fetchMoreLogs()}
           onCreate={(data) => createLogMutation.mutateAsync(data)}
           onUpdate={(id, data) => updateLogMutation.mutateAsync({ id, data })}

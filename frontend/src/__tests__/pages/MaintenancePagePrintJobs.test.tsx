@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
@@ -105,37 +105,39 @@ afterEach(() => {
 
 const paths = () => calls.map((c) => `${c.method} ${c.path}`);
 
-describe('job-based task cards', () => {
-  async function openPrinter(user: ReturnType<typeof userEvent.setup>) {
+describe('job-based task rows', () => {
+  async function openStatus() {
     render(<MaintenancePage />);
-    await screen.findByText('1 overdue');
-    await user.click(screen.getAllByRole('button', { name: /Expand/ })[0]);
+    await screen.findByRole('heading', { name: 'All machines' });
   }
+  const row = (name: string) => screen.getByRole('group', { name: new RegExp(`^${name}`) });
 
-  it('describes each task by the jobs left, due soon or overdue', async () => {
-    const user = userEvent.setup();
-    await openPrinter(user);
+  it('counts down the jobs left, due soon or overdue', async () => {
+    await openStatus();
 
-    expect(screen.getByText('Overdue by 3 jobs')).toBeInTheDocument();
-    expect(screen.getByText('Due in 4 jobs')).toBeInTheDocument();
-    expect(screen.getByText('Due in 1 job')).toBeInTheDocument();
-    expect(screen.getByText('30 jobs left')).toBeInTheDocument();
+    expect(within(row('Replace Nozzle')).getByText('3 jobs')).toBeInTheDocument();
+    expect(within(row('Replace Nozzle')).getByText('overdue')).toBeInTheDocument();
+    expect(within(row('Replace Nozzle')).getByText('53 jobs / 50 jobs')).toBeInTheDocument();
+    expect(within(row('Clean Plate')).getByText('4 jobs')).toBeInTheDocument();
+    expect(within(row('Clean Plate')).getByText('left')).toBeInTheDocument();
+    // A single job reads naturally rather than "1 jobs".
+    expect(within(row('Oil Bearings')).getByText('1 job')).toBeInTheDocument();
+    expect(within(row('Check Cutter')).getByText('30 jobs')).toBeInTheDocument();
   });
 
   it('does not overflow the progress bar for an overdue task', async () => {
-    const user = userEvent.setup();
-    await openPrinter(user);
+    await openStatus();
 
-    const overdue = screen.getByText('Replace Nozzle', { selector: 'h3' }).closest('.rounded-xl') as HTMLElement;
-    const bar = overdue.querySelector('[style*="width"]') as HTMLElement;
-    expect(bar.style.width).toBe('100%');
+    const bar = within(row('Replace Nozzle')).getByRole('progressbar');
+    expect(bar).toHaveAttribute('aria-valuenow', '100');
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe('100%');
   });
 });
 
 describe('job-based settings', () => {
   async function openSettings(user: ReturnType<typeof userEvent.setup>) {
     render(<MaintenancePage />);
-    await screen.findByText('1 overdue');
+    await screen.findByRole('heading', { name: 'All machines' });
     await user.click(screen.getByRole('button', { name: /^Settings$/ }));
     await screen.findByText('Maintenance Types');
   }
@@ -179,9 +181,8 @@ describe('maintenance log', () => {
 
     await user.click(await screen.findByText('Log'));
 
-    expect(await screen.findByText('Replace Nozzle', { selector: 'h3' })).toBeInTheDocument();
-    expect(screen.getByText('100.0h')).toBeInTheDocument();
-    expect(screen.getByText('12 jobs')).toBeInTheDocument();
+    expect(await screen.findByText('Replace Nozzle')).toBeInTheDocument();
+    expect(screen.getByText('100.0h · 12 jobs')).toBeInTheDocument();
   });
 
   it('omits the job count for entries that predate job tracking', async () => {

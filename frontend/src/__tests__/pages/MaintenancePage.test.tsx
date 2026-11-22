@@ -196,12 +196,39 @@ describe('MaintenancePage', () => {
 
       expect(await screen.findByText('Clean Nozzle')).toBeInTheDocument();
       expect(screen.getByRole('combobox', { name: 'Filter by printer' })).toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Filter by type' })).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Filter by type' })).toBeInTheDocument();
       expect(screen.getByText('Completed as scheduled')).toBeInTheDocument();
-      expect(screen.getByText('X1 Carbon', { selector: 'span' })).toBeInTheDocument();
+      expect(screen.getByText('X1 Carbon', { selector: 'div' })).toBeInTheDocument();
       expect(screen.getByText('Scheduled', { selector: 'span' })).toBeInTheDocument();
       expect(screen.queryByLabelText('Edit')).not.toBeInTheDocument();
       expect(screen.queryByLabelText('Delete')).not.toBeInTheDocument();
+    });
+
+    it('lists entries newest first under a heading for each month', async () => {
+      server.use(
+        http.get('/api/v1/maintenance/logs', () =>
+          HttpResponse.json({
+            items: [
+              { ...mockManualLogEntry, id: 5, title: 'Fan replaced', occurred_at: '2024-02-10T10:00:00Z', notes: null, hours_at_maintenance: null },
+              mockManualLogEntry,
+              mockScheduledLogEntry,
+            ],
+            next_cursor: null,
+          })),
+      );
+
+      render(<MaintenancePage />);
+      fireEvent.click(await screen.findByText('Log'));
+
+      const february = await screen.findByRole('region', { name: /February/ });
+      const january = screen.getByRole('region', { name: /January/ });
+      expect(february).toHaveTextContent('Fan replaced');
+      expect(february).toHaveTextContent('1 entry');
+      expect(january).toHaveTextContent('Replaced extruder');
+      expect(january).toHaveTextContent('Clean Nozzle');
+      expect(january).toHaveTextContent('2 entries');
+      expect(screen.getByText('Recorded at')).toBeInTheDocument();
+      expect(screen.getByText('120.0h')).toBeInTheDocument();
     });
 
     it('uses the shared React dropdown for the log printer field', async () => {
@@ -285,8 +312,9 @@ describe('MaintenancePage', () => {
       }));
       expect(screen.queryByRole('button', { name: 'Save log entry' })).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by type' }));
-      fireEvent.click(await screen.findByRole('option', { name: 'Unscheduled' }));
+      expect(screen.getByRole('button', { name: 'All entries' })).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(screen.getByRole('button', { name: 'Unscheduled' }));
+      expect(screen.getByRole('button', { name: 'Unscheduled' })).toHaveAttribute('aria-pressed', 'true');
 
       await waitFor(() => {
         expect(screen.getByText('Bearing replaced')).toBeInTheDocument();
@@ -323,7 +351,8 @@ describe('MaintenancePage', () => {
 
       render(<MaintenancePage />);
       fireEvent.click(await screen.findByText('Log'));
-      expect(await screen.findByText('Recorded by alice')).toBeInTheDocument();
+      const recordedBy = await screen.findByText('alice');
+      expect(recordedBy).toHaveAttribute('title', 'Recorded by alice');
       expect(screen.getByLabelText('Edit')).toBeInTheDocument();
       expect(screen.getByLabelText('Delete')).toBeInTheDocument();
 
