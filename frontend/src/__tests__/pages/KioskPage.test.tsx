@@ -123,6 +123,11 @@ describe('KioskPage', () => {
         'kiosk-job-job-12',
       ]);
     });
+    // Plate clear, paused and printing share one group; pending jobs are "Up next".
+    expect(screen.getByTestId('kiosk-section-printing')).toHaveTextContent(/Printing\s*3/);
+    expect(screen.getByTestId('kiosk-section-up-next')).toHaveTextContent(/Up next\s*2/);
+    expect(screen.getByTestId('kiosk-job-plate-clear-2').parentElement).toContainElement(screen.getByTestId('kiosk-section-printing'));
+    expect(screen.getByTestId('kiosk-job-job-11').parentElement).toContainElement(screen.getByTestId('kiosk-section-up-next'));
     expect(screen.queryByRole('heading', { name: 'Printers' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Active jobs' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();

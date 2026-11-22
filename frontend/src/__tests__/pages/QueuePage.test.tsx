@@ -232,7 +232,7 @@ describe('QueuePage', () => {
       });
     });
 
-    it('lists printing and queued jobs without section headings', async () => {
+    it('separates printing jobs from up next jobs with headings and counts', async () => {
       render(<QueuePage />);
 
       await waitFor(() => {
@@ -240,7 +240,28 @@ describe('QueuePage', () => {
         expect(screen.getByText('Test Print 1')).toBeInTheDocument();
       });
       expect(screen.queryByText('Active jobs')).not.toBeInTheDocument();
-      expect(screen.queryByRole('heading', { level: 2 })).not.toBeInTheDocument();
+
+      const printing = screen.getByTestId('queue-section-printing');
+      const upNext = screen.getByTestId('queue-section-up-next');
+      expect(within(printing).getByRole('heading', { level: 2, name: 'Printing' })).toBeInTheDocument();
+      expect(printing).toHaveTextContent(/Printing\s*1/);
+      expect(within(upNext).getByRole('heading', { level: 2, name: 'Up next' })).toBeInTheDocument();
+      expect(upNext).toHaveTextContent(/Up next\s*1/);
+      // Printing comes first, then the queue.
+      expect(printing.compareDocumentPosition(upNext) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('hides the Printing heading when nothing is printing', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(mockQueueItems.filter((item) => item.status === 'pending'))),
+      );
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Print 1')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('queue-section-printing')).not.toBeInTheDocument();
+      expect(screen.getByTestId('queue-section-up-next')).toBeInTheDocument();
     });
 
     it('shows dispatching items as active without calling them printing', async () => {

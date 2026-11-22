@@ -1194,6 +1194,8 @@ export default {
     // Bölümler
     sections: {
       activeJobs: 'Etkin işler',
+      printing: 'Yazdırılıyor',
+      upNext: 'Sıradakiler',
       queued: 'Kuyruktaki',
       history: 'Geçmiş',
     },

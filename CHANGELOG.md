@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Queue and Kiosk: printing and queued jobs are now split into two groups with
+  headings and counts, **Printing** and **Up next**, so what is running is easy
+  to tell apart from what is waiting (#362). Printing includes paused and
+  heat-soaking jobs, and on the kiosk the printers waiting for their plate to be
+  cleared. Up next lists pending, scheduled, waiting and staged jobs in queue
+  order. A heading is hidden when its group is empty.
 - Kiosk: the kiosk now matches the Print Queue page (#359). The Printers strip
   and the separate Active jobs section are gone, replaced by one read-only list
   that uses the same job lines as the Queue page, so printing, paused,

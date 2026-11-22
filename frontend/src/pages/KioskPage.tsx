@@ -5,6 +5,7 @@ import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { api, type Printer as PrinterRecord, type PrinterStatus } from '../api/client';
 import { QueueJobLine, type QueueJobLineItem, type QueueJobLineStatus } from '../components/queue/QueueJobLine';
+import { QueueSectionHeading } from '../components/queue/QueueSectionHeading';
 import {
   QUEUE_TONES,
   jobProgressFromStatus,
@@ -260,6 +261,9 @@ export function KioskPage() {
     };
   }, [owners, pendingItems, printers, printingItems, printingItemsByPrinter, statuses, t]);
 
+  // Plate clear, paused and printing jobs form the "Printing" group; the rest are "Up next".
+  const printingGroupCount = plateRows.length + pausedRows.length + printingRows.length;
+
   const rows = useMemo(
     () => [...plateRows, ...pausedRows, ...printingRows, ...queueRows],
     [plateRows, pausedRows, printingRows, queueRows],
@@ -308,21 +312,42 @@ export function KioskPage() {
               ) : (
                 <>
                   <div data-testid="kiosk-job-list" ref={listRef} className="flex h-full flex-col gap-2 overflow-hidden">
-                    {rows.map((row) => (
-                      <div key={row.key} data-testid={`kiosk-job-${row.key}`} className="flex-none">
-                        <QueueJobLine
-                          size="kiosk"
-                          item={row.item}
-                          displayName={row.displayName}
-                          printerState={row.printerState}
-                          timeFormat={timeFormat}
-                          t={t as unknown as (key: string, options?: Record<string, unknown>) => string}
-                          progress={row.progress}
-                          pauseReasonKey={row.pauseReasonKey}
-                          status={row.status}
-                          alert={row.alert}
-                          extraFooter={row.extraFooter}
-                        />
+                    {rows.map((row, index) => (
+                      <div key={row.key} className="flex-none">
+                        {/* Headings ride inside the first line of their group so overflow still counts jobs only. */}
+                        {index === 0 && printingGroupCount > 0 && (
+                          <QueueSectionHeading
+                            size="kiosk"
+                            testId="kiosk-section-printing"
+                            label={t('queue.sections.printing')}
+                            count={printingGroupCount}
+                            className="mb-2"
+                          />
+                        )}
+                        {index === printingGroupCount && queueRows.length > 0 && (
+                          <QueueSectionHeading
+                            size="kiosk"
+                            testId="kiosk-section-up-next"
+                            label={t('queue.sections.upNext')}
+                            count={queueRows.length}
+                            className={`mb-2 ${printingGroupCount > 0 ? 'mt-2' : ''}`}
+                          />
+                        )}
+                        <div data-testid={`kiosk-job-${row.key}`}>
+                          <QueueJobLine
+                            size="kiosk"
+                            item={row.item}
+                            displayName={row.displayName}
+                            printerState={row.printerState}
+                            timeFormat={timeFormat}
+                            t={t as unknown as (key: string, options?: Record<string, unknown>) => string}
+                            progress={row.progress}
+                            pauseReasonKey={row.pauseReasonKey}
+                            status={row.status}
+                            alert={row.alert}
+                            extraFooter={row.extraFooter}
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>

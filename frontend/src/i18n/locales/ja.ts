@@ -1193,6 +1193,8 @@ export default {
     // Sections
     sections: {
       activeJobs: '実行中のジョブ',
+      printing: '印刷中',
+      upNext: '次の予定',
       queued: 'キュー中',
       history: '履歴',
     },

@@ -59,6 +59,7 @@ import { QueueStatsBar } from '../components/QueueStatsBar';
 import { CompactHistoryRow } from '../components/CompactHistoryRow';
 import { QueueTimelineView } from '../components/QueueTimelineView';
 import { QueueJobLine, QueueOptionIcons } from '../components/queue/QueueJobLine';
+import { QueueSectionHeading } from '../components/queue/QueueSectionHeading';
 import { formatWeight } from '../components/queue/format';
 import { jobProgressFromStatus, pauseReasonKeyFor, resolveQueueTone } from '../components/queue/queueTones';
 import { ToolbarDropdown, ReactSelect, toolbarControlClass, toolbarIconButtonClass } from '../components/ToolbarControls';
@@ -1800,9 +1801,15 @@ export function QueuePage() {
         />
       ) : (
         <div className="space-y-2 sm:space-y-3">
-          {/* Active prints: no heading, the card status gutter says what they are. */}
+          {/* Active prints */}
           {activeItems.length > 0 && (
             <div>
+              <QueueSectionHeading
+                testId="queue-section-printing"
+                label={t('queue.sections.printing')}
+                count={activeItems.length}
+                className="mb-2 sm:mb-3"
+              />
               <div className="space-y-2 sm:space-y-3">
                 {activeItems.map((item) => (
                   <SortableQueueItem
@@ -1828,6 +1835,12 @@ export function QueuePage() {
           {/* Pending Queue */}
           {pendingItems.length > 0 && (
             <div>
+              <QueueSectionHeading
+                testId="queue-section-up-next"
+                label={t('queue.sections.upNext')}
+                count={pendingItems.length}
+                className={`mb-2 sm:mb-3 ${activeItems.length > 0 ? 'mt-4 sm:mt-5' : ''}`}
+              />
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
