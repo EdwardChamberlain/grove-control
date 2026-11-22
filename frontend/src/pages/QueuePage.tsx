@@ -47,7 +47,7 @@ import {
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { type TimeFormat, formatDuration, parseUTCDate } from '../utils/date';
-import type { PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
+import type { Printer as PrinterRecord, PrinterStatus, PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -60,6 +60,8 @@ import { CompactHistoryRow } from '../components/CompactHistoryRow';
 import { QueueTimelineView } from '../components/QueueTimelineView';
 import { QueueJobLine, QueueOptionIcons } from '../components/queue/QueueJobLine';
 import { QueueSectionHeading } from '../components/queue/QueueSectionHeading';
+import { PlateClearLine } from '../components/queue/PlateClearLine';
+import { needsPlateClear } from '../utils/plateClear';
 import { formatWeight } from '../components/queue/format';
 import { jobProgressFromStatus, pauseReasonKeyFor, resolveQueueTone } from '../components/queue/queueTones';
 import { ToolbarDropdown, ReactSelect, toolbarControlClass, toolbarIconButtonClass } from '../components/ToolbarControls';
@@ -1153,6 +1155,41 @@ export function QueuePage() {
     })),
   });
 
+  // Printers waiting for their plate to be cleared keep their finished job in
+  // the queue (#366). Statuses share the ['printerStatus', id] cache with the
+  // active-print queries above.
+  const requirePlateClear = settings?.require_plate_clear !== false;
+  const plateCandidates = useMemo(
+    () => (requirePlateClear ? (printers ?? []).filter((printer) => printer.is_active !== false) : []),
+    [printers, requirePlateClear],
+  );
+  const plateStatusQueries = useQueries({
+    queries: plateCandidates.map((printer) => ({
+      queryKey: ['printerStatus', printer.id],
+      queryFn: () => api.getPrinterStatus(printer.id),
+      // The websocket keeps this cache fresh; polling is only a fallback.
+      refetchInterval: 30000,
+    })),
+  });
+  const plateClearRows = useMemo(() => {
+    const rows: Array<{ printer: PrinterRecord; status: PrinterStatus; nextJobName?: string }> = [];
+    plateCandidates.forEach((printer, index) => {
+      const status = plateStatusQueries[index]?.data;
+      if (!status || !needsPlateClear(printer, status)) return;
+      if (filterStatus || (filterPrinter && filterPrinter !== printer.id)) return;
+      if (filterLocation && printer.location !== filterLocation) return;
+      const next = (queue ?? [])
+        .filter((item) => item.status === 'pending' && item.printer_id === printer.id)
+        .sort((a, b) => a.position - b.position)[0];
+      rows.push({
+        printer,
+        status,
+        nextJobName: next ? queueItemDisplayName(next, (count) => t('common.plusNMore', { count })) : undefined,
+      });
+    });
+    return rows.sort((a, b) => a.printer.name.localeCompare(b.printer.name));
+  }, [plateCandidates, plateStatusQueries, queue, filterPrinter, filterStatus, filterLocation, t]);
+
   // Build a map of printer_id -> state for quick lookup
   const printerStateMap = useMemo(() => {
     const map: Record<number, string | null> = {};
@@ -1759,7 +1796,7 @@ export function QueuePage() {
 
       {isLoading ? (
         <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
-      ) : queue?.length === 0 ? (
+      ) : queue?.length === 0 && !(activeTab === 'queue' && plateClearRows.length > 0) ? (
         <div className="py-16 text-center">
           <Calendar className="w-14 h-14 text-bambu-gray mx-auto mb-4 opacity-40" />
           <h3 className="text-lg font-medium text-white mb-2">{t('queue.empty.title')}</h3>
@@ -1802,6 +1839,23 @@ export function QueuePage() {
         />
       ) : (
         <div className="space-y-2 sm:space-y-3">
+          {/* Finished jobs stay until the plate is cleared (#366) */}
+          {plateClearRows.length > 0 && (
+            <div className="space-y-2 sm:space-y-3" data-testid="queue-plate-clear">
+              {plateClearRows.map(({ printer, status, nextJobName }) => (
+                <PlateClearLine
+                  key={printer.id}
+                  printer={printer}
+                  status={status}
+                  nextJobName={nextJobName}
+                  canClearPlate={hasPermission('printers:clear_plate')}
+                  timeFormat={timeFormat}
+                  t={t}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Active prints */}
           {activeItems.length > 0 && (
             <div>

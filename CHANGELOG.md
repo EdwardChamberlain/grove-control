@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Queue: a finished or failed job now stays in the Queue tab as a yellow
+  **Clear plate** line, with the hand icon, until its printer's plate is marked
+  cleared (#366). The line has a Mark plate as cleared button, names the next
+  job for that printer, and is hidden when plate-clear confirmation is off.
 - Queue and Kiosk: colour now means a person needs to act, with green for
   printing (#364). Green is printing and heat soak, orange is paused, yellow is
   a plate waiting to be cleared and purple is waiting on something (material not
