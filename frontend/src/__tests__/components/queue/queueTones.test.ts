@@ -23,6 +23,42 @@ describe('resolveQueueTone', () => {
     expect(staged.label).toBe('queue.badges.staged');
   });
 
+  it('keeps a wait that clears by itself neutral, but still labelled Waiting', () => {
+    // e.g. "Waiting for printer reservation on P1S - 2": the job starts when the printer frees up.
+    const automatic = resolveQueueTone(
+      { ...base, status: 'pending', waiting_reason: 'Waiting for printer reservation on P1S - 2', waiting_needs_action: false },
+      null,
+      t,
+    );
+    expect(automatic.tone).toBe(QUEUE_TONES.neutral);
+    expect(automatic.label).toBe('queue.status.waiting');
+  });
+
+  it('uses purple for a wait the backend says needs action, and when the flag is missing', () => {
+    const needsAction = { ...base, status: 'pending' as const, waiting_reason: 'No matching material. Waiting on PETG' };
+    expect(resolveQueueTone({ ...needsAction, waiting_needs_action: true }, null, t).tone).toBe(QUEUE_TONES.waiting);
+    // Stale cached data without the flag keeps the highlight rather than hiding a stuck job.
+    expect(resolveQueueTone(needsAction, null, t).tone).toBe(QUEUE_TONES.waiting);
+  });
+
+  it('still shows a staged job as purple while it also waits on a busy printer', () => {
+    const item = {
+      ...base,
+      status: 'pending' as const,
+      manual_start: true,
+      waiting_reason: 'Waiting for printer reservation on P1S - 2',
+      waiting_needs_action: false,
+    };
+    const result = resolveQueueTone(item, null, t);
+    expect(result.tone).toBe(QUEUE_TONES.waiting);
+    expect(result.label).toBe('queue.badges.staged');
+  });
+
+  it('a filament shortfall stays purple even when the reason is a busy printer', () => {
+    const item = { ...base, status: 'pending' as const, filament_short: true, waiting_reason: 'Waiting for printer reservation on P1S - 2', waiting_needs_action: false };
+    expect(resolveQueueTone(item, null, t).tone).toBe(QUEUE_TONES.waiting);
+  });
+
   it('keeps scheduled, pending and dispatching jobs neutral because they need no user action', () => {
     const scheduled = resolveQueueTone({ ...base, status: 'pending', scheduled_time: future }, null, t);
     expect(scheduled.tone).toBe(QUEUE_TONES.neutral);

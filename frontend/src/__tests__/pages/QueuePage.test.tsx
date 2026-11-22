@@ -691,6 +691,24 @@ describe('QueuePage', () => {
       });
     });
 
+    it('colours a wait purple only when a person needs to act on it', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], id: 91, waiting_reason: 'Waiting for printer reservation on P1S - 2', waiting_needs_action: false },
+          { ...mockQueueItems[0], id: 92, position: 2, waiting_reason: 'No matching material. Waiting on PETG', waiting_needs_action: true },
+        ])),
+      );
+
+      render(<QueuePage />);
+
+      // A busy printer clears by itself: the reason is still shown, in the neutral footer.
+      const busy = (await screen.findByText('Waiting for printer reservation on P1S - 2')).closest('div.border-t') as HTMLElement;
+      expect(busy.className).not.toContain('purple');
+      // Missing material needs someone to load it, so it keeps the purple footer.
+      const material = screen.getByText('No matching material. Waiting on PETG').closest('div.border-t') as HTMLElement;
+      expect(material.className).toContain('purple');
+    });
+
     it('puts the Start button in the footer strip beside the Staged note', async () => {
       server.use(
         http.get('/api/v1/queue/', () => HttpResponse.json([

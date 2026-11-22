@@ -44,6 +44,7 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.notification_service import notification_service
+from backend.app.services.queue_waiting import waiting_reason_needs_action
 from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
@@ -262,6 +263,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "filament_overrides": filament_overrides_parsed,
         "force_color_match": bool(item.force_color_match),
         "waiting_reason": item.waiting_reason,
+        "waiting_needs_action": waiting_reason_needs_action(item.waiting_reason),
         "archive_id": item.archive_id,
         "library_file_id": item.library_file_id,
         "position": item.position,

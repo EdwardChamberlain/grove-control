@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Queue and Kiosk: a job waiting for something that clears by itself is no
+  longer purple (#373). Purple now only marks a wait a person has to act on, such
+  as a missing material or filament. A job waiting for its printer to finish, for
+  an upload slot or for AMS drying stays a neutral Waiting line, with the reason
+  still shown in its footer. The queue API reports this as a new
+  `waiting_needs_action` field on each queue item.
 - Printers and Queue: counts now pluralise properly (#370). A printer's queue
   line reads "3 prints in queue" rather than "3 print in queue", and the Queue
   page reads "3 items" and "Edit 3 Items", and plate objects read "3 objects",

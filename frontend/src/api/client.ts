@@ -2158,6 +2158,9 @@ export interface PrintQueueItem {
   target_location: string | null;  // Target location filter for model-based assignment
   required_filament_types: string[] | null;  // Required filament types for model-based assignment
   waiting_reason: string | null;  // Why a model-based job hasn't started yet
+  // False while the wait clears by itself (printer busy, upload slot, AMS
+  // drying), so the queue only highlights jobs a person has to act on.
+  waiting_needs_action: boolean;
   // Cross-model alternatives (#671), in priority order. Empty for ordinary
   // items. Present until dispatch resolves one, after which library_file_id and
   // target_model name the candidate that actually ran.
