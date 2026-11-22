@@ -1198,6 +1198,13 @@ export default {
       history: 'Cronologia',
     },
     // Status
+    pauseReason: {
+      filamentRanOut: 'Filamento esaurito',
+      byUser: 'In pausa su richiesta dell\'utente',
+      frontCover: 'Copertura frontale rimossa',
+      nozzleTemperature: 'Errore di temperatura dell\'ugello',
+      bedTemperature: 'Errore di temperatura del piano',
+    },
     status: {
       pending: 'In attesa',
       scheduled: 'Pianificata',

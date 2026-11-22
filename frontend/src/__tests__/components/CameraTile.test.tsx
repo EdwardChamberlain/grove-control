@@ -78,6 +78,73 @@ describe('CameraTile', () => {
     expect(container.querySelector('img[src="/img/camera_placeholder_P1S.png"]')).not.toBeNull();
   });
 
+  it('glows orange with an orange progress bar and paused icon when the printer is paused', async () => {
+    render(
+      <CameraTile
+        printerId={3}
+        printerName="Paused-Printer"
+        mode="snapshot"
+        snapshotIntervalMs={5000}
+        connected
+        printerState="PAUSE"
+        progress={40}
+      />,
+    );
+    await flushMicrotasks();
+
+    const bar = screen.getByRole('progressbar');
+    const tile = bar.parentElement as HTMLElement;
+    expect(tile).toHaveAttribute('data-paused', 'true');
+    expect(tile).toHaveClass('border-orange-500/60');
+    expect(bar.firstElementChild).toHaveClass('bg-orange-500');
+    expect(screen.getByRole('img', { name: 'Paused' })).toBeInTheDocument();
+  });
+
+  it('does not show a printer in maintenance mode as paused', async () => {
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="Maintenance-Printer"
+        mode="snapshot"
+        snapshotIntervalMs={5000}
+        connected
+        printerState="PAUSE"
+        isMaintenanceMode
+        progress={40}
+      />,
+    );
+    await flushMicrotasks();
+
+    const bar = screen.getByRole('progressbar');
+    const tile = bar.parentElement as HTMLElement;
+    expect(tile).not.toHaveAttribute('data-paused');
+    expect(tile).not.toHaveClass('border-orange-500/60');
+    expect(bar.firstElementChild).not.toHaveClass('bg-orange-500');
+    expect(screen.queryByRole('img', { name: 'Paused' })).not.toBeInTheDocument();
+  });
+
+  it('has no orange glow or paused icon while the printer is running', async () => {
+    render(
+      <CameraTile
+        printerId={4}
+        printerName="Running-Printer"
+        mode="snapshot"
+        snapshotIntervalMs={5000}
+        connected
+        printerState="RUNNING"
+        progress={40}
+      />,
+    );
+    await flushMicrotasks();
+
+    const bar = screen.getByRole('progressbar');
+    const tile = bar.parentElement as HTMLElement;
+    expect(tile).not.toHaveAttribute('data-paused');
+    expect(tile).not.toHaveClass('border-orange-500/60');
+    expect(bar.firstElementChild).toHaveClass('bg-bambu-green');
+    expect(screen.queryByRole('img', { name: 'Paused' })).not.toBeInTheDocument();
+  });
+
   it('shows the paused placeholder in paused mode', async () => {
     render(
       <CameraTile

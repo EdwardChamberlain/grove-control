@@ -1198,6 +1198,13 @@ export default {
       history: 'Geçmiş',
     },
     // Durum
+    pauseReason: {
+      filamentRanOut: 'Filament bitti',
+      byUser: 'Kullanıcı tarafından duraklatıldı',
+      frontCover: 'Ön kapak çıkarıldı',
+      nozzleTemperature: 'Nozul sıcaklığı hatası',
+      bedTemperature: 'Tabla sıcaklığı hatası',
+    },
     status: {
       pending: 'Beklemede',
       scheduled: 'Planlandı',

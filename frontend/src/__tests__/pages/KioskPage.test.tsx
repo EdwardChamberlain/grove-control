@@ -124,6 +124,37 @@ describe('KioskPage', () => {
     vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => statusFor(String(printerId)) as never);
   });
 
+  it('shows a paused job in orange with a paused label, and a running job in blue', async () => {
+    const pausedStatus = (id: string) => (
+      id === '1' ? { ...statusFor(id), state: 'PAUSE' } : statusFor(id)
+    );
+    server.use(
+      http.get('/api/v1/printers/:id/status', ({ request }) => {
+        const printerId = new URL(request.url).pathname.split('/')[4];
+        return HttpResponse.json(pausedStatus(printerId));
+      }),
+    );
+    vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => pausedStatus(String(printerId)) as never);
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('kiosk-queue-status-10')).toHaveTextContent('Paused');
+    });
+    const pill = screen.getByTestId('kiosk-queue-status-10');
+    expect(pill).toHaveClass('text-orange-400', 'bg-orange-500/10');
+    expect(pill).not.toHaveClass('text-yellow-400');
+  });
+
+  it('keeps a running job in blue', async () => {
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('kiosk-queue-status-10')).toHaveTextContent('Printing');
+    });
+    expect(screen.getByTestId('kiosk-queue-status-10')).toHaveClass('text-blue-400');
+    expect(screen.getByTestId('kiosk-queue-status-10')).not.toHaveClass('text-orange-400');
+  });
+
   it('shows compact fleet status and a vertically ordered read-only queue', async () => {
     render(<KioskPage />);
 

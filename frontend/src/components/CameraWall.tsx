@@ -241,6 +241,7 @@ export function CameraWall({
                 snapshotIntervalMs={snapshotIntervalSec * 1000}
                 connected={statusByPrinter.get(p.id)?.connected ?? false}
                 printerState={statusByPrinter.get(p.id)?.state ?? null}
+                isMaintenanceMode={p.is_active === false}
                 progress={statusByPrinter.get(p.id)?.progress ?? null}
                 etaLabel={etaLabel}
                 showClearPlate={needsPlateClear}

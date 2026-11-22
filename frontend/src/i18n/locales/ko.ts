@@ -1141,6 +1141,13 @@ export default {
       queued: '대기 중',
       history: '기록'
     },
+    pauseReason: {
+      filamentRanOut: '필라멘트 소진',
+      byUser: '사용자가 일시정지함',
+      frontCover: '전면 커버 분리됨',
+      nozzleTemperature: '노즐 온도 오류',
+      bedTemperature: '베드 온도 오류',
+    },
     status: {
       pending: '대기 중',
       scheduled: '예약됨',

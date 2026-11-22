@@ -1197,6 +1197,13 @@ export default {
       history: '履歴',
     },
     // Status
+    pauseReason: {
+      filamentRanOut: 'フィラメント切れ',
+      byUser: 'ユーザーにより一時停止',
+      frontCover: 'フロントカバーが外れています',
+      nozzleTemperature: 'ノズル温度異常',
+      bedTemperature: 'ベッド温度異常',
+    },
     status: {
       pending: '待機中',
       scheduled: '予定済み',

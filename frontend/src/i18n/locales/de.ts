@@ -1198,6 +1198,13 @@ export default {
       history: 'Verlauf',
     },
     // Status
+    pauseReason: {
+      filamentRanOut: 'Filament aufgebraucht',
+      byUser: 'Vom Benutzer pausiert',
+      frontCover: 'Frontabdeckung entfernt',
+      nozzleTemperature: 'Düsentemperaturfehler',
+      bedTemperature: 'Heizbetttemperaturfehler',
+    },
     status: {
       pending: 'Ausstehend',
       scheduled: 'Geplant',

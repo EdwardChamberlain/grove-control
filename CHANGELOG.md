@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Printers: paused prints are now orange across the Printers page, camera wall, kiosk and bulk toolbar. A paused printer shows a pause icon beside its name, its progress bar turns orange, its card and camera tile get an orange border and glow, and its row gets an orange background in the list view (#335).
+- Queue: paused prints are now orange instead of sharing the yellow used for scheduled jobs, and the job card footer shows why the print paused (filament ran out, paused by user, front cover removed, nozzle or bed temperature fault) when the printer reports it (#335).
 - Stats: each print now records the filament it actually used. A job sliced for
   black PLA but overridden to blue PLA shows as blue, and a spool tracked in
   inventory takes precedence over both the slice and the override. Only the

@@ -500,7 +500,7 @@ function StatusSummaryBar({ printers }: { printers: Printer[] | undefined }) {
 
   const badges: { count: number; dot: string; label: string }[] = [
     { count: counts.printing, dot: 'bg-bambu-green animate-pulse', label: t('printers.status.printing').toLowerCase() },
-    { count: counts.paused, dot: 'bg-status-warning', label: t('printers.status.paused', 'paused').toLowerCase() },
+    { count: counts.paused, dot: 'bg-orange-500', label: t('printers.status.paused', 'paused').toLowerCase() },
     { count: counts.finished, dot: 'bg-blue-400', label: t('printers.status.finished', 'finished').toLowerCase() },
     { count: counts.idle, dot: counts.idle > 0 ? 'bg-bambu-green' : 'bg-gray-500', label: t('printers.status.available').toLowerCase() },
     { count: counts.error, dot: 'bg-status-error', label: t('printers.status.problem').toLowerCase() },
@@ -666,7 +666,7 @@ const STATUS_GROUP_ORDER: string[] = ['error', 'printing', 'paused', 'finished',
 const STATUS_GROUP_META: Record<string, { labelKey: string; dot: string }> = {
   error:    { labelKey: 'printers.status.problem',   dot: 'bg-status-error' },
   printing: { labelKey: 'printers.status.printing',  dot: 'bg-bambu-green animate-pulse' },
-  paused:   { labelKey: 'printers.status.paused',    dot: 'bg-status-warning' },
+  paused:   { labelKey: 'printers.status.paused',    dot: 'bg-orange-500' },
   finished: { labelKey: 'printers.status.finished',  dot: 'bg-blue-400' },
   idle:     { labelKey: 'printers.status.idle',       dot: 'bg-bambu-green' },
   offline:  { labelKey: 'printers.status.offline',   dot: 'bg-gray-400' },
@@ -690,6 +690,17 @@ function classifyPrinterStatus(
     case 'FAILED':  return 'finished';
     default:        return 'idle';
   }
+}
+
+/** Small orange pause glyph that marks a paused printer next to its name. */
+function PausedIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
+  const { t } = useTranslation();
+  const label = t('printers.status.paused', 'Paused');
+  return (
+    <span role="img" aria-label={label} title={label} className="inline-flex shrink-0 text-orange-400">
+      <Pause className={`${className} fill-current`} aria-hidden="true" />
+    </span>
+  );
 }
 
 /**
@@ -812,6 +823,7 @@ function PrinterListRow({
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isMaintenanceMode = printer.is_active === false;
   const isPrintingOrPaused = !isMaintenanceMode && (status?.state === 'RUNNING' || status?.state === 'PAUSE');
+  const isPaused = !isMaintenanceMode && status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
   const needsPlateClear = !!requirePlateClear && !isMaintenanceMode && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected === true && needsPlateClear;
@@ -895,11 +907,12 @@ function PrinterListRow({
 
   return (
     <div
+      data-testid={`printer-list-row-${printer.id}`}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest('button')) return;
         activateRow();
       }}
-      className={`relative border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
+      className={`relative border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 ${isSelected ? 'bg-bambu-green/10' : isPaused ? 'bg-orange-500/10 hover:bg-orange-500/15' : 'hover:bg-bambu-dark'}`}
     >
       <button
         type="button"
@@ -927,7 +940,10 @@ function PrinterListRow({
         )}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium text-white">{printer.name}</div>
+            <div className="flex min-w-0 items-center gap-1.5 font-medium text-white">
+              {isPaused && <PausedIcon />}
+              <span className="truncate">{printer.name}</span>
+            </div>
             <div className="truncate text-xs text-bambu-gray">{printer.model || jobStatusLabel}</div>
           </div>
           {renderClearPlateButton()}
@@ -976,7 +992,10 @@ function PrinterListRow({
             className="h-10 w-10 shrink-0 rounded-lg object-contain"
           />
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium text-white">{printer.name}</div>
+            <div className="flex min-w-0 items-center gap-1.5 font-medium text-white">
+              {isPaused && <PausedIcon />}
+              <span className="truncate">{printer.name}</span>
+            </div>
             <div className="truncate text-xs text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
           </div>
           {renderClearPlateButton()}
@@ -1005,7 +1024,7 @@ function PrinterListRow({
           {showPrintProgress && (
             <div className="mt-1 flex items-center gap-2">
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-                <div className="h-full rounded-full bg-bambu-green transition-all" style={{ width: `${progress}%` }} />
+                <div data-testid={`printer-list-progress-${printer.id}`} className={`h-full rounded-full transition-all ${isPaused ? 'bg-orange-500' : 'bg-bambu-green'}`} style={{ width: `${progress}%` }} />
               </div>
               <span className="w-9 shrink-0 text-right text-xs tabular-nums text-bambu-gray">{`${Math.round(progress)}%`}</span>
             </div>
@@ -1093,7 +1112,10 @@ function SinglePrinterSwitcherItem({
         className="h-10 w-10 shrink-0 rounded-lg bg-bambu-dark-secondary object-contain"
       />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-semibold text-white">{printer.name}</div>
+        <div className="flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-white">
+          {printer.is_active !== false && status?.state === 'PAUSE' && <PausedIcon className="h-3 w-3" />}
+          <span className="truncate">{printer.name}</span>
+        </div>
         <div className="mt-0.5 truncate text-[11px] text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
       </div>
       <span
@@ -2600,7 +2622,10 @@ function SinglePrinterCockpit({
             <div className="relative flex h-full min-h-0 flex-col gap-3 p-4">
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
-                  <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">{printer.name}</h2>
+                  <h2 className="flex min-w-0 flex-1 items-center gap-2 text-3xl font-semibold leading-none text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
+                    {isPaused && !isMaintenanceMode && <PausedIcon className="h-6 w-6 drop-shadow-[0_2px_5px_rgba(0,0,0,0.9)]" />}
+                    <span className="truncate">{printer.name}</span>
+                  </h2>
                   {printerActionsMenu}
                   <div className="relative flex shrink-0 flex-col items-end">
                     <PrinterHealthMenu
@@ -2669,7 +2694,7 @@ function SinglePrinterCockpit({
                   </span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-black/60 shadow-[0_1px_8px_rgba(0,0,0,0.45)] ring-1 ring-white/15">
-                  <div className="h-full rounded-full bg-gradient-to-r from-bambu-green to-emerald-300 transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+                  <div data-testid="cockpit-progress-bar" className={`h-full rounded-full bg-gradient-to-r transition-all ${isPaused && !isMaintenanceMode ? 'from-orange-500 to-orange-300' : 'from-bambu-green to-emerald-300'}`} style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
                 </div>
               </div>
             </div>
@@ -3320,6 +3345,9 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  // A printer in maintenance mode is out of service and shows no print status, so
+  // its (stale) PAUSE state must not light up the card.
+  const isPrinterPaused = printer.is_active !== false && status?.state === 'PAUSE';
   const hasQueuedWork = isPrintingOrPaused || !!(queueWork?.[printer.id] ?? status?.has_queued_work);
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
@@ -4132,7 +4160,7 @@ function PrinterCard({
   return (
     <Card
       id={`printer-card-${printer.id}`}
-      className={`relative flex h-full min-w-0 flex-col ${isSelected ? 'ring-2 ring-bambu-green' : ''}`}
+      className={`relative flex h-full min-w-0 flex-col ${isSelected ? 'ring-2 ring-bambu-green' : ''} ${isPrinterPaused ? '!border-orange-500/60 !shadow-[0_0_18px_2px_rgba(249,115,22,0.45)]' : ''}`}
       onDragEnter={handleCardDragEnter}
       onDragOver={handleCardDragOver}
       onDragLeave={handleCardDragLeave}
@@ -4465,7 +4493,8 @@ function PrinterCard({
                         />
                         <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1">
                           <div className="flex min-h-[18px] items-center gap-2 pr-8">
-                            <p className="min-w-0 truncate text-sm text-bambu-gray">{status.preheating ? t('heatSoak.status') : getStatusDisplay(status.state, status.stg_cur_name)}</p>
+                            {status.state === 'PAUSE' && <PausedIcon />}
+                            <p className={`min-w-0 truncate text-sm ${status.state === 'PAUSE' ? 'font-medium text-orange-400' : 'text-bambu-gray'}`}>{status.preheating ? t('heatSoak.status') : getStatusDisplay(status.state, status.stg_cur_name)}</p>
                           </div>
                           <p className={`min-h-[18px] truncate pr-8 text-sm ${printName ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}
@@ -4474,7 +4503,8 @@ function PrinterCard({
                             <div className="flex h-3 items-center gap-2 text-sm">
                               <div className="h-1.5 min-w-0 flex-1 rounded-full bg-bambu-dark-tertiary">
                                 <div
-                                  className={`${status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green'} h-1.5 rounded-full transition-all`}
+                                  data-testid="printer-card-progress"
+                                  className={`${status.state === 'PAUSE' ? 'bg-orange-500' : 'bg-bambu-green'} h-1.5 rounded-full transition-all`}
                                   style={{ width: `${progress}%` }}
                                 />
                               </div>

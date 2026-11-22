@@ -610,6 +610,50 @@ describe('PrintersPage', () => {
       expect(screen.queryByText(/1h 30m/)).not.toBeInTheDocument();
     });
 
+    it('shows a paused job in list view with an orange row, orange bar and a paused icon', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'PAUSE',
+          current_print: 'paused-widget.3mf',
+          progress: 42,
+          remaining_time: 90,
+        })),
+      );
+
+      render(<PrintersPage />);
+
+      await screen.findByText('X1 Carbon');
+      fireEvent.click(screen.getByRole('button', { name: 'List' }));
+      const row = await screen.findByTestId('printer-list-row-1');
+      await waitFor(() => expect(row).toHaveClass('bg-orange-500/10'));
+      expect(within(row).getByTestId('printer-list-progress-1')).toHaveClass('bg-orange-500');
+      expect(within(row).getAllByRole('img', { name: 'Paused' }).length).toBeGreaterThan(0);
+    });
+
+    it('keeps a running job in list view green with no orange row or paused icon', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'running-widget.3mf',
+          progress: 42,
+          remaining_time: 90,
+        })),
+      );
+
+      render(<PrintersPage />);
+
+      await screen.findByText('X1 Carbon');
+      fireEvent.click(screen.getByRole('button', { name: 'List' }));
+      const row = await screen.findByTestId('printer-list-row-1');
+      const bar = await within(row).findByTestId('printer-list-progress-1');
+      expect(row).not.toHaveClass('bg-orange-500/10');
+      expect(bar).toHaveClass('bg-bambu-green');
+      expect(bar).not.toHaveClass('bg-orange-500');
+      expect(within(row).queryByRole('img', { name: 'Paused' })).not.toBeInTheDocument();
+    });
+
     it('shows an icon-only plate-clear action in the list printer-name field when needed', async () => {
       let awaitingPlateClear = true;
       server.use(

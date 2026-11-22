@@ -1198,6 +1198,13 @@ export default {
       history: '歷史',
     },
     // Status
+    pauseReason: {
+      filamentRanOut: '耗材用完',
+      byUser: '使用者已暫停',
+      frontCover: '前蓋已脫落',
+      nozzleTemperature: '噴嘴溫度異常',
+      bedTemperature: '熱床溫度異常',
+    },
     status: {
       pending: '等待中',
       scheduled: '已排程',
