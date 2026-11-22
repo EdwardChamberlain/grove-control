@@ -6,7 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
@@ -110,37 +110,39 @@ afterEach(() => {
 
 const paths = () => calls.map((c) => `${c.method} ${c.path}`);
 
-describe('change-based task cards', () => {
-  async function openPrinter(user: ReturnType<typeof userEvent.setup>) {
+describe('change-based task rows', () => {
+  async function openStatus() {
     render(<MaintenancePage />);
-    await screen.findByText('1 overdue');
-    await user.click(screen.getAllByRole('button', { name: /Expand/ })[0]);
+    await screen.findByRole('heading', { name: 'All machines' });
   }
+  const row = (name: string) => screen.getByRole('group', { name: new RegExp(`^${name}`) });
 
-  it('describes each task by the changes left, due soon or overdue', async () => {
-    const user = userEvent.setup();
-    await openPrinter(user);
+  it('counts down the changes left, due soon or overdue', async () => {
+    await openStatus();
 
-    expect(screen.getByText('Overdue by 3 changes')).toBeInTheDocument();
-    expect(screen.getByText('Due in 2 changes')).toBeInTheDocument();
-    expect(screen.getByText('Due in 1 change')).toBeInTheDocument();
-    expect(screen.getByText('13 changes left')).toBeInTheDocument();
+    expect(within(row('Replace Cutter Blade')).getByText('3 changes')).toBeInTheDocument();
+    expect(within(row('Replace Cutter Blade')).getByText('overdue')).toBeInTheDocument();
+    expect(within(row('Replace Cutter Blade')).getByText('23 changes / 20 changes')).toBeInTheDocument();
+    expect(within(row('Clean AMS Path')).getByText('2 changes')).toBeInTheDocument();
+    // A single change reads naturally rather than "1 changes".
+    expect(within(row('Check PTFE Tubes')).getByText('1 change')).toBeInTheDocument();
+    expect(within(row('Oil Cutter Pivot')).getByText('13 changes')).toBeInTheDocument();
+    expect(within(row('Oil Cutter Pivot')).getByText('left')).toBeInTheDocument();
   });
 
   it('does not overflow the progress bar for an overdue task', async () => {
-    const user = userEvent.setup();
-    await openPrinter(user);
+    await openStatus();
 
-    const overdue = screen.getByText('Replace Cutter Blade', { selector: 'h3' }).closest('.rounded-xl') as HTMLElement;
-    const bar = overdue.querySelector('[style*="width"]') as HTMLElement;
-    expect(bar.style.width).toBe('100%');
+    const bar = within(row('Replace Cutter Blade')).getByRole('progressbar');
+    expect(bar).toHaveAttribute('aria-valuenow', '100');
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe('100%');
   });
 });
 
 describe('change-based settings', () => {
   async function openSettings(user: ReturnType<typeof userEvent.setup>) {
     render(<MaintenancePage />);
-    await screen.findByText('1 overdue');
+    await screen.findByRole('heading', { name: 'All machines' });
     await user.click(screen.getByRole('button', { name: /^Settings$/ }));
     await screen.findByText('Maintenance Types');
   }
@@ -184,9 +186,8 @@ describe('maintenance log', () => {
 
     await user.click(await screen.findByText('Log'));
 
-    expect(await screen.findByText('Replace Cutter Blade', { selector: 'h3' })).toBeInTheDocument();
-    expect(screen.getByText('100.0h')).toBeInTheDocument();
-    expect(screen.getByText('24 changes')).toBeInTheDocument();
+    expect(await screen.findByText('Replace Cutter Blade')).toBeInTheDocument();
+    expect(screen.getByText('100.0h · 24 changes')).toBeInTheDocument();
   });
 
   it('shows both counts when an entry recorded both', async () => {
@@ -200,8 +201,7 @@ describe('maintenance log', () => {
 
     await user.click(await screen.findByText('Log'));
 
-    expect(await screen.findByText('12 jobs')).toBeInTheDocument();
-    expect(screen.getByText('24 changes')).toBeInTheDocument();
+    expect(await screen.findByText('100.0h · 12 jobs · 24 changes')).toBeInTheDocument();
   });
 
   it('omits the change count for entries that predate change tracking', async () => {
