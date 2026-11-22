@@ -15,6 +15,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { type TimeFormat } from '../utils/date';
 import { formatPrintName } from '../utils/printName';
+import { needsPlateClear } from '../utils/plateClear';
 import { queueItemDisplayName } from '../utils/queueItemName';
 
 type Translate = TFunction;
@@ -24,10 +25,6 @@ const MAX_FOOTER_PRINTERS = 6;
 
 function isActivePrint(status: PrinterStatus | undefined): boolean {
   return status?.preheating === true || status?.state === 'RUNNING' || status?.state === 'PAUSE';
-}
-
-function needsPlateClear(printer: PrinterRecord, status: PrinterStatus | undefined): boolean {
-  return printer.is_active !== false && status?.awaiting_plate_clear === true && !isActivePrint(status);
 }
 
 /** Connected, in service and with nothing to do. */

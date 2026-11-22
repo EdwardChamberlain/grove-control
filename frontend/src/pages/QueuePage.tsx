@@ -1167,7 +1167,8 @@ export function QueuePage() {
     queries: plateCandidates.map((printer) => ({
       queryKey: ['printerStatus', printer.id],
       queryFn: () => api.getPrinterStatus(printer.id),
-      refetchInterval: 5000,
+      // The websocket keeps this cache fresh; polling is only a fallback.
+      refetchInterval: 30000,
     })),
   });
   const plateClearRows = useMemo(() => {
@@ -1176,6 +1177,7 @@ export function QueuePage() {
       const status = plateStatusQueries[index]?.data;
       if (!status || !needsPlateClear(printer, status)) return;
       if (filterStatus || (filterPrinter && filterPrinter !== printer.id)) return;
+      if (filterLocation && printer.location !== filterLocation) return;
       const next = (queue ?? [])
         .filter((item) => item.status === 'pending' && item.printer_id === printer.id)
         .sort((a, b) => a.position - b.position)[0];
@@ -1186,7 +1188,7 @@ export function QueuePage() {
       });
     });
     return rows.sort((a, b) => a.printer.name.localeCompare(b.printer.name));
-  }, [plateCandidates, plateStatusQueries, queue, filterPrinter, filterStatus, t]);
+  }, [plateCandidates, plateStatusQueries, queue, filterPrinter, filterStatus, filterLocation, t]);
 
   // Build a map of printer_id -> state for quick lookup
   const printerStateMap = useMemo(() => {
@@ -1794,7 +1796,7 @@ export function QueuePage() {
 
       {isLoading ? (
         <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
-      ) : queue?.length === 0 && plateClearRows.length === 0 ? (
+      ) : queue?.length === 0 && !(activeTab === 'queue' && plateClearRows.length > 0) ? (
         <div className="py-16 text-center">
           <Calendar className="w-14 h-14 text-bambu-gray mx-auto mb-4 opacity-40" />
           <h3 className="text-lg font-medium text-white mb-2">{t('queue.empty.title')}</h3>
