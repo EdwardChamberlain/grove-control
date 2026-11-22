@@ -1649,13 +1649,16 @@ export default {
 
   kiosk: {
     noPrinters: 'Aucune imprimante configurée',
-    noPrinting: 'Aucun travail en cours d’impression',
-    noQueue: 'Aucun travail en file d’attente',
     noJob: 'Aucun travail actif',
     unknownOwner: 'Propriétaire indisponible',
-    plateClearRequired: 'Nettoyage du plateau requis',
     morePrinters: '+{{count}} imprimantes',
     moreJobs: '+{{count}} travaux',
+    clearPlate: 'Vider le plateau',
+    clearPlateHint: 'Retirez l’impression et videz le plateau.',
+    nextJob: 'Suivant : {{name}}',
+    noJobs: 'Aucun travail à afficher',
+    idlePrinters: 'Imprimantes libres',
+    ready: 'Prête',
   },
 
   // Settings page

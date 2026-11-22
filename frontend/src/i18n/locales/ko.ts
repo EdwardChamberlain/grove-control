@@ -1568,13 +1568,16 @@ export default {
   },
   kiosk: {
     noPrinters: '구성된 프린터가 없습니다',
-    noPrinting: '현재 인쇄 중인 작업이 없습니다',
-    noQueue: '대기 중인 작업이 없습니다',
     noJob: '활성 작업이 없습니다',
     unknownOwner: '작업자를 확인할 수 없습니다',
-    plateClearRequired: '플레이트 정리가 필요합니다',
     morePrinters: '프린터 +{{count}}대',
     moreJobs: '작업 +{{count}}개',
+    clearPlate: '플레이트 비우기',
+    clearPlateHint: '출력물을 제거하고 플레이트를 비워 주세요.',
+    nextJob: '다음: {{name}}',
+    noJobs: '표시할 작업이 없습니다',
+    idlePrinters: '대기 중인 프린터',
+    ready: '준비됨',
   },
 
   settings: {

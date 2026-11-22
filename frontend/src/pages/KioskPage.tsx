@@ -1,52 +1,37 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { AlertCircle, Calendar, Clock, Layers, ListOrdered, Pause, Play, Printer, User } from 'lucide-react';
+import { Hand } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { api, type Printer as PrinterRecord, type PrinterStatus, type PrintQueueItem } from '../api/client';
+import { api, type Printer as PrinterRecord, type PrinterStatus } from '../api/client';
+import { QueueJobLine, type QueueJobLineItem, type QueueJobLineStatus } from '../components/queue/QueueJobLine';
+import {
+  QUEUE_TONES,
+  jobProgressFromStatus,
+  pauseReasonKeyFor,
+  type QueueJobProgress,
+} from '../components/queue/queueTones';
 import { useTheme } from '../contexts/ThemeContext';
-import { type TimeFormat, formatDate, formatDuration, formatETA, parseUTCDate } from '../utils/date';
+import { type TimeFormat } from '../utils/date';
 import { formatPrintName } from '../utils/printName';
+import { queueItemDisplayName } from '../utils/queueItemName';
 
 type Translate = TFunction;
 
-type KioskQueueItem = Pick<
-  PrintQueueItem,
-  | 'id'
-  | 'printer_id'
-  | 'archive_id'
-  | 'library_file_id'
-  | 'archive_name'
-  | 'archive_thumbnail'
-  | 'library_file_name'
-  | 'library_file_thumbnail'
-  | 'printer_name'
-  | 'created_by_username'
-  | 'print_time_seconds'
-  | 'status'
-  | 'scheduled_time'
-  | 'waiting_reason'
->;
+/** Idle printers named in the footer before the rest collapse into a "+N" cell. */
+const MAX_FOOTER_PRINTERS = 6;
 
 function isActivePrint(status: PrinterStatus | undefined): boolean {
   return status?.preheating === true || status?.state === 'RUNNING' || status?.state === 'PAUSE';
 }
 
-function getPrinterStateLabel(printer: PrinterRecord, status: PrinterStatus | undefined, t: Translate): string {
-  if (!status) return t('common.loading');
-  if (printer.is_active === false) return t('printers.maintenance.modeLabel', 'Maintenance Mode');
-  if (!status.connected) return t('printers.connection.offline');
-  if (status.preheating) return t('heatSoak.status');
-  if (status.awaiting_plate_clear && !isActivePrint(status)) return t('kiosk.plateClearRequired');
+function needsPlateClear(printer: PrinterRecord, status: PrinterStatus | undefined): boolean {
+  return printer.is_active !== false && status?.awaiting_plate_clear === true && !isActivePrint(status);
+}
 
-  switch (status.state) {
-    case 'RUNNING': return t('queue.status.printing');
-    case 'PAUSE': return t('queue.status.paused');
-    case 'FINISH': return t('queue.status.completed');
-    case 'FAILED': return t('queue.status.failed');
-    case 'IDLE': return t('printers.status.idle', 'Idle');
-    default: return status.state ? status.state.charAt(0) + status.state.slice(1).toLowerCase() : t('printers.status.idle', 'Idle');
-  }
+/** Connected, in service and with nothing to do. */
+function isIdle(printer: PrinterRecord, status: PrinterStatus | undefined): boolean {
+  return printer.is_active !== false && status?.connected === true && !isActivePrint(status) && !status.awaiting_plate_clear;
 }
 
 function getActiveJobName(status: PrinterStatus | undefined, t: Translate): string {
@@ -78,260 +63,71 @@ function useOverflowing(dependencies: unknown[]) {
     const observer = new ResizeObserver(checkOverflow);
     observer.observe(element);
     return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, dependencies);
 
   return { ref, hiddenItemCount };
 }
 
-function KioskPrinterTile({
-  printer,
-  status,
-  owner,
-  timeFormat,
-  t,
-  className,
-  style,
-}: {
-  printer: PrinterRecord;
-  status: PrinterStatus | undefined;
-  owner: string | undefined;
-  timeFormat: TimeFormat;
-  t: Translate;
-  className?: string;
-  style?: CSSProperties;
-}) {
-  const isMaintenanceMode = printer.is_active === false;
-  const active = !isMaintenanceMode && isActivePrint(status);
-  const preheating = status?.preheating === true;
-  const plateClearRequired = !isMaintenanceMode && status?.awaiting_plate_clear === true && !active;
-  const progress = plateClearRequired ? 100 : Math.max(0, Math.min(100, active && !preheating ? status?.progress ?? 0 : 0));
-  const jobName = !preheating && (active || plateClearRequired)
-    ? getActiveJobName(status, t)
-    : t('kiosk.noJob');
-  const eta = active && status?.remaining_time != null && status.remaining_time > 0
-    ? formatETA(status.remaining_time, timeFormat, t)
-    : null;
-
-  return (
-    <article data-testid={`kiosk-printer-${printer.id}`} className={`h-full min-w-0 border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 ${plateClearRequired ? 'border-yellow-400/60 kiosk-plate-clear-alert' : ''} ${className || ''}`} style={style}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold text-white">{printer.name}</h2>
-          <p className="truncate text-xs text-bambu-gray">{printer.model || t('common.unknown')}</p>
-        </div>
-        <span className={`shrink-0 text-[11px] font-medium ${isMaintenanceMode ? 'text-blue-400' : plateClearRequired ? 'text-yellow-300' : status?.connected ? 'text-bambu-gray' : 'text-status-error'}`}>
-          {getPrinterStateLabel(printer, status, t)}
-        </span>
-      </div>
-
-      <div className="mt-3 min-w-0">
-        <p className="truncate text-sm text-white" title={jobName}>{jobName}</p>
-        {owner && (
-          <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-bambu-gray" title={t('queue.addedBy', { name: owner })}>
-            <User className="h-3 w-3 shrink-0" />
-            {owner}
-          </p>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
-        <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-          <div
-            className={`h-full rounded-full transition-[width] duration-500 ${plateClearRequired ? 'bg-yellow-400' : 'bg-bambu-green'}`}
-            data-testid={`kiosk-progress-${printer.id}`}
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <span className="w-9 shrink-0 text-right text-xs font-medium tabular-nums text-white">{Math.round(progress)}%</span>
-      </div>
-
-      <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-bambu-gray">
-        <span>{active && status?.remaining_time != null && status.remaining_time > 0 ? formatDuration(status.remaining_time * 60) : plateClearRequired ? t('kiosk.plateClearRequired') : '—'}</span>
-        {eta && <span className="shrink-0 text-bambu-green">{t('printers.eta', 'ETA')} {eta}</span>}
-      </div>
-    </article>
-  );
+/** A job line for a printer's current print, which may have no queue row behind it. */
+function kioskLineItem(overrides: Partial<QueueJobLineItem> & Pick<QueueJobLineItem, 'printer_id'>): QueueJobLineItem {
+  return {
+    status: 'printing',
+    printer_name: null,
+    target_model: null,
+    target_location: null,
+    required_filament_types: null,
+    archive_id: null,
+    library_file_id: null,
+    archive_thumbnail: null,
+    library_file_thumbnail: null,
+    plate_id: null,
+    bed_type: null,
+    created_by_username: null,
+    scheduled_time: null,
+    manual_start: false,
+    waiting_reason: null,
+    print_time_seconds: null,
+    filament_used_grams: null,
+    require_previous_success: false,
+    auto_off_after: false,
+    gcode_injection: false,
+    filament_short: false,
+    error_message: null,
+    preheat_started_at: null,
+    ...overrides,
+  };
 }
 
-function KioskQueueCard({
-  item,
-  status,
-  timeFormat,
-  t,
-}: {
-  item: KioskQueueItem;
-  status: PrinterStatus | undefined;
-  timeFormat: TimeFormat;
-  t: Translate;
-}) {
-  const printing = item.status === 'printing' || item.status === 'preheating';
-  const active = item.status === 'printing' && isActivePrint(status);
-  const progress = active ? Math.max(0, Math.min(100, status?.progress ?? 0)) : 0;
-  const title = item.archive_name || item.library_file_name || `${t('common.print')} #${item.id}`;
-  const thumbnail = item.archive_thumbnail && item.archive_id
-    ? api.getArchiveThumbnail(item.archive_id)
-    : item.library_file_thumbnail && item.library_file_id
-      ? api.getLibraryFileThumbnailUrl(item.library_file_id)
-      : null;
-
-  return (
-    <article className={`border border-bambu-dark-tertiary border-l-[3px] bg-bambu-dark-secondary p-3 pr-5 ${printing ? 'border-l-blue-500' : 'border-l-yellow-500'}`}>
-      <div className="flex min-w-0 gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md bg-bambu-dark text-bambu-gray">
-          {thumbnail ? <img src={thumbnail} alt="" className="h-full w-full object-cover" /> : <Layers className="h-5 w-5" />}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-white" title={title}>{title}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-bambu-gray">
-            <span className="flex min-w-0 items-center gap-1"><Printer className="h-3 w-3 shrink-0" />{item.printer_name || (item.printer_id ? `${t('common.printer')} #${item.printer_id}` : t('queue.filter.unassigned'))}</span>
-            {item.created_by_username && <span className="flex items-center gap-1"><User className="h-3 w-3" />{item.created_by_username}</span>}
-            {item.print_time_seconds && <span>{formatDuration(item.print_time_seconds)}</span>}
-          </div>
-        </div>
-        <KioskQueueStatusPill item={item} status={status} t={t} />
-      </div>
-
-      {printing && (
-        <div className="mt-3">
-          <div className="flex items-center gap-3">
-            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-              <div className="h-full rounded-full bg-bambu-green transition-[width] duration-500" style={{ width: `${progress}%` }} />
-            </div>
-            <span className="text-xs font-medium tabular-nums text-white">{Math.round(progress)}%</span>
-          </div>
-          {active && status?.remaining_time != null && status.remaining_time > 0 && (
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-bambu-gray">
-              <Clock className="h-3 w-3" />
-              <span>{formatDuration(status.remaining_time * 60)}</span>
-              <span className="text-bambu-green">{t('printers.eta', 'ETA')} {formatETA(status.remaining_time, timeFormat, t)}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-    </article>
-  );
+interface KioskRow {
+  key: string;
+  item: QueueJobLineItem;
+  displayName: string;
+  printerState?: string | null;
+  progress?: QueueJobProgress | null;
+  pauseReasonKey?: string;
+  status?: QueueJobLineStatus;
+  alert?: boolean;
+  extraFooter?: ReactNode;
 }
 
-/** Compact kiosk equivalent of the main Queue page's status badge. */
-function KioskQueueStatusPill({
-  item,
-  status,
-  t,
-}: {
-  item: KioskQueueItem;
-  status: PrinterStatus | undefined;
-  t: Translate;
-}) {
-  const scheduled = item.status === 'pending' && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
-  const className = 'flex max-w-[48%] shrink-0 items-center gap-1 self-center truncate rounded-full border px-2 py-1 text-right text-xs';
+const STAT_TONES = {
+  plate: 'border-t-yellow-500 text-yellow-700 dark:text-yellow-300',
+  printing: 'border-t-bambu-green text-green-700 dark:text-green-400',
+  paused: 'border-t-orange-500 text-orange-700 dark:text-orange-300',
+  queued: 'border-t-purple-400 text-purple-700 dark:text-purple-300',
+  idle: 'border-t-bambu-gray-dark text-bambu-gray-light',
+} as const;
 
-  if (scheduled) {
-    return (
-      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-yellow-500/20 bg-yellow-500/10 text-yellow-300`} title={formatDate(item.scheduled_time)}>
-        <Calendar className="h-3 w-3 shrink-0" />
-        <span className="truncate">{t('queue.status.scheduled')} · {formatDate(item.scheduled_time)}</span>
-      </p>
-    );
-  }
-
-  if (item.status === 'pending' && item.waiting_reason) {
-    return (
-      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-purple-400/30 bg-purple-400/10 text-purple-400`} title={item.waiting_reason}>
-        <AlertCircle className="h-3 w-3 shrink-0" />
-        <span className="truncate">{t('queue.status.waiting')} · {item.waiting_reason}</span>
-      </p>
-    );
-  }
-
-  if (item.status === 'printing' || item.status === 'preheating') {
-    if (item.status === 'preheating') {
-      return (
-        <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-amber-400/20 bg-amber-400/10 text-amber-300`}>
-          <Clock className="h-3 w-3 shrink-0 animate-pulse" />
-          <span className="truncate">{t('heatSoak.status')}</span>
-        </p>
-      );
-    }
-    const paused = status?.state === 'PAUSE';
-    return (
-      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} ${paused ? 'border-orange-400/25 bg-orange-500/10 text-orange-400' : 'border-blue-400/20 bg-blue-400/10 text-blue-400'}`}>
-        {paused ? <Pause className="h-3 w-3 shrink-0" /> : <Play className="h-3 w-3 shrink-0" />}
-        <span className="truncate">{paused ? t('queue.status.paused') : t('queue.status.printing')}</span>
-      </p>
-    );
-  }
-
-  if (item.status === 'dispatching') {
-    return (
-      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-purple-500/20 bg-purple-500/10 text-purple-300`}>
-        <Clock className="h-3 w-3 shrink-0 animate-pulse" />
-        <span className="truncate">{t('queue.status.dispatching')}</span>
-      </p>
-    );
-  }
-
+function KioskStat({ id, tone, count, label }: { id: string; tone: keyof typeof STAT_TONES; count: number; label: string }) {
   return (
-    <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-status-warning/20 bg-status-warning/10 text-status-warning`}>
-      <Clock className="h-3 w-3 shrink-0" />
-      <span className="truncate">{t('queue.status.pending')}</span>
-    </p>
-  );
-}
-
-function KioskQueueSection({
-  title,
-  items,
-  statuses,
-  timeFormat,
-  t,
-  className,
-  testId,
-  fillAvailableHeight = false,
-  listClassName,
-}: {
-  title: string;
-  items: KioskQueueItem[];
-  statuses: Map<number, PrinterStatus | undefined>;
-  timeFormat: TimeFormat;
-  t: Translate;
-  className?: string;
-  testId: string;
-  fillAvailableHeight?: boolean;
-  listClassName?: string;
-}) {
-  const { ref, hiddenItemCount } = useOverflowing([items, statuses]);
-
-  return (
-    <section data-testid={testId} className={`${fillAvailableHeight ? 'flex min-h-0 flex-col' : ''} ${className || ''}`} aria-label={title}>
-      <div className="mb-2 flex shrink-0 items-center gap-2">
-        <ListOrdered className="h-4 w-4 text-bambu-green" />
-        <h2 className="text-base font-semibold text-white">{title}</h2>
-        <span className="text-xs text-bambu-gray">({items.length})</span>
-      </div>
-      {items.length === 0 ? (
-        <p className="border border-dashed border-bambu-dark-tertiary px-3 py-4 text-sm text-bambu-gray">{title === t('queue.sections.activeJobs') ? t('kiosk.noPrinting') : t('kiosk.noQueue')}</p>
-      ) : (
-        <div className={`relative min-h-0 ${fillAvailableHeight ? 'flex-1' : ''}`}>
-          <div data-testid={`${testId}-list`} ref={ref} className={`${fillAvailableHeight ? 'h-full' : ''} space-y-2 overflow-hidden ${listClassName || ''}`}>
-            {items.map((item) => (
-              <KioskQueueCard
-                key={item.id}
-                item={item}
-                status={item.printer_id ? statuses.get(item.printer_id) : undefined}
-                timeFormat={timeFormat}
-                t={t}
-              />
-            ))}
-          </div>
-          {hiddenItemCount > 0 && (
-            <div data-testid={`${testId}-overflow`} className="pointer-events-none absolute inset-x-0 bottom-0 flex h-12 items-end justify-center bg-gradient-to-t from-bambu-dark to-transparent pb-1" aria-label={t('kiosk.moreJobs', { count: hiddenItemCount })}>
-              <span className="rounded-full bg-bambu-dark-tertiary px-2 py-0.5 text-sm font-medium text-white">{t('kiosk.moreJobs', { count: hiddenItemCount })}</span>
-            </div>
-          )}
-        </div>
-      )}
-    </section>
+    <div
+      data-testid={`kiosk-stat-${id}`}
+      className={`flex items-baseline gap-3 border-l border-t-[3px] border-l-bambu-dark-tertiary bg-bambu-dark-secondary px-[18px] py-2 first:border-l-0 ${STAT_TONES[tone]}`}
+    >
+      <b className="text-3xl font-semibold tabular-nums leading-tight">{count}</b>
+      <span className="text-[13px] font-semibold uppercase tracking-[0.06em] text-bambu-gray-light">{label}</span>
+    </div>
   );
 }
 
@@ -364,6 +160,7 @@ export function KioskPage() {
       };
     }),
   });
+
   const printingItems = useMemo(
     () => queue.filter((item) => item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing'),
     [queue],
@@ -383,46 +180,98 @@ export function KioskPage() {
         : undefined;
     return [printer.id, owner];
   })), [currentPrintUserQueries, printers, printingItemsByPrinter, statuses]);
-  const synthesizedPrintingItems = useMemo<KioskQueueItem[]>(() => printers.flatMap((printer) => {
-    const status = statuses.get(printer.id);
-    if (!isActivePrint(status) || printingItemsByPrinter.has(printer.id)) return [];
 
-    return [{
-      // Synthetic IDs are only used as stable React keys for read-only kiosk cards.
-      id: -printer.id,
-      printer_id: printer.id,
-      archive_id: status?.current_archive_id ?? null,
-      library_file_id: null,
-      archive_name: getActiveJobName(status, t),
-      archive_thumbnail: null,
-      library_file_name: null,
-      library_file_thumbnail: null,
-      printer_name: printer.name,
-      created_by_username: owners.get(printer.id) ?? null,
-      print_time_seconds: null,
-      status: status?.preheating ? 'preheating' : 'printing',
-      scheduled_time: null,
-      waiting_reason: null,
-    }];
-  }), [owners, printers, printingItemsByPrinter, statuses, t]);
-  const activeItems = useMemo(
-    () => [...printingItems, ...synthesizedPrintingItems],
-    [printingItems, synthesizedPrintingItems],
-  );
+  // Order: plate clear, paused, printing (heat soak included), then the queue.
+  const { plateRows, pausedRows, printingRows, queueRows } = useMemo(() => {
+    const plusMore = (count: number) => t('common.plusNMore', { count });
 
-  const prioritizedPrinters = useMemo(() => [...printers].sort((a, b) => {
-    const priority = (printer: PrinterRecord) => {
+    const plate: KioskRow[] = [...printers]
+      .filter((printer) => needsPlateClear(printer, statuses.get(printer.id)))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((printer) => {
+        const status = statuses.get(printer.id);
+        const next = pendingItems.find((item) => item.printer_id === printer.id);
+        const clearPlate: QueueJobLineStatus = { tone: QUEUE_TONES.scheduled, Icon: Hand, label: t('kiosk.clearPlate') };
+        return {
+          key: `plate-clear-${printer.id}`,
+          item: kioskLineItem({
+            printer_id: printer.id,
+            printer_name: printer.name,
+            created_by_username: owners.get(printer.id) ?? null,
+            archive_id: status?.awaiting_plate_clear_print?.archive_id ?? null,
+          }),
+          displayName: status?.awaiting_plate_clear_print?.print_name || getActiveJobName(status, t),
+          status: clearPlate,
+          alert: true,
+          extraFooter: (
+            <>
+              <Hand className="h-4 w-4 flex-shrink-0" />
+              <span className="flex-1">
+                {t('kiosk.clearPlateHint')}
+                {next ? ` ${t('kiosk.nextJob', { name: queueItemDisplayName(next, plusMore) })}` : ''}
+              </span>
+            </>
+          ),
+        };
+      });
+
+    const printing: KioskRow[] = printingItems.map((item) => {
+      const status = item.printer_id ? statuses.get(item.printer_id) : undefined;
+      const state = status?.state;
+      return {
+        key: `job-${item.id}`,
+        item,
+        displayName: queueItemDisplayName(item, plusMore),
+        printerState: state,
+        progress: status ? jobProgressFromStatus(status) : null,
+        pauseReasonKey: state === 'PAUSE' ? pauseReasonKeyFor(status) : undefined,
+      };
+    });
+    // A printer running a job that is not in the queue response still gets a line.
+    for (const printer of printers) {
       const status = statuses.get(printer.id);
-      if (status?.awaiting_plate_clear && !isActivePrint(status)) return 0;
-      if (isActivePrint(status)) return 1;
-      return 2;
+      if (!isActivePrint(status) || printingItemsByPrinter.has(printer.id) || printer.is_active === false) continue;
+      printing.push({
+        key: `printer-${printer.id}`,
+        item: kioskLineItem({
+          printer_id: printer.id,
+          printer_name: printer.name,
+          status: status?.preheating ? 'preheating' : 'printing',
+          archive_id: status?.current_archive_id ?? null,
+          created_by_username: owners.get(printer.id) ?? null,
+        }),
+        displayName: getActiveJobName(status, t),
+        printerState: status?.state,
+        progress: status ? jobProgressFromStatus(status) : null,
+        pauseReasonKey: status?.state === 'PAUSE' ? pauseReasonKeyFor(status) : undefined,
+      });
+    }
+
+    const queued: KioskRow[] = pendingItems.map((item) => ({
+      key: `job-${item.id}`,
+      item,
+      displayName: queueItemDisplayName(item, plusMore),
+    }));
+    return {
+      plateRows: plate,
+      pausedRows: printing.filter((row) => row.printerState === 'PAUSE'),
+      printingRows: printing.filter((row) => row.printerState !== 'PAUSE'),
+      queueRows: queued,
     };
-    const priorityDifference = priority(a) - priority(b);
-    return priorityDifference || a.name.localeCompare(b.name);
-  }), [printers, statuses]);
-  const hasPrinterOverflow = prioritizedPrinters.length > 3;
-  const visiblePrinters = prioritizedPrinters.slice(0, hasPrinterOverflow ? 4 : 3);
-  const overflowPrinterCount = Math.max(0, prioritizedPrinters.length - 3);
+  }, [owners, pendingItems, printers, printingItems, printingItemsByPrinter, statuses, t]);
+
+  const rows = useMemo(
+    () => [...plateRows, ...pausedRows, ...printingRows, ...queueRows],
+    [plateRows, pausedRows, printingRows, queueRows],
+  );
+  const idlePrinters = useMemo(
+    () => printers.filter((printer) => isIdle(printer, statuses.get(printer.id))).sort((a, b) => a.name.localeCompare(b.name)),
+    [printers, statuses],
+  );
+  const footerPrinters = idlePrinters.length > MAX_FOOTER_PRINTERS ? idlePrinters.slice(0, MAX_FOOTER_PRINTERS - 1) : idlePrinters;
+  const footerOverflow = idlePrinters.length - footerPrinters.length;
+
+  const { ref: listRef, hiddenItemCount } = useOverflowing([rows, idlePrinters.length]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 10_000);
@@ -431,48 +280,92 @@ export function KioskPage() {
 
   return (
     <div data-testid="kiosk-page" className="flex h-screen flex-col overflow-hidden bg-bambu-dark px-4 py-4 sm:px-6 lg:px-8">
-      <header className="mx-auto flex w-full shrink-0 max-w-[1920px] items-center justify-between border-b border-bambu-dark-tertiary pb-3">
+      <header className="mx-auto flex w-full shrink-0 max-w-[1920px] items-center justify-between pb-3">
         <img src={resolvedMode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png'} alt="Grove Control" className="h-9 w-auto sm:h-10" />
         <time className="text-lg font-medium tabular-nums text-white sm:text-xl">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
       </header>
 
-      <main className="mx-auto flex min-h-0 w-full max-w-[1920px] flex-1 flex-col overflow-hidden pb-4">
-        <section className="shrink-0 py-3" aria-labelledby="kiosk-fleet-heading">
-          <div className="mb-3 flex items-center gap-2">
-            <Printer className="h-5 w-5 text-bambu-green" />
-            <h1 id="kiosk-fleet-heading" className="text-lg font-semibold text-white">{t('nav.printers')}</h1>
-          </div>
-          {printers.length === 0 ? (
-            <p className="border border-dashed border-bambu-dark-tertiary px-4 py-8 text-center text-bambu-gray">{t('kiosk.noPrinters')}</p>
-          ) : (
-            <div className="relative overflow-hidden">
-              <div data-testid="kiosk-fleet-grid" className="flex h-[154px] gap-3">
-                {visiblePrinters.map((printer) => (
-                  <KioskPrinterTile
-                    key={printer.id}
-                    printer={printer}
-                    status={statuses.get(printer.id)}
-                    owner={owners.get(printer.id)}
-                    timeFormat={timeFormat}
-                    t={t}
-                    className={hasPrinterOverflow ? 'shrink-0' : 'flex-1'}
-                    style={hasPrinterOverflow ? { flexBasis: 'calc((100% - 2.25rem) / 3.25)' } : undefined}
-                  />
-                ))}
-              </div>
-              {overflowPrinterCount > 0 && (
-                <div data-testid="kiosk-fleet-overflow" className="pointer-events-none absolute inset-y-0 right-0 flex w-[10%] items-center justify-end bg-gradient-to-l from-bambu-dark via-bambu-dark/85 to-transparent pr-3" aria-label={t('kiosk.morePrinters', { count: overflowPrinterCount })}>
-                  <span className="rounded-full bg-bambu-dark-tertiary px-2 py-0.5 text-sm font-medium text-white">{t('kiosk.morePrinters', { count: overflowPrinterCount })}</span>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
+      <main className="mx-auto flex min-h-0 w-full max-w-[1920px] flex-1 flex-col overflow-hidden pb-2">
+        {printers.length === 0 ? (
+          <p className="border border-dashed border-bambu-dark-tertiary px-4 py-8 text-center text-bambu-gray">{t('kiosk.noPrinters')}</p>
+        ) : (
+          <>
+            <section
+              data-testid="kiosk-stats"
+              aria-label={t('nav.printers')}
+              className="grid shrink-0 grid-cols-5 overflow-hidden rounded-lg border border-bambu-dark-tertiary"
+            >
+              <KioskStat id="clear-plate" tone="plate" count={plateRows.length} label={t('kiosk.clearPlate')} />
+              <KioskStat id="printing" tone="printing" count={printingRows.length} label={t('queue.status.printing')} />
+              <KioskStat id="paused" tone="paused" count={pausedRows.length} label={t('queue.status.paused')} />
+              <KioskStat id="queued" tone="queued" count={queueRows.length} label={t('queue.sections.queued')} />
+              <KioskStat id="idle" tone="idle" count={idlePrinters.length} label={t('printers.status.idle', 'Idle')} />
+            </section>
 
-        <div data-testid="kiosk-queue-area" className="flex min-h-0 flex-1 flex-col border-t border-bambu-dark-tertiary pt-3">
-          <KioskQueueSection title={t('queue.sections.activeJobs')} items={activeItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-printing-section" className="mb-4 shrink-0" listClassName="max-h-52" />
-          <KioskQueueSection title={t('queue.sections.queued')} items={pendingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-pending-section" fillAvailableHeight />
-        </div>
+            <section data-testid="kiosk-jobs" aria-label={t('nav.queue')} className="relative mt-3 min-h-0 flex-1">
+              {rows.length === 0 ? (
+                <p className="border border-dashed border-bambu-dark-tertiary px-3 py-4 text-sm text-bambu-gray">{t('kiosk.noJobs')}</p>
+              ) : (
+                <>
+                  <div data-testid="kiosk-job-list" ref={listRef} className="flex h-full flex-col gap-2 overflow-hidden">
+                    {rows.map((row) => (
+                      <div key={row.key} data-testid={`kiosk-job-${row.key}`} className="flex-none">
+                        <QueueJobLine
+                          size="kiosk"
+                          item={row.item}
+                          displayName={row.displayName}
+                          printerState={row.printerState}
+                          timeFormat={timeFormat}
+                          t={t as unknown as (key: string, options?: Record<string, unknown>) => string}
+                          progress={row.progress}
+                          pauseReasonKey={row.pauseReasonKey}
+                          status={row.status}
+                          alert={row.alert}
+                          extraFooter={row.extraFooter}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {hiddenItemCount > 0 && (
+                    <div data-testid="kiosk-job-overflow" className="pointer-events-none absolute inset-x-0 bottom-0 flex h-16 items-end justify-center bg-gradient-to-t from-bambu-dark to-transparent pb-0.5" aria-label={t('kiosk.moreJobs', { count: hiddenItemCount })}>
+                      <span className="rounded-md bg-bambu-dark-tertiary px-3.5 py-0.5 text-base font-semibold text-white">{t('kiosk.moreJobs', { count: hiddenItemCount })}</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+
+            {idlePrinters.length > 0 && (
+              <footer
+                data-testid="kiosk-idle-printers"
+                aria-label={t('kiosk.idlePrinters')}
+                className="mt-2.5 flex shrink-0 items-stretch overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary"
+              >
+                <span className="flex items-center whitespace-nowrap border-r border-bambu-dark-tertiary px-[18px] text-[13px] font-semibold uppercase tracking-[0.06em] text-bambu-gray-light">
+                  {t('kiosk.idlePrinters')}
+                </span>
+                {footerPrinters.map((printer) => (
+                  <div
+                    key={printer.id}
+                    data-testid={`kiosk-idle-printer-${printer.id}`}
+                    className="flex min-w-0 flex-1 flex-col justify-center border-l border-t-[3px] border-l-bambu-dark-tertiary border-t-bambu-green px-4 py-1.5 first:border-l-0"
+                  >
+                    <b className="truncate text-[17px] font-semibold text-white">{printer.name}</b>
+                    <small className="truncate text-sm text-green-700 dark:text-green-400">{t('kiosk.ready')}</small>
+                  </div>
+                ))}
+                {footerOverflow > 0 && (
+                  <div
+                    data-testid="kiosk-idle-overflow"
+                    className="flex flex-none items-center border-l border-t-[3px] border-l-bambu-dark-tertiary border-t-bambu-gray-dark px-4 text-[17px] font-semibold text-bambu-gray-light"
+                  >
+                    {t('kiosk.morePrinters', { count: footerOverflow })}
+                  </div>
+                )}
+              </footer>
+            )}
+          </>
+        )}
       </main>
     </div>
   );

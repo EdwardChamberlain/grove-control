@@ -847,12 +847,15 @@ test('regenerates the README product screenshots', async ({ page }) => {
   });
 
   fixtureState.showKioskPlateClear = true;
+  // The kiosk targets 1080p displays.
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto('/kiosk');
   await expect(page.getByTestId('kiosk-page')).toBeVisible();
-  await expect(page.getByTestId('kiosk-printer-1')).toContainText('Modular Planter');
-  await expect(page.getByTestId('kiosk-printer-3')).toContainText('Plate clear required');
-  await expect(page.getByText('Production Alignment Jig', { exact: true })).toBeVisible();
-  await expect(page.getByTestId('kiosk-queue-status-3')).toContainText('Scheduled');
+  await expect(page.getByTestId('kiosk-job-plate-clear-3')).toContainText('Clear plate');
+  await expect(page.getByTestId('kiosk-job-printer-2')).toContainText('Paused');
+  await expect(page.getByTestId('kiosk-job-job-1')).toContainText('Modular Planter');
+  await expect(page.getByTestId('kiosk-job-job-4')).toContainText('Production Alignment Jig');
+  await expect(page.getByTestId('kiosk-job-job-4')).toContainText('Scheduled');
   await prepareScreenshot(page);
   await page.screenshot({
     path: KIOSK_SCREENSHOT,

@@ -1648,13 +1648,16 @@ export default {
 
   kiosk: {
     noPrinters: 'プリンターが設定されていません',
-    noPrinting: '印刷中のジョブはありません',
-    noQueue: 'キューにジョブはありません',
     noJob: 'アクティブなジョブはありません',
     unknownOwner: '所有者は不明です',
-    plateClearRequired: 'プレートの片付けが必要です',
     morePrinters: 'プリンター +{{count}} 台',
     moreJobs: 'ジョブ +{{count}} 件',
+    clearPlate: 'プレートを空にする',
+    clearPlateHint: '印刷物を取り出し、プレートを空にしてください。',
+    nextJob: '次: {{name}}',
+    noJobs: '表示するジョブはありません',
+    idlePrinters: '待機中のプリンター',
+    ready: '準備完了',
   },
 
   // Settings page

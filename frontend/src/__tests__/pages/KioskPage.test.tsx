@@ -9,46 +9,88 @@ import { api } from '../../api/client';
 const printers = [
   { id: 1, name: 'Atlas', model: 'X1 Carbon', is_active: true },
   { id: 2, name: 'Beacon', model: 'P1S', is_active: true },
+  { id: 3, name: 'Cedar', model: 'H2D', is_active: true },
+  { id: 4, name: 'Delta', model: 'A1', is_active: true },
 ];
 
 const baseSettings = { time_format: '24h', require_plate_clear: true };
 
-function statusFor(id: string) {
-  if (id === '2') {
-    return {
-      id: 2,
-      name: 'Beacon',
-      connected: true,
-      state: 'FINISH',
-      current_print: 'Plate-clear job',
-      subtask_name: null,
-      gcode_file: null,
-      progress: 100,
-      remaining_time: 0,
-      awaiting_plate_clear: true,
-      awaiting_plate_clear_print: {
-        archive_id: 2,
-        print_name: 'Plate-clear job',
-        filename: 'plate-clear-job.3mf',
-        thumbnail_path: null,
-        created_by_username: 'Taylor',
-      },
-    };
-  }
+const printing = {
+  id: 1,
+  name: 'Atlas',
+  connected: true,
+  state: 'RUNNING',
+  current_print: 'Widget batch',
+  current_queue_owner: 'Morgan',
+  subtask_name: null,
+  gcode_file: null,
+  progress: 42,
+  remaining_time: 65,
+  layer_num: 120,
+  total_layers: 300,
+  awaiting_plate_clear: false,
+};
 
-  return {
-    id: 1,
-    name: 'Atlas',
-    connected: true,
-    state: 'RUNNING',
-    current_print: 'Widget batch',
-    current_queue_owner: 'Morgan',
-    subtask_name: null,
-    gcode_file: null,
-    progress: 42,
-    remaining_time: 65,
-    awaiting_plate_clear: false,
-  };
+const plateClear = {
+  id: 2,
+  name: 'Beacon',
+  connected: true,
+  state: 'FINISH',
+  current_print: 'Plate-clear job',
+  subtask_name: null,
+  gcode_file: null,
+  progress: 100,
+  remaining_time: 0,
+  awaiting_plate_clear: true,
+  awaiting_plate_clear_print: {
+    archive_id: 2,
+    print_name: 'Plate-clear job',
+    filename: 'plate-clear-job.3mf',
+    thumbnail_path: null,
+    created_by_username: 'Taylor',
+  },
+};
+
+const paused = {
+  ...printing,
+  id: 3,
+  name: 'Cedar',
+  state: 'PAUSE',
+  current_print: 'Cable chain',
+  current_queue_owner: 'Sam',
+  progress: 38,
+  stg_cur: 6,
+};
+
+const idle = {
+  id: 4,
+  name: 'Delta',
+  connected: true,
+  state: 'IDLE',
+  current_print: null,
+  progress: 0,
+  remaining_time: 0,
+  awaiting_plate_clear: false,
+};
+
+function statusFor(id: number | string) {
+  switch (Number(id)) {
+    case 1: return printing;
+    case 2: return plateClear;
+    case 3: return paused;
+    default: return { ...idle, id: Number(id), name: `Printer ${id}` };
+  }
+}
+
+const queue = [
+  { id: 10, printer_id: 1, archive_id: 1, library_file_id: null, archive_name: 'Widget batch', printer_name: 'Atlas', position: 1, status: 'printing', created_by_username: 'Morgan' },
+  { id: 13, printer_id: 3, archive_id: 3, library_file_id: null, archive_name: 'Cable chain', printer_name: 'Cedar', position: 2, status: 'printing', created_by_username: 'Sam' },
+  { id: 12, printer_id: 4, archive_id: 5, library_file_id: null, archive_name: 'Second in line', printer_name: 'Delta', position: 2, status: 'pending', created_by_username: 'Avery' },
+  { id: 11, printer_id: 2, archive_id: 4, library_file_id: null, archive_name: 'Next assembly', printer_name: 'Beacon', position: 1, status: 'pending', created_by_username: 'Avery', print_time_seconds: 3600, waiting_reason: 'Waiting for compatible material' },
+];
+
+function jobOrder() {
+  return screen.getAllByTestId(/^kiosk-job-(?!list|overflow)/).map((el) => el.getAttribute('data-testid'));
 }
 
 describe('KioskPage', () => {
@@ -61,352 +103,210 @@ describe('KioskPage', () => {
     server.use(
       http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: false, requires_setup: false })),
       http.get('/api/v1/settings/', () => HttpResponse.json(baseSettings)),
-      http.get('/api/v1/printers/', () => HttpResponse.json(printers)),
-      http.get('/api/v1/printers/:id/status', ({ request }) => {
-        const printerId = new URL(request.url).pathname.split('/')[4];
-        return HttpResponse.json(statusFor(printerId));
-      }),
-      http.get('/api/v1/queue/', () => HttpResponse.json([
-        {
-          id: 10,
-          printer_id: 1,
-          archive_id: 1,
-          library_file_id: null,
-          archive_name: 'Widget batch',
-          printer_name: 'Atlas',
-          position: 1,
-          status: 'printing',
-          created_by_username: 'Morgan',
-        },
-        {
-          id: 11,
-          printer_id: 2,
-          archive_id: 2,
-          library_file_id: null,
-          archive_name: 'Next assembly',
-          printer_name: 'Beacon',
-          position: 1,
-          status: 'pending',
-          created_by_username: 'Avery',
-          print_time_seconds: 3600,
-          waiting_reason: 'Waiting for compatible material',
-        },
-      ])),
     );
     vi.spyOn(api, 'getPrinters').mockResolvedValue(printers as never);
     vi.spyOn(api, 'getSettings').mockResolvedValue(baseSettings as never);
-    vi.spyOn(api, 'getQueue').mockResolvedValue([
-      {
-        id: 10,
-        printer_id: 1,
-        archive_id: 1,
-        library_file_id: null,
-        archive_name: 'Widget batch',
-        printer_name: 'Atlas',
-        position: 1,
-        status: 'printing',
-        created_by_username: 'Morgan',
-      },
-      {
-        id: 11,
-        printer_id: 2,
-        archive_id: 2,
-        library_file_id: null,
-        archive_name: 'Next assembly',
-        printer_name: 'Beacon',
-        position: 1,
-        status: 'pending',
-        created_by_username: 'Avery',
-        print_time_seconds: 3600,
-        waiting_reason: 'Waiting for compatible material',
-      },
-    ] as never);
-    vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => statusFor(String(printerId)) as never);
+    vi.spyOn(api, 'getQueue').mockResolvedValue(queue as never);
+    vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => statusFor(printerId) as never);
+    vi.spyOn(api, 'getCurrentPrintUser').mockResolvedValue({ username: null } as never);
   });
 
-  it('shows a paused job in orange with a paused label, and a running job in blue', async () => {
-    const pausedStatus = (id: string) => (
-      id === '1' ? { ...statusFor(id), state: 'PAUSE' } : statusFor(id)
-    );
-    server.use(
-      http.get('/api/v1/printers/:id/status', ({ request }) => {
-        const printerId = new URL(request.url).pathname.split('/')[4];
-        return HttpResponse.json(pausedStatus(printerId));
-      }),
-    );
-    vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => pausedStatus(String(printerId)) as never);
+  it('shows one read-only job list in the order plate clear, paused, printing, queue', async () => {
     render(<KioskPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('kiosk-queue-status-10')).toHaveTextContent('Paused');
+      expect(jobOrder()).toEqual([
+        'kiosk-job-plate-clear-2',
+        'kiosk-job-job-13',
+        'kiosk-job-job-10',
+        'kiosk-job-job-11',
+        'kiosk-job-job-12',
+      ]);
     });
-    const pill = screen.getByTestId('kiosk-queue-status-10');
-    expect(pill).toHaveClass('text-orange-400', 'bg-orange-500/10');
-    expect(pill).not.toHaveClass('text-yellow-400');
-  });
-
-  it('keeps a running job in blue', async () => {
-    render(<KioskPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('kiosk-queue-status-10')).toHaveTextContent('Printing');
-    });
-    expect(screen.getByTestId('kiosk-queue-status-10')).toHaveClass('text-blue-400');
-    expect(screen.getByTestId('kiosk-queue-status-10')).not.toHaveClass('text-orange-400');
-  });
-
-  it('shows compact fleet status and a vertically ordered read-only queue', async () => {
-    render(<KioskPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Printers')).toBeInTheDocument();
-      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('Atlas')).toBeInTheDocument();
-      expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
-      expect(screen.getAllByText('Widget batch').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Morgan')).toHaveLength(2);
-      expect(within(screen.getByTestId('kiosk-printer-1')).getByTitle('Added by Morgan')).toBeInTheDocument();
-      expect(within(screen.getByTestId('kiosk-printer-2')).getByText('Taylor')).toBeInTheDocument();
-      expect(screen.getAllByText('42%')).toHaveLength(2);
-      expect(screen.getAllByText('Plate clear required')).toHaveLength(2);
-      expect(screen.getByTestId('kiosk-queue-status-10')).toHaveTextContent('Printing');
-      expect(screen.getByTestId('kiosk-queue-status-11')).toHaveTextContent('Waiting · Waiting for compatible material');
-      expect(screen.getByRole('banner').parentElement).toHaveClass('h-screen', 'overflow-hidden');
-      expect(screen.getByTestId('kiosk-printer-1')).toHaveClass('flex-1');
-      expect(screen.queryByTestId('kiosk-fleet-overflow')).not.toBeInTheDocument();
-    });
-
-    const printing = screen.getByRole('heading', { name: 'Active jobs' });
-    const queued = screen.getByRole('heading', { name: 'Queued' });
-    expect(printing.compareDocumentPosition(queued) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Printers' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Active jobs' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByRole('banner').parentElement).toHaveClass('h-screen', 'overflow-hidden');
   });
 
-  it('uses a flashing yellow progress bar when a plate must be cleared', async () => {
+  it('summarises the fleet in a stats row', async () => {
     render(<KioskPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('kiosk-progress-2')).toHaveClass('bg-yellow-400');
-      expect(screen.getByTestId('kiosk-printer-2')).toHaveClass('border-yellow-400/60', 'kiosk-plate-clear-alert');
+      expect(within(screen.getByTestId('kiosk-stat-clear-plate')).getByText('1')).toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-stat-printing')).getByText('1')).toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-stat-paused')).getByText('1')).toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-stat-queued')).getByText('2')).toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-stat-idle')).getByText('1')).toBeInTheDocument();
     });
   });
 
-  it('shows maintenance mode instead of offline for an inactive printer', async () => {
-    const maintenancePrinter = { id: 1, name: 'Atlas', model: 'X1 Carbon', is_active: false };
-    vi.mocked(api.getPrinters).mockResolvedValue([maintenancePrinter, printers[1]] as never);
-    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
-      if (printerId === 1) return { ...statusFor('1'), connected: false, awaiting_plate_clear: true } as never;
-      return statusFor(String(printerId)) as never;
-    });
+  it('shows a pulsing plate-clear line with the printer, owner and next job', async () => {
+    render(<KioskPage />);
+
+    const line = await screen.findByTestId('kiosk-job-plate-clear-2');
+    expect(within(line).getByText('Clear plate')).toBeInTheDocument();
+    expect(within(line).getByText('Plate-clear job')).toBeInTheDocument();
+    expect(within(line).getByText('Beacon')).toBeInTheDocument();
+    expect(within(line).getByText('Taylor')).toBeInTheDocument();
+    expect(within(line).getByText(/Next: Next assembly/)).toBeInTheDocument();
+    expect(line.firstElementChild).toHaveClass('kiosk-plate-clear-alert', 'border-yellow-400/40');
+  });
+
+  it('does not ask for a plate clear on a printer in maintenance mode', async () => {
+    vi.mocked(api.getPrinters).mockResolvedValue([printers[0], { ...printers[1], is_active: false }] as never);
 
     render(<KioskPage />);
 
-    await waitFor(() => {
-      const tile = screen.getByTestId('kiosk-printer-1');
-      const state = within(tile).getByText('Maintenance Mode');
-      expect(state).toHaveClass('text-blue-400');
-      expect(within(tile).queryByText('Offline')).not.toBeInTheDocument();
-      expect(within(tile).queryByText('Plate clear required')).not.toBeInTheDocument();
-      expect(screen.getByTestId('kiosk-progress-1')).not.toHaveClass('bg-yellow-400');
-      expect(tile).not.toHaveClass('border-yellow-400/60', 'kiosk-plate-clear-alert');
-    });
+    await screen.findByTestId('kiosk-job-job-10');
+    expect(screen.queryByTestId('kiosk-job-plate-clear-2')).not.toBeInTheDocument();
   });
 
-  it('shows future pending jobs as scheduled with their start time', async () => {
+  it('shows a paused job in orange with progress and its pause reason', async () => {
+    render(<KioskPage />);
+
+    const line = await screen.findByTestId('kiosk-job-job-13');
+    await waitFor(() => expect(within(line).getByText('38%')).toBeInTheDocument());
+    expect(within(line).getByText('Paused')).toBeInTheDocument();
+    expect(line.firstElementChild).toHaveClass('border-orange-500/55');
+    expect(within(line).getByText('Filament ran out')).toBeInTheDocument();
+  });
+
+  it('shows a running job with progress, time left and layers, in green', async () => {
+    render(<KioskPage />);
+
+    const line = await screen.findByTestId('kiosk-job-job-10');
+    await waitFor(() => expect(within(line).getByText('42%')).toBeInTheDocument());
+    expect(within(line).getByText('Printing')).toBeInTheDocument();
+    expect(within(line).getByText('120/300')).toBeInTheDocument();
+    expect(within(line).getByText(/ETA/)).toBeInTheDocument();
+    expect(line.firstElementChild).toHaveClass('border-bambu-green/50');
+  });
+
+  it('shows waiting and scheduled jobs in queue order with their reason and time', async () => {
     vi.mocked(api.getQueue).mockResolvedValue([
-      {
-        id: 12,
-        printer_id: 2,
-        archive_id: 2,
-        library_file_id: null,
-        archive_name: 'Scheduled assembly',
-        printer_name: 'Beacon',
-        position: 1,
-        status: 'pending',
-        scheduled_time: '2099-01-01T09:30:00Z',
-        waiting_reason: null,
-      },
+      { id: 11, printer_id: 2, archive_id: 4, library_file_id: null, archive_name: 'Waiting job', printer_name: 'Beacon', position: 1, status: 'pending', waiting_reason: 'Waiting for compatible material' },
+      { id: 12, printer_id: 4, archive_id: 5, library_file_id: null, archive_name: 'Scheduled job', printer_name: 'Delta', position: 2, status: 'pending', scheduled_time: '2099-01-01T09:30:00Z', waiting_reason: null },
     ] as never);
 
     render(<KioskPage />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId('kiosk-queue-status-12')).toHaveTextContent('Scheduled · Jan 1, 2099, 09:30 AM');
-    });
+    const waiting = await screen.findByTestId('kiosk-job-job-11');
+    expect(within(waiting).getByText('Waiting')).toBeInTheDocument();
+    expect(within(waiting).getByText('Waiting for compatible material')).toBeInTheDocument();
+    const scheduled = screen.getByTestId('kiosk-job-job-12');
+    expect(within(scheduled).getByText('Scheduled')).toBeInTheDocument();
+    expect(within(scheduled).getByText('Jan 1, 2099, 09:30 AM')).toBeInTheDocument();
+    expect(jobOrder().slice(-2)).toEqual(['kiosk-job-job-11', 'kiosk-job-job-12']);
   });
 
-  it('shows preheating jobs as active heat-soak work', async () => {
+  it('counts a heat-soaking job as printing', async () => {
     vi.mocked(api.getQueue).mockResolvedValue([
-      {
-        id: 12,
-        printer_id: 1,
-        archive_id: 1,
-        library_file_id: null,
-        archive_name: 'Warm chamber assembly',
-        printer_name: 'Atlas',
-        position: 1,
-        status: 'preheating',
-        created_by_username: 'Morgan',
-      },
+      { id: 12, printer_id: 1, archive_id: 1, library_file_id: null, archive_name: 'Warm chamber assembly', printer_name: 'Atlas', position: 1, status: 'preheating', created_by_username: 'Morgan' },
     ] as never);
-    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
-      if (printerId === 1) {
-        return {
-          ...statusFor('1'),
-          state: 'IDLE',
-          current_print: null,
-          preheating: true,
-          progress: 0,
-        } as never;
-      }
-      return statusFor(String(printerId)) as never;
-    });
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => (
+      printerId === 1
+        ? { ...printing, state: 'IDLE', current_print: null, preheating: true, progress: 0 } as never
+        : statusFor(printerId) as never
+    ));
 
     render(<KioskPage />);
 
-    await waitFor(() => {
-      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('Preheating')).toBeInTheDocument();
-      expect(screen.getByTestId('kiosk-queue-status-12')).toHaveTextContent('Preheating');
-      expect(screen.getByText('Warm chamber assembly')).toBeInTheDocument();
-    });
+    const line = await screen.findByTestId('kiosk-job-job-12');
+    expect(within(line).getByText('Preheating')).toBeInTheDocument();
+    expect(within(line).getByText('Warm chamber assembly')).toBeInTheDocument();
+    expect(line.firstElementChild).toHaveClass('border-amber-400/40');
+    await waitFor(() => expect(within(screen.getByTestId('kiosk-stat-printing')).getByText('1')).toBeInTheDocument());
   });
 
-  it('shows three prioritised printers and a faded fourth card when the fleet overflows', async () => {
+  it('lists idle printers in a footer, leaving out busy, offline and maintenance ones', async () => {
     vi.mocked(api.getPrinters).mockResolvedValue([
-      { id: 1, name: 'Printing printer', model: 'X1 Carbon', is_active: true },
-      { id: 2, name: 'Plate-clear printer', model: 'P1S', is_active: true },
-      { id: 3, name: 'Idle printer', model: 'A1', is_active: true },
-      { id: 4, name: 'Idle printer 4', model: 'A1', is_active: true },
-      { id: 5, name: 'Idle printer 5', model: 'A1', is_active: true },
-      { id: 6, name: 'Idle printer 6', model: 'A1', is_active: true },
-      { id: 7, name: 'Idle printer 7', model: 'A1', is_active: true },
-      { id: 8, name: 'Idle printer 8', model: 'A1', is_active: true },
-      { id: 9, name: 'Idle printer 9', model: 'A1', is_active: true },
+      ...printers,
+      { id: 5, name: 'Echo', model: 'A1', is_active: true },
+      { id: 6, name: 'Foxtrot', model: 'A1', is_active: false },
     ] as never);
-    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
-      if (printerId === 2) return statusFor('2') as never;
-      if (printerId !== 1) return { ...statusFor('1'), id: printerId, name: `Idle printer ${printerId}`, state: 'IDLE', current_print: null, progress: 0 } as never;
-      return statusFor('1') as never;
-    });
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => (
+      printerId === 5 ? { ...idle, id: 5, name: 'Echo', connected: false } as never : statusFor(printerId) as never
+    ));
 
     render(<KioskPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText('Plate-clear printer')).toBeInTheDocument();
-      expect(screen.getByText('Printing printer')).toBeInTheDocument();
-      expect(screen.getByText('Idle printer 4')).toBeInTheDocument();
-      expect(screen.queryByText('Idle printer 9')).not.toBeInTheDocument();
-      expect(screen.getByText('+6 Printers')).toBeInTheDocument();
-      expect(screen.getAllByTestId(/^kiosk-printer-/)).toHaveLength(4);
-      expect(screen.getByTestId('kiosk-fleet-grid')).toHaveClass('flex', 'h-[154px]');
-      expect(screen.getByTestId('kiosk-printer-4')).toHaveClass('shrink-0');
-      expect(screen.getByTestId('kiosk-printer-4')).toHaveStyle({ flexBasis: 'calc((100% - 2.25rem) / 3.25)' });
-      expect(screen.getByTestId('kiosk-fleet-overflow')).toHaveClass('inset-y-0', 'right-0', 'w-[10%]');
-    });
+    const footer = await screen.findByTestId('kiosk-idle-printers');
+    await waitFor(() => expect(within(footer).getByText('Delta')).toBeInTheDocument());
+    expect(within(footer).getByText('Ready')).toBeInTheDocument();
+    expect(within(footer).queryByText('Atlas')).not.toBeInTheDocument();
+    expect(within(footer).queryByText('Echo')).not.toBeInTheDocument();
+    expect(within(footer).queryByText('Foxtrot')).not.toBeInTheDocument();
   });
 
-  it('renders empty fleet and queue states', async () => {
+  it('collapses extra idle printers into a +N cell', async () => {
+    const many = Array.from({ length: 9 }, (_, index) => ({ id: index + 1, name: `Idle ${index + 1}`, model: 'A1', is_active: true }));
+    vi.mocked(api.getPrinters).mockResolvedValue(many as never);
+    vi.mocked(api.getQueue).mockResolvedValue([] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => ({ ...idle, id: printerId, name: `Idle ${printerId}` }) as never);
+
+    render(<KioskPage />);
+
+    const footer = await screen.findByTestId('kiosk-idle-printers');
+    await waitFor(() => expect(within(footer).getByText('Idle 1')).toBeInTheDocument());
+    expect(within(footer).getByText('Idle 5')).toBeInTheDocument();
+    expect(within(footer).queryByText('Idle 6')).not.toBeInTheDocument();
+    expect(screen.getByTestId('kiosk-idle-overflow')).toHaveTextContent('+4 Printers');
+  });
+
+  it('renders empty fleet and empty job states', async () => {
     vi.mocked(api.getPrinters).mockResolvedValue([] as never);
     vi.mocked(api.getQueue).mockResolvedValue([] as never);
-    render(<KioskPage />);
-
+    const { unmount } = render(<KioskPage />);
     expect(await screen.findByText('No printers configured')).toBeInTheDocument();
-    expect(screen.getByText('No jobs are currently printing')).toBeInTheDocument();
-    expect(screen.getByText('No jobs are queued')).toBeInTheDocument();
-  });
+    unmount();
 
-  it('omits owner details when no owner is available', async () => {
-    vi.mocked(api.getQueue).mockResolvedValue([
-      {
-        id: 10,
-        printer_id: 1,
-        archive_id: 1,
-        library_file_id: null,
-        archive_name: 'Widget batch',
-        printer_name: 'Atlas',
-        position: 1,
-        status: 'printing',
-        created_by_username: null,
-      },
-    ] as never);
-    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
-      if (printerId === 1) return { ...statusFor('1'), current_queue_owner: null } as never;
-      return statusFor(String(printerId)) as never;
-    });
-
+    vi.mocked(api.getPrinters).mockResolvedValue([printers[3]] as never);
     render(<KioskPage />);
-
-    await waitFor(() => {
-      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('42%')).toBeInTheDocument();
-      expect(screen.queryByText('Owner unavailable')).not.toBeInTheDocument();
-      expect(within(screen.getByTestId('kiosk-printer-1')).queryByTitle(/Added by/)).not.toBeInTheDocument();
-    });
+    expect(await screen.findByText('No jobs to show')).toBeInTheDocument();
   });
 
-  it('does not retain an active owner after a print completes without plate clearance', async () => {
-    vi.mocked(api.getQueue).mockResolvedValue([
-      {
-        id: 10,
-        printer_id: 1,
-        archive_id: 1,
-        library_file_id: null,
-        archive_name: 'Widget batch',
-        printer_name: 'Atlas',
-        position: 1,
-        status: 'printing',
-        created_by_username: null,
-      },
-    ] as never);
-    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
-      if (printerId === 1) {
-        return {
-          ...statusFor('1'),
-          state: 'FINISH',
-          current_queue_owner: 'Morgan',
-          progress: 100,
-          awaiting_plate_clear: false,
-        } as never;
-      }
-      return statusFor(String(printerId)) as never;
-    });
-
-    render(<KioskPage />);
-
-    await waitFor(() => {
-      const printerTile = screen.getByTestId('kiosk-printer-1');
-      expect(within(printerTile).getByText('Completed')).toBeInTheDocument();
-      expect(within(printerTile).queryByTitle(/Added by/)).not.toBeInTheDocument();
-    });
-  });
-
-  it('uses the status owner when the viewer cannot see another user\'s queue row', async () => {
+  it('keeps a line for a running print that is missing from the queue response', async () => {
     vi.mocked(api.getQueue).mockResolvedValue([] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => (
+      printerId === 1 ? { ...printing, current_queue_owner: null } as never : statusFor(printerId) as never
+    ));
+    vi.mocked(api.getCurrentPrintUser).mockResolvedValue({ username: 'Ed' } as never);
 
     render(<KioskPage />);
 
-    await waitFor(() => {
-      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('Morgan')).toBeInTheDocument();
-      expect(within(screen.getByTestId('kiosk-printer-1')).getByTitle('Added by Morgan')).toBeInTheDocument();
-    });
+    const line = await screen.findByTestId('kiosk-job-printer-1');
+    expect(within(line).getByText('Widget batch')).toBeInTheDocument();
+    expect(within(line).getByText('Atlas')).toBeInTheDocument();
+    await waitFor(() => expect(within(line).getByTitle('Added by Ed')).toBeInTheDocument());
   });
 
-  it('uses the current print user when an active job is absent from the queue response', async () => {
-    vi.mocked(api.getQueue).mockResolvedValue([] as never);
-    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
-      if (printerId === 1) return { ...statusFor('1'), current_queue_owner: null } as never;
-      return statusFor(String(printerId)) as never;
-    });
-    vi.spyOn(api, 'getCurrentPrintUser').mockResolvedValue({ username: 'Ed' } as never);
+  it('omits the owner when none is known', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([
+      { ...queue[0], created_by_username: null },
+    ] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => (
+      printerId === 1 ? { ...printing, current_queue_owner: null } as never : statusFor(printerId) as never
+    ));
 
     render(<KioskPage />);
 
-    await waitFor(() => {
-      const printerTile = screen.getByTestId('kiosk-printer-1');
-      expect(within(printerTile).getByText('Ed')).toBeInTheDocument();
-      expect(within(printerTile).getByTitle('Added by Ed')).toBeInTheDocument();
-      const activeSection = screen.getByTestId('kiosk-printing-section');
-      expect(within(activeSection).getByText('Widget batch')).toBeInTheDocument();
-      expect(within(activeSection).getByText('Atlas')).toBeInTheDocument();
-      expect(within(activeSection).getByText('(1)')).toBeInTheDocument();
-    });
+    const line = await screen.findByTestId('kiosk-job-job-10');
+    await waitFor(() => expect(within(line).getByText('42%')).toBeInTheDocument());
+    expect(within(line).queryByTitle(/Added by/)).not.toBeInTheDocument();
+  });
+
+  it('does not keep a finished print on the list once the printer is no longer active', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => (
+      printerId === 1
+        ? { ...printing, state: 'FINISH', progress: 100, awaiting_plate_clear: false } as never
+        : statusFor(printerId) as never
+    ));
+
+    render(<KioskPage />);
+
+    await screen.findByTestId('kiosk-job-plate-clear-2');
+    expect(screen.queryByTestId('kiosk-job-printer-1')).not.toBeInTheDocument();
   });
 });

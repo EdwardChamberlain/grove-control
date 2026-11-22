@@ -77,48 +77,38 @@ async function mockKioskApi(page: Page) {
   });
 }
 
-test('keeps queue truncation within the kiosk viewport at 1080p', async ({ page }) => {
+test('keeps the job list within the kiosk viewport at 1080p', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await stubWebSocket(page);
   await mockKioskApi(page);
   await page.goto('/kiosk');
 
-  await expect(page.getByRole('heading', { name: 'Printers' })).toBeVisible();
-  await expect(page.getByText(/Scheduled · Jan 1, 2099/)).toBeVisible();
-  await expect(page.getByText('Waiting · Waiting for compatible material')).toBeVisible();
-  await expect(page.getByTestId('kiosk-pending-section-overflow')).toContainText(/^\+\d+ Jobs$/);
+  // One list of shared job lines: no Printers strip and no separate Active jobs section.
+  await expect(page.getByTestId('kiosk-stats')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Printers' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Active jobs' })).toHaveCount(0);
+  await expect(page.getByTestId('kiosk-job-job-1')).toContainText('Printing job 1');
+  await expect(page.getByTestId('kiosk-job-job-101')).toContainText('Scheduled');
+  await expect(page.getByTestId('kiosk-job-job-102')).toContainText('Waiting for compatible material');
+  await expect(page.getByTestId('kiosk-idle-printer-9')).toBeVisible();
+  await expect(page.getByTestId('kiosk-job-overflow')).toContainText(/^\+\d+ Jobs$/);
 
   const pageBounds = await page.getByTestId('kiosk-page').boundingBox();
-  const fleetBounds = await page.getByTestId('kiosk-fleet-grid').boundingBox();
-  const fourthPrinterBounds = await page.getByTestId('kiosk-printer-4').boundingBox();
-  const fleetFadeBounds = await page.getByTestId('kiosk-fleet-overflow').boundingBox();
-  const queueBounds = await page.getByTestId('kiosk-queue-area').boundingBox();
-  const printingBounds = await page.getByTestId('kiosk-printing-section').boundingBox();
-  const pendingBounds = await page.getByTestId('kiosk-pending-section').boundingBox();
+  const jobsBounds = await page.getByTestId('kiosk-jobs').boundingBox();
+  const footerBounds = await page.getByTestId('kiosk-idle-printers').boundingBox();
 
   expect(pageBounds).not.toBeNull();
-  expect(fleetBounds).not.toBeNull();
-  expect(fourthPrinterBounds).not.toBeNull();
-  expect(fleetFadeBounds).not.toBeNull();
-  expect(queueBounds).not.toBeNull();
-  expect(printingBounds).not.toBeNull();
-  expect(pendingBounds).not.toBeNull();
+  expect(jobsBounds).not.toBeNull();
+  expect(footerBounds).not.toBeNull();
+  expect(jobsBounds!.y + jobsBounds!.height).toBeLessThanOrEqual(footerBounds!.y);
+  expect(footerBounds!.y + footerBounds!.height).toBeLessThanOrEqual(pageBounds!.y + pageBounds!.height);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(1080);
 
-  const visibleFourthPrinterWidth = fleetBounds!.x + fleetBounds!.width - fourthPrinterBounds!.x;
-  expect(visibleFourthPrinterWidth / fourthPrinterBounds!.width).toBeGreaterThan(0.2);
-  expect(visibleFourthPrinterWidth / fourthPrinterBounds!.width).toBeLessThan(0.3);
-  expect(fleetFadeBounds!.x + fleetFadeBounds!.width).toBeCloseTo(fleetBounds!.x + fleetBounds!.width, 1);
-
-  expect(queueBounds!.y + queueBounds!.height).toBeLessThanOrEqual(pageBounds!.y + pageBounds!.height);
-  expect(printingBounds!.y + printingBounds!.height).toBeLessThanOrEqual(queueBounds!.y + queueBounds!.height);
-  expect(pendingBounds!.y + pendingBounds!.height).toBeLessThanOrEqual(queueBounds!.y + queueBounds!.height);
-
-  const pendingList = page.getByTestId('kiosk-pending-section-list');
-  const hiddenItemCount = await pendingList.evaluate((element) => {
+  const hiddenItemCount = await page.getByTestId('kiosk-job-list').evaluate((element) => {
     const bottom = element.getBoundingClientRect().bottom;
     return Array.from(element.children).filter((item) => item.getBoundingClientRect().bottom > bottom + 1).length;
   });
 
   expect(hiddenItemCount).toBeGreaterThan(0);
-  await expect(page.getByTestId('kiosk-pending-section-overflow')).toHaveText(`+${hiddenItemCount} Jobs`);
+  await expect(page.getByTestId('kiosk-job-overflow')).toHaveText(`+${hiddenItemCount} Jobs`);
 });
