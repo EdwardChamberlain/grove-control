@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Stats: each print now records the filament it actually used. A job sliced for
+  black PLA but overridden to blue PLA shows as blue, and a spool tracked in
+  inventory takes precedence over both the slice and the override. Only the
+  plate that was printed counts, so multi-plate files no longer list every
+  plate's filaments, and stopped prints keep their override. Prints without a
+  queue override or tracked spool are unchanged (#340).
 - Queue: removed the Shortest Job First (SJF) toggle (#339). The queue now has
   one scheduling policy and always follows the saved queue order, so you can
   reason about what prints next from the order you see. Installs that had SJF

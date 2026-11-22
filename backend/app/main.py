@@ -5145,10 +5145,30 @@ async def on_print_complete(printer_id: int, data: dict):
     try:
         async with async_session() as db:
             from backend.app.models.archive import PrintArchive
+            from backend.app.services.filament_override_stats import resolve_run_filament_metadata
             from backend.app.services.print_log import write_log_entry
 
             archive = await db.get(PrintArchive, archive_id)
             if archive:
+                # Both Stats endpoints read PrintLogEntry. Resolve this run's
+                # selected plate and filament without changing its source.
+                run_queue_item_id = queue_item_id if queue_item_id is not None else stopped_queue_item_id
+                run_filament_type, run_filament_color = archive.filament_type, archive.filament_color
+                try:
+                    # Own session: a failed read here must not poison the log write below.
+                    async with async_session() as resolver_db:
+                        run_filament_type, run_filament_color = await resolve_run_filament_metadata(
+                            resolver_db,
+                            archive,
+                            printer_id,
+                            usage_results,
+                            queue_item_id=run_queue_item_id,
+                            dispatch_subtask_id=event_subtask_id,
+                        )
+                except Exception as e:
+                    # Attribution is best-effort: never lose the run's log entry.
+                    logger.warning("Filament attribution failed for archive %s: %s", archive_id, e)
+
                 # Back-fill created_by_id on reprint (#730): reprint reuses the
                 # source archive row rather than creating a new one, so an
                 # archive that was auto-created from a printer-initiated
@@ -5197,8 +5217,8 @@ async def on_print_complete(printer_id: int, data: dict):
                     printer_id=printer_id,
                     started_at=archive.started_at,
                     completed_at=archive.completed_at,
-                    filament_type=archive.filament_type,
-                    filament_color=archive.filament_color,
+                    filament_type=run_filament_type,
+                    filament_color=run_filament_color,
                     filament_used_grams=_run_grams,
                     cost=_run_cost,
                     failure_reason=archive.failure_reason,
