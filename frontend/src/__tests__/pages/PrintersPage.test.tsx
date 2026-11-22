@@ -610,6 +610,47 @@ describe('PrintersPage', () => {
       expect(screen.queryByText(/1h 30m/)).not.toBeInTheDocument();
     });
 
+    it('shows a paused job in list view with an orange row and progress bar', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'PAUSE',
+          current_print: 'paused-widget.3mf',
+          progress: 42,
+          remaining_time: 90,
+        })),
+      );
+
+      render(<PrintersPage />);
+
+      await screen.findByText('X1 Carbon');
+      fireEvent.click(screen.getByRole('button', { name: 'List' }));
+      await screen.findAllByText('42%');
+      const row = document.querySelector('.bg-orange-500\\/10');
+      expect(row).not.toBeNull();
+      expect(row!.querySelector('.bg-orange-500')).not.toBeNull();
+    });
+
+    it('keeps a running job in list view green with no orange row', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'running-widget.3mf',
+          progress: 42,
+          remaining_time: 90,
+        })),
+      );
+
+      render(<PrintersPage />);
+
+      await screen.findByText('X1 Carbon');
+      fireEvent.click(screen.getByRole('button', { name: 'List' }));
+      await screen.findAllByText('42%');
+      expect(document.querySelector('.bg-orange-500\\/10')).toBeNull();
+      expect(document.querySelector('.bg-orange-500')).toBeNull();
+    });
+
     it('shows an icon-only plate-clear action in the list printer-name field when needed', async () => {
       let awaitingPlateClear = true;
       server.use(

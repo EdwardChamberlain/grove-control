@@ -812,6 +812,7 @@ function PrinterListRow({
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isMaintenanceMode = printer.is_active === false;
   const isPrintingOrPaused = !isMaintenanceMode && (status?.state === 'RUNNING' || status?.state === 'PAUSE');
+  const isPaused = !isMaintenanceMode && status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
   const needsPlateClear = !!requirePlateClear && !isMaintenanceMode && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected === true && needsPlateClear;
@@ -899,7 +900,7 @@ function PrinterListRow({
         if ((event.target as HTMLElement).closest('button')) return;
         activateRow();
       }}
-      className={`relative border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
+      className={`relative border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 ${isPaused ? 'bg-orange-500/10 hover:bg-orange-500/15' : 'hover:bg-bambu-dark'} ${isSelected ? 'bg-bambu-green/10' : ''}`}
     >
       <button
         type="button"
@@ -1005,7 +1006,7 @@ function PrinterListRow({
           {showPrintProgress && (
             <div className="mt-1 flex items-center gap-2">
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-                <div className="h-full rounded-full bg-bambu-green transition-all" style={{ width: `${progress}%` }} />
+                <div className={`h-full rounded-full transition-all ${isPaused ? 'bg-orange-500' : 'bg-bambu-green'}`} style={{ width: `${progress}%` }} />
               </div>
               <span className="w-9 shrink-0 text-right text-xs tabular-nums text-bambu-gray">{`${Math.round(progress)}%`}</span>
             </div>
