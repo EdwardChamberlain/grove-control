@@ -1651,13 +1651,16 @@ export default {
 
   kiosk: {
     noPrinters: 'Yapılandırılmış yazıcı yok',
-    noPrinting: 'Şu anda yazdırılan iş yok',
-    noQueue: 'Kuyrukta iş yok',
     noJob: 'Etkin iş yok',
     unknownOwner: 'Sahip bilinmiyor',
-    plateClearRequired: 'Plakanın temizlenmesi gerekiyor',
     morePrinters: '+{{count}} yazıcı',
     moreJobs: '+{{count}} iş',
+    clearPlate: 'Tablayı temizle',
+    clearPlateHint: 'Baskıyı alın ve tablayı temizleyin.',
+    nextJob: 'Sıradaki: {{name}}',
+    noJobs: 'Gösterilecek iş yok',
+    idlePrinters: 'Boştaki yazıcılar',
+    ready: 'Hazır',
   },
 
   // Ayarlar sayfası

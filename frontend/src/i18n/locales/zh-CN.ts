@@ -1649,13 +1649,16 @@ export default {
 
   kiosk: {
     noPrinters: '未配置打印机',
-    noPrinting: '当前没有打印任务',
-    noQueue: '队列中没有任务',
     noJob: '没有活动任务',
     unknownOwner: '所有者不可用',
-    plateClearRequired: '需要清理打印板',
     morePrinters: '+{{count}} 台打印机',
     moreJobs: '+{{count}} 个任务',
+    clearPlate: '请清理打印板',
+    clearPlateHint: '请取下打印件并清理打印板。',
+    nextJob: '下一个：{{name}}',
+    noJobs: '没有可显示的任务',
+    idlePrinters: '空闲打印机',
+    ready: '就绪',
   },
 
   // Settings page

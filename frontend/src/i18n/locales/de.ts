@@ -1649,13 +1649,16 @@ export default {
 
   kiosk: {
     noPrinters: 'Keine Drucker konfiguriert',
-    noPrinting: 'Derzeit werden keine Aufträge gedruckt',
-    noQueue: 'Keine Aufträge in der Warteschlange',
     noJob: 'Kein aktiver Auftrag',
     unknownOwner: 'Besitzer nicht verfügbar',
-    plateClearRequired: 'Plattenfreigabe erforderlich',
     morePrinters: '+{{count}} Drucker',
     moreJobs: '+{{count}} Aufträge',
+    clearPlate: 'Platte räumen',
+    clearPlateHint: 'Druck entnehmen und Platte freiräumen.',
+    nextJob: 'Als Nächstes: {{name}}',
+    noJobs: 'Keine Aufträge vorhanden',
+    idlePrinters: 'Freie Drucker',
+    ready: 'Bereit',
   },
 
   // Settings page

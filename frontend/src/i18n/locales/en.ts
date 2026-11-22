@@ -1671,13 +1671,16 @@ export default {
 
   kiosk: {
     noPrinters: 'No printers configured',
-    noPrinting: 'No jobs are currently printing',
-    noQueue: 'No jobs are queued',
     noJob: 'No active job',
     unknownOwner: 'Owner unavailable',
-    plateClearRequired: 'Plate clear required',
     morePrinters: '+{{count}} Printers',
     moreJobs: '+{{count}} Jobs',
+    clearPlate: 'Clear plate',
+    clearPlateHint: 'Remove the print and clear the plate.',
+    nextJob: 'Next: {{name}}',
+    noJobs: 'No jobs to show',
+    idlePrinters: 'Idle printers',
+    ready: 'Ready',
   },
 
   // Settings page
