@@ -627,6 +627,33 @@ class TestPrintQueueAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.parametrize(
+        ("waiting_reason", "needs_action"),
+        [
+            (None, False),
+            ("Waiting for printer reservation on P1S - 2", False),
+            ("Waiting for upload slot (1 of 1 in use)", False),
+            ("Waiting for AMS drying to complete", False),
+            ("No matching material. Waiting on PETG", True),
+            ("Waiting for filament: P1S (needs PLA)", True),
+        ],
+    )
+    async def test_queue_item_reports_whether_its_wait_needs_action(
+        self, async_client: AsyncClient, queue_item_factory, waiting_reason, needs_action
+    ):
+        """A wait that clears by itself is not flagged, so the queue does not highlight it."""
+        item = await queue_item_factory(waiting_reason=waiting_reason)
+
+        single = await async_client.get(f"/api/v1/queue/{item.id}")
+        listed = await async_client.get("/api/v1/queue/")
+
+        assert single.status_code == 200
+        assert single.json()["waiting_reason"] == waiting_reason
+        assert single.json()["waiting_needs_action"] is needs_action
+        assert [row["waiting_needs_action"] for row in listed.json() if row["id"] == item.id] == [needs_action]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_queue_item_not_found(self, async_client: AsyncClient):
         """Verify 404 for non-existent queue item."""
         response = await async_client.get("/api/v1/queue/9999")

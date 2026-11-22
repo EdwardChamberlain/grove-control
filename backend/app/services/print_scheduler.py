@@ -45,6 +45,14 @@ from backend.app.services.printer_manager import (
     supports_drying,
     supports_drying_while_printing,
 )
+from backend.app.services.queue_waiting import (
+    BUSY_PREFIX,
+    DRYING_STOP_FAILED_MESSAGE,
+    PRINTER_RESERVATION_PREFIX,
+    STOPPING_DRYING_MESSAGE,
+    UPLOAD_POOL_WAITING_PREFIX,
+    WAITING_FOR_DRYING_MESSAGE,
+)
 from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.services.temporary_files import is_temporary_file, should_remove_after_dispatch
 from backend.app.utils.filename import derive_remote_filename
@@ -65,10 +73,10 @@ _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING
 # session at a time until an operator explicitly raises the limit.
 DEFAULT_QUEUE_MAX_CONCURRENT_UPLOADS = 1
 MAX_QUEUE_CONCURRENT_UPLOADS = 16
-_WAITING_FOR_DRYING_MESSAGE = "Waiting for AMS drying to complete"
-_STOPPING_DRYING_MESSAGE = "Stopping AMS drying before dispatch"
-_DRYING_STOP_FAILED_MESSAGE = "Unable to stop AMS drying; waiting to retry"
-_UPLOAD_POOL_WAITING_PREFIX = "Waiting for upload slot"
+_WAITING_FOR_DRYING_MESSAGE = WAITING_FOR_DRYING_MESSAGE
+_STOPPING_DRYING_MESSAGE = STOPPING_DRYING_MESSAGE
+_DRYING_STOP_FAILED_MESSAGE = DRYING_STOP_FAILED_MESSAGE
+_UPLOAD_POOL_WAITING_PREFIX = UPLOAD_POOL_WAITING_PREFIX
 _DRYING_WAITING_MESSAGES: frozenset[str] = frozenset(
     {
         _WAITING_FOR_DRYING_MESSAGE,
@@ -909,7 +917,7 @@ class PrintScheduler:
                     printer_name = item.printer.name if item.printer else f"printer {item.printer_id}"
                     if item.printer_id in busy_printers:
                         if not cleared_sensor_interlock_reason:
-                            item.waiting_reason = f"Waiting for printer reservation on {printer_name}"
+                            item.waiting_reason = f"{PRINTER_RESERVATION_PREFIX} on {printer_name}"
                             await db.commit()
                         continue
 
@@ -952,7 +960,7 @@ class PrintScheduler:
                     # Check if printer is idle (busy with another print)
                     if not printer_idle:
                         if not cleared_sensor_interlock_reason:
-                            item.waiting_reason = f"Waiting for printer reservation on {printer_name}"
+                            item.waiting_reason = f"{PRINTER_RESERVATION_PREFIX} on {printer_name}"
                         busy_printers.add(item.printer_id)
                         await db.commit()
                         continue
@@ -1070,7 +1078,7 @@ class PrintScheduler:
 
                     _claim_library_row(item)
                     if item.waiting_reason and (
-                        item.waiting_reason.startswith("Waiting for printer reservation")
+                        item.waiting_reason.startswith(PRINTER_RESERVATION_PREFIX)
                         or item.waiting_reason.startswith(_UPLOAD_POOL_WAITING_PREFIX)
                     ):
                         item.waiting_reason = None
@@ -1612,7 +1620,7 @@ class PrintScheduler:
                 ]
                 reasons.append(f"Waiting for filament: {'; '.join(names_and_missing)}")
         if printers_busy:
-            reasons.append(f"Busy: {', '.join(printers_busy)}")
+            reasons.append(f"{BUSY_PREFIX} {', '.join(printers_busy)}")
         if printers_offline:
             reasons.append(f"Offline: {', '.join(printers_offline)}")
 
@@ -1627,7 +1635,7 @@ class PrintScheduler:
         is required, so we skip the notification.
         """
         parts = [p.strip() for p in waiting_reason.split(" | ")]
-        return all(p.startswith("Busy:") for p in parts)
+        return all(p.startswith(BUSY_PREFIX) for p in parts)
 
     def _get_missing_force_color_slots(self, printer_id: int, force_overrides: list[dict]) -> list[str]:
         """Return descriptive strings for force_color_match slots not satisfied by the printer.

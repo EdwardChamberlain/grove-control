@@ -93,18 +93,26 @@ export const PAUSE_REASON_KEYS: Record<number, string> = {
  */
 export function resolveQueueTone(
   item: Pick<PrintQueueItem, 'status' | 'scheduled_time' | 'waiting_reason'> &
-    Partial<Pick<PrintQueueItem, 'manual_start' | 'filament_short'>>,
+    Partial<Pick<PrintQueueItem, 'manual_start' | 'filament_short' | 'waiting_needs_action'>>,
   printerState: string | null | undefined,
   t: (key: string) => string,
 ): { tone: QueueTone; Icon: LucideIcon; label: string } {
   const { status } = item;
   if (status === 'pending') {
-    // Blocked on something a person can fix: material, or a manual start.
-    if (item.waiting_reason || item.filament_short) {
+    // Blocked on something a person can fix: material, or a manual start. A wait
+    // that clears by itself (printer busy, upload slot, AMS drying) is not, and
+    // the backend says so with waiting_needs_action. A missing flag, such as
+    // stale cached data, keeps the highlight rather than hiding a stuck job.
+    const waitNeedsAction = !!item.waiting_reason && item.waiting_needs_action !== false;
+    if (waitNeedsAction || item.filament_short) {
       return { tone: QUEUE_TONES.waiting, Icon: Clock, label: t('queue.status.waiting') };
     }
     if (item.manual_start) {
       return { tone: QUEUE_TONES.waiting, Icon: Hand, label: t('queue.badges.staged') };
+    }
+    // Still labelled Waiting, but neutral: the job starts on its own.
+    if (item.waiting_reason) {
+      return { tone: QUEUE_TONES.neutral, Icon: Clock, label: t('queue.status.waiting') };
     }
     // A future pending job needs nothing from anyone, so it stays neutral.
     if (item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now()) {

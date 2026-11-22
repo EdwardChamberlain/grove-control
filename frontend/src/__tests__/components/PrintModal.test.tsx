@@ -35,6 +35,7 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   target_location: null,
   required_filament_types: null,
   waiting_reason: null,
+  waiting_needs_action: false,
   library_file_id: null,
   archive_id: 1,
   position: 1,

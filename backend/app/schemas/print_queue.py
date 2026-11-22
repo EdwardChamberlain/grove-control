@@ -200,6 +200,11 @@ class PrintQueueItemResponse(BaseModel):
     filament_overrides: list[dict] | None = None  # Per-slot filament requirements and force-colour preferences
     force_color_match: bool = True  # Fail closed when requested metadata cannot be established
     waiting_reason: str | None = None  # Why a model-based job hasn't started yet
+    # False while the wait clears by itself (printer busy, upload slot, AMS
+    # drying), so the queue only highlights jobs a person has to act on. Set
+    # explicitly in the route from `waiting_reason` rather than `@computed_field`
+    # (project policy).
+    waiting_needs_action: bool = False
     archive_id: int | None  # None if library_file_id is set (archive created at print start)
     library_file_id: int | None  # For queue items from library files
     position: int

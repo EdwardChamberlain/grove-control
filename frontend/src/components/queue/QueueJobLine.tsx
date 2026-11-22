@@ -43,7 +43,9 @@ export type QueueJobLineItem = Pick<
   | 'error_message'
   | 'preheat_started_at'
   | 'heat_soak_minutes'
->;
+> &
+  // Optional so a synthetic line needs no flag: a missing one keeps a wait highlighted.
+  Partial<Pick<PrintQueueItem, 'waiting_needs_action'>>;
 
 export interface QueueJobLineStatus {
   tone: QueueTone;
