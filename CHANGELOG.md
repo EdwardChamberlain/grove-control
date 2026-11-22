@@ -14,6 +14,11 @@
   now a list grouped by month, with the entry and a one-line note, printer,
   scheduled or unscheduled badge, hours, jobs or changes at the time, and who
   recorded it; the entry type filter is a segmented control.
+- Maintenance: the due and warning counts on the Printers page now pluralise
+  properly ("3 items due" rather than "3 item due", "4 warnings" rather than
+  "4 warning") (#368). The Maintenance page's overdue and due soon totals are now
+  counted from the tasks it lists, so they always match the rail and the rows,
+  and each task's last-done date follows the date format chosen in Settings.
 - Queue: a finished or failed job now stays in the Queue tab as a yellow
   **Clear plate** line, with the hand icon, until its printer's plate is marked
   cleared (#366). The line has a Mark plate as cleared button, names the next

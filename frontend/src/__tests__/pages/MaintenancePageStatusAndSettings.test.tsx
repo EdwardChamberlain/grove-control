@@ -283,6 +283,28 @@ describe('printer view', () => {
     expect(within(row('Dry Box')).getByRole('button', { name: /Mark as Done/ })).toBeDisabled();
   });
 
+  it('shows the last-done date in the saved date format', async () => {
+    server.use(http.get('/api/v1/settings/ui-preferences', () => HttpResponse.json({ date_format: 'eu' })));
+    const user = userEvent.setup();
+    await openPrinter(user);
+
+    await waitFor(() => expect(within(row('Replace HEPA')).getByText('Every 3 months · last done 05/03/2024')).toBeInTheDocument());
+  });
+
+  it('counts the page summary and printer badges from the tasks, whatever the backend totals say', async () => {
+    server.use(
+      http.get('/api/v1/maintenance/overview', () =>
+        HttpResponse.json(overview.map((p) => ({ ...p, due_count: 9, warning_count: 9 }))),
+      ),
+    );
+    const user = userEvent.setup();
+    await openPrinter(user);
+
+    expect(screen.queryByText('9 overdue')).not.toBeInTheDocument();
+    expect(screen.queryByText('9 due soon')).not.toBeInTheDocument();
+    expect(screen.getAllByText('1 overdue', { selector: 'span' })).toHaveLength(2);
+  });
+
   it('resets and disables tasks', async () => {
     const user = userEvent.setup();
     await openPrinter(user);

@@ -50,7 +50,7 @@ import type {
   Permission,
 } from '../api/client';
 import { getMaintenanceWikiUrl } from '../utils/maintenanceWikiUrls';
-import { parseUTCDate, formatDateOnly, type DateFormat } from '../utils/date';
+import { parseUTCDate, formatDateInput, type DateFormat } from '../utils/date';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
@@ -332,12 +332,14 @@ function MachineRail({
 function TaskRow({
   item,
   printerName,
+  dateFormat,
   onPerform,
   onToggle,
   hasPermission,
   t,
 }: {
   item: MaintenanceStatus;
+  dateFormat: DateFormat;
   /** Set on the all-machines list, where rows from every printer are mixed. */
   printerName?: string;
   onPerform: (id: number) => void;
@@ -367,8 +369,9 @@ function TaskRow({
         ? t('maintenance.countdownOverdue')
         : t('maintenance.countdownLeft');
 
-  const lastDone = item.last_performed_at
-    ? t('maintenance.lastDone', { date: formatDateOnly(item.last_performed_at) })
+  const lastPerformed = parseUTCDate(item.last_performed_at);
+  const lastDone = lastPerformed
+    ? t('maintenance.lastDone', { date: formatDateInput(lastPerformed, dateFormat) })
     : t('maintenance.neverDone');
   const rule = t('maintenance.everyInterval', { interval: formatIntervalLabel(metrics.interval, metrics.intervalType, t) });
   const actionLabel = `${t('maintenance.markDone')}: ${item.maintenance_type_name}${printerName ? ` (${printerName})` : ''}`;
@@ -452,11 +455,13 @@ const MAX_ON_TRACK_COLLAPSED = 8;
 
 function AllMachinesView({
   overview,
+  dateFormat,
   onPerform,
   hasPermission,
   t,
 }: {
   overview: PrinterMaintenanceOverview[];
+  dateFormat: DateFormat;
   onPerform: (id: number) => void;
   hasPermission: (permission: Permission) => boolean;
   t: TFunction;
@@ -549,6 +554,7 @@ function AllMachinesView({
                   key={item.id}
                   item={item}
                   printerName={printerName}
+                  dateFormat={dateFormat}
                   onPerform={onPerform}
                   hasPermission={hasPermission}
                   t={t}
@@ -576,6 +582,7 @@ function AllMachinesView({
 
 function PrinterView({
   overview,
+  dateFormat,
   onPerform,
   onToggle,
   onSetHours,
@@ -584,6 +591,7 @@ function PrinterView({
   t,
 }: {
   overview: PrinterMaintenanceOverview;
+  dateFormat: DateFormat;
   onPerform: (id: number) => void;
   onToggle: (id: number, enabled: boolean) => void;
   onSetHours: (printerId: number, hours: number) => void;
@@ -632,19 +640,19 @@ function PrinterView({
               {t('printers.maintenance.modeLabel')}
             </span>
           )}
-          {overview.due_count > 0 && (
+          {counts.overdue > 0 && (
             <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-1 text-xs font-medium text-red-400">
               <AlertTriangle className="h-3 w-3" />
-              {t('maintenance.overdueCount', { count: overview.due_count })}
+              {t('maintenance.overdueCount', { count: counts.overdue })}
             </span>
           )}
-          {overview.warning_count > 0 && (
+          {counts.soon > 0 && (
             <span className="flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-400">
               <Clock className="h-3 w-3" />
-              {t('maintenance.dueSoonCount', { count: overview.warning_count })}
+              {t('maintenance.dueSoonCount', { count: counts.soon })}
             </span>
           )}
-          {overview.due_count === 0 && overview.warning_count === 0 && (
+          {counts.overdue === 0 && counts.soon === 0 && (
             <span className="flex items-center gap-1.5 rounded-full bg-bambu-green/20 px-2.5 py-1 text-xs font-medium text-bambu-green">
               <Check className="h-3 w-3" />
               {t('maintenance.allGood')}
@@ -736,6 +744,7 @@ function PrinterView({
                 <TaskRow
                   key={item.id}
                   item={item}
+                  dateFormat={dateFormat}
                   onPerform={onPerform}
                   onToggle={onToggle}
                   hasPermission={hasPermission}
@@ -752,6 +761,7 @@ function PrinterView({
 
 function StatusTab({
   overview,
+  dateFormat,
   onPerform,
   onToggle,
   onSetHours,
@@ -760,6 +770,7 @@ function StatusTab({
   t,
 }: {
   overview: PrinterMaintenanceOverview[] | undefined;
+  dateFormat: DateFormat;
   onPerform: (id: number) => void;
   onToggle: (id: number, enabled: boolean) => void;
   onSetHours: (printerId: number, hours: number) => void;
@@ -791,6 +802,7 @@ function StatusTab({
         <PrinterView
           key={selectedPrinter.printer_id}
           overview={selectedPrinter}
+          dateFormat={dateFormat}
           onPerform={onPerform}
           onToggle={onToggle}
           onSetHours={onSetHours}
@@ -799,7 +811,7 @@ function StatusTab({
           t={t}
         />
       ) : (
-        <AllMachinesView overview={overview} onPerform={onPerform} hasPermission={hasPermission} t={t} />
+        <AllMachinesView overview={overview} dateFormat={dateFormat} onPerform={onPerform} hasPermission={hasPermission} t={t} />
       )}
     </div>
   );
@@ -2028,8 +2040,10 @@ export function MaintenancePage() {
     );
   }
 
-  const totalDue = overview?.reduce((sum, p) => sum + p.due_count, 0) || 0;
-  const totalWarning = overview?.reduce((sum, p) => sum + p.warning_count, 0) || 0;
+  // Counted from the tasks, like the rail and lists, so every number on the page agrees.
+  const fleetCounts = summariseTasks((overview ?? []).flatMap((p) => p.maintenance_items));
+  const totalDue = fleetCounts.overdue;
+  const totalWarning = fleetCounts.soon;
 
   return (
     <div className="p-4 md:p-8">
@@ -2093,6 +2107,7 @@ export function MaintenancePage() {
       {activeTab === 'status' ? (
         <StatusTab
           overview={overview}
+          dateFormat={dateFormat}
           onPerform={handlePerform}
           onToggle={handleToggle}
           onSetHours={handleSetHours}
