@@ -684,7 +684,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Staged')).toBeInTheDocument();
+        expect(screen.getAllByText('Staged').length).toBeGreaterThan(0);
       });
     });
 

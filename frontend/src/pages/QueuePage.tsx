@@ -1877,7 +1877,7 @@ export function QueuePage() {
                         return (
                           <div key={bucket.key}>
                             <div className="flex items-center gap-3 px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-t-lg">
-                              <Printer className={`w-4 h-4 ${bucket.isUnassigned ? 'text-orange-400' : bucket.targetModel ? 'text-blue-400' : 'text-bambu-green'}`} />
+                              <Printer className="w-4 h-4 text-bambu-gray-light" />
                               <span className="font-semibold text-white text-sm">{bucket.label}</span>
                               <span className="text-xs text-bambu-gray flex flex-wrap gap-x-3">
                                 <span>{t('queue.itemCount', { count: agg.count })}</span>

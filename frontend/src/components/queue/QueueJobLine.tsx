@@ -6,7 +6,7 @@ import type { PrintQueueItem } from '../../api/client';
 import { getBedTypeInfo } from '../../utils/bedType';
 import { type TimeFormat, formatDate, formatDuration, formatETA, formatRelativeTime, parseUTCDate } from '../../utils/date';
 import { formatWeight } from './format';
-import { resolveQueueTone, type QueueJobProgress, type QueueTone } from './queueTones';
+import { QUEUE_TONES, resolveQueueTone, type QueueJobProgress, type QueueTone } from './queueTones';
 
 function formatHeatSoakCountdown(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -102,7 +102,7 @@ export function QueueOptionIcons({ item, t }: { item: QueueJobLineItem; t: Queue
           role="img"
           aria-label={t('queue.badges.requiresPrevious')}
           title={t('queue.badges.requiresPrevious')}
-          className="inline-flex shrink-0 text-orange-600 dark:text-orange-400"
+          className="inline-flex shrink-0 text-bambu-gray-light"
         >
           <Check className="w-3.5 h-3.5" />
         </span>
@@ -112,7 +112,7 @@ export function QueueOptionIcons({ item, t }: { item: QueueJobLineItem; t: Queue
           role="img"
           aria-label={t('queue.badges.autoPowerOff')}
           title={t('queue.badges.autoPowerOff')}
-          className="inline-flex shrink-0 text-blue-600 dark:text-blue-400"
+          className="inline-flex shrink-0 text-bambu-gray-light"
         >
           <Power className="w-3.5 h-3.5" />
         </span>
@@ -122,7 +122,7 @@ export function QueueOptionIcons({ item, t }: { item: QueueJobLineItem; t: Queue
           role="img"
           aria-label={t('queue.badges.gcodeInjection')}
           title={t('queue.badges.gcodeInjection')}
-          className="inline-flex shrink-0 text-emerald-600 dark:text-emerald-400"
+          className="inline-flex shrink-0 text-bambu-gray-light"
         >
           <Code className="w-3.5 h-3.5" />
         </span>
@@ -204,7 +204,7 @@ export function QueueJobLine({
   const bed = getBedTypeInfo(item.bed_type);
   const showStartButton = isPending && item.manual_start;
   const showWaitingReason = isPending && !!item.waiting_reason;
-  const showStagedFooter = showStartButton || showWaitingReason;
+  const showStagedFooter = (showStartButton && !!startAction) || showWaitingReason;
 
   const printerLabel =
     (item.variants?.length ?? 0) > 1 && !item.printer_id
@@ -217,12 +217,6 @@ export function QueueJobLine({
         : item.printer_id === null
           ? t('queue.filter.unassigned')
           : (item.printer_name || `${t('common.printer')} #${item.printer_id}`);
-  const printerTone =
-    item.printer_id === null && !item.target_model ? 'text-orange-600 dark:text-orange-400'
-    : item.target_model && !item.printer_id ? 'text-blue-600 dark:text-blue-400'
-    : isPrinting ? 'text-bambu-green-light'
-    : 'text-bambu-gray-light';
-
   const isFutureSchedule = !!item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
   const scheduleText = isPending && !item.manual_start
     ? (item.scheduled_time
@@ -313,7 +307,7 @@ export function QueueJobLine({
               {!k && (
                 <span className={`text-[10px] font-bold uppercase tracking-[0.04em] sm:hidden ${tone.text}`}>{statusLabel}</span>
               )}
-              <span className={`flex items-center gap-1.5 ${printerTone}`}>
+              <span className="flex items-center gap-1.5">
                 <Printer className={k ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
                 <span className={k ? 'truncate' : 'max-w-[160px] truncate sm:max-w-none'}>{printerLabel}</span>
               </span>
@@ -390,7 +384,8 @@ export function QueueJobLine({
             ) : (
               <span className="flex-1" />
             )}
-            {item.manual_start && (
+            {/* The gutter already says Staged unless a waiting reason took its place. */}
+            {item.manual_start && showWaitingReason && (
               <span className="flex items-center gap-1.5">
                 <Hand className="h-3 w-3" />
                 {t('queue.badges.staged')}
@@ -403,7 +398,7 @@ export function QueueJobLine({
         {/* Filament-short flag from the dispatch pre-flight (#1496). */}
         {item.filament_short && item.status === 'pending' && (
           <div
-            className={`flex items-start gap-2 border-t border-yellow-400/25 bg-yellow-400/10 text-yellow-700 dark:text-yellow-300 ${footerPad}`}
+            className={`flex items-start gap-2 border-t ${QUEUE_TONES.waiting.footer} ${footerPad}`}
             title={t('queue.filamentShort.rowTooltip')}
           >
             <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
@@ -416,7 +411,7 @@ export function QueueJobLine({
           <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-t ${progressPad} ${tone.footer}`}>
             <div className={`min-w-[120px] flex-1 rounded-full bg-bambu-dark-tertiary ${k ? 'h-2.5' : 'h-1.5'}`}>
               <div
-                className={`rounded-full bg-bambu-green-light transition-all ${k ? 'h-2.5' : 'h-1.5'}`}
+                className={`rounded-full transition-all ${tone.bar} ${k ? 'h-2.5' : 'h-1.5'}`}
                 style={{ width: `${progress.progress}%` }}
               />
             </div>
@@ -424,7 +419,7 @@ export function QueueJobLine({
             {progress.remaining != null && progress.remaining > 0 && (
               <>
                 <span>{formatDuration(progress.remaining * 60)}</span>
-                <span className="font-medium text-green-700 dark:text-green-400" title={t('printers.estimatedCompletion')}>
+                <span className={`font-medium ${tone.text}`} title={t('printers.estimatedCompletion')}>
                   ETA {formatETA(progress.remaining, timeFormat, t)}
                 </span>
               </>

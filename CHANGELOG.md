@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Queue and Kiosk: colour now means a person needs to act, with green for
+  printing (#364). Green is printing and heat soak, orange is paused, yellow is
+  a plate waiting to be cleared and purple is waiting on something (material not
+  available, a staged job waiting for a manual start, or short of filament).
+  Everything else is the neutral card colour, including scheduled and
+  dispatching jobs, which need nothing from you. Printer names, print option
+  icons and the kiosk Queued and idle printer cells are neutral too, and a
+  paused job's progress bar is orange. A staged job's gutter now says Staged.
 - Queue and Kiosk: printing and queued jobs are now split into two groups with
   headings and counts, **Printing** and **Up next**, so what is running is easy
   to tell apart from what is waiting (#362). Printing includes paused and

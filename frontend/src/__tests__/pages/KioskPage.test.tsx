@@ -220,7 +220,7 @@ describe('KioskPage', () => {
     const line = await screen.findByTestId('kiosk-job-job-12');
     expect(within(line).getByText('Preheating')).toBeInTheDocument();
     expect(within(line).getByText('Warm chamber assembly')).toBeInTheDocument();
-    expect(line.firstElementChild).toHaveClass('border-amber-400/40');
+    expect(line.firstElementChild).toHaveClass('border-bambu-green/50');
     await waitFor(() => expect(within(screen.getByTestId('kiosk-stat-printing')).getByText('1')).toBeInTheDocument());
   });
 

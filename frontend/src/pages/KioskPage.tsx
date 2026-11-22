@@ -116,7 +116,7 @@ const STAT_TONES = {
   plate: 'border-t-yellow-500 text-yellow-700 dark:text-yellow-300',
   printing: 'border-t-bambu-green text-green-700 dark:text-green-400',
   paused: 'border-t-orange-500 text-orange-700 dark:text-orange-300',
-  queued: 'border-t-purple-400 text-purple-700 dark:text-purple-300',
+  queued: 'border-t-bambu-gray-light text-white',
   idle: 'border-t-bambu-gray-dark text-bambu-gray-light',
 } as const;
 
@@ -192,7 +192,7 @@ export function KioskPage() {
       .map((printer) => {
         const status = statuses.get(printer.id);
         const next = pendingItems.find((item) => item.printer_id === printer.id);
-        const clearPlate: QueueJobLineStatus = { tone: QUEUE_TONES.scheduled, Icon: Hand, label: t('kiosk.clearPlate') };
+        const clearPlate: QueueJobLineStatus = { tone: QUEUE_TONES.plateClear, Icon: Hand, label: t('kiosk.clearPlate') };
         return {
           key: `plate-clear-${printer.id}`,
           item: kioskLineItem({
@@ -373,10 +373,10 @@ export function KioskPage() {
                   <div
                     key={printer.id}
                     data-testid={`kiosk-idle-printer-${printer.id}`}
-                    className="flex min-w-0 flex-1 flex-col justify-center border-l border-t-[3px] border-l-bambu-dark-tertiary border-t-bambu-green px-4 py-1.5 first:border-l-0"
+                    className="flex min-w-0 flex-1 flex-col justify-center border-l border-t-[3px] border-l-bambu-dark-tertiary border-t-bambu-gray-dark px-4 py-1.5 first:border-l-0"
                   >
                     <b className="truncate text-[17px] font-semibold text-white">{printer.name}</b>
-                    <small className="truncate text-sm text-green-700 dark:text-green-400">{t('kiosk.ready')}</small>
+                    <small className="truncate text-sm text-bambu-gray-light">{t('kiosk.ready')}</small>
                   </div>
                 ))}
                 {footerOverflow > 0 && (
