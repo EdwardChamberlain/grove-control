@@ -123,10 +123,42 @@ describe('KioskPage', () => {
         'kiosk-job-job-12',
       ]);
     });
+    // Plate clear, paused and printing share one group; pending jobs are "Up next".
+    expect(screen.getByTestId('kiosk-section-printing')).toHaveTextContent(/Printing\s*3/);
+    expect(screen.getByTestId('kiosk-section-up-next')).toHaveTextContent(/Up next\s*2/);
+    expect(screen.getByTestId('kiosk-job-plate-clear-2').parentElement).toContainElement(screen.getByTestId('kiosk-section-printing'));
+    expect(screen.getByTestId('kiosk-job-job-11').parentElement).toContainElement(screen.getByTestId('kiosk-section-up-next'));
     expect(screen.queryByRole('heading', { name: 'Printers' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Active jobs' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.getByRole('banner').parentElement).toHaveClass('h-screen', 'overflow-hidden');
+  });
+
+  it('shows only the Up next heading when nothing is printing', async () => {
+    vi.spyOn(api, 'getQueue').mockResolvedValue(queue.filter((item) => item.status === 'pending') as never);
+    vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => (
+      { ...idle, id: Number(printerId), name: `Printer ${printerId}` } as never
+    ));
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(jobOrder()).toEqual(['kiosk-job-job-11', 'kiosk-job-job-12']);
+    });
+    expect(screen.queryByTestId('kiosk-section-printing')).not.toBeInTheDocument();
+    const upNext = screen.getByTestId('kiosk-section-up-next');
+    expect(upNext).toHaveTextContent(/Up next\s*2/);
+    // The heading rides inside the first queued line.
+    expect(screen.getByTestId('kiosk-job-job-11').parentElement).toContainElement(upNext);
+  });
+
+  it('shows only the Printing heading when nothing is queued', async () => {
+    vi.spyOn(api, 'getQueue').mockResolvedValue(queue.filter((item) => item.status === 'printing') as never);
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('kiosk-section-printing')).toHaveTextContent(/Printing\s*3/);
+    });
+    expect(screen.queryByTestId('kiosk-section-up-next')).not.toBeInTheDocument();
   });
 
   it('summarises the fleet in a stats row', async () => {
@@ -215,7 +247,7 @@ describe('KioskPage', () => {
     const line = await screen.findByTestId('kiosk-job-job-12');
     expect(within(line).getByText('Preheating')).toBeInTheDocument();
     expect(within(line).getByText('Warm chamber assembly')).toBeInTheDocument();
-    expect(line.firstElementChild).toHaveClass('border-amber-400/40');
+    expect(line.firstElementChild).toHaveClass('border-bambu-green/50');
     await waitFor(() => expect(within(screen.getByTestId('kiosk-stat-printing')).getByText('1')).toBeInTheDocument());
   });
 

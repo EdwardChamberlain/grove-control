@@ -59,6 +59,7 @@ import { QueueStatsBar } from '../components/QueueStatsBar';
 import { CompactHistoryRow } from '../components/CompactHistoryRow';
 import { QueueTimelineView } from '../components/QueueTimelineView';
 import { QueueJobLine, QueueOptionIcons } from '../components/queue/QueueJobLine';
+import { QueueSectionHeading } from '../components/queue/QueueSectionHeading';
 import { formatWeight } from '../components/queue/format';
 import { jobProgressFromStatus, pauseReasonKeyFor, resolveQueueTone } from '../components/queue/queueTones';
 import { ToolbarDropdown, ReactSelect, toolbarControlClass, toolbarIconButtonClass } from '../components/ToolbarControls';
@@ -574,7 +575,7 @@ function SortableQueueItem({
           onClick={onStart}
           disabled={!canUpdate}
           title={!canUpdate ? t('queue.permissions.noStartPrint') : t('queue.actions.startPrint')}
-          className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-bambu-green bg-bambu-green/15 px-3 text-xs font-semibold text-green-700 dark:text-green-400 transition-colors hover:bg-bambu-green/25 disabled:cursor-not-allowed disabled:opacity-50"
+          className="-my-0.5 inline-flex h-5 items-center gap-1.5 rounded-md border border-bambu-green bg-bambu-green/15 px-2.5 text-xs font-semibold text-green-700 dark:text-green-400 transition-colors hover:bg-bambu-green/25 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Play className="h-3 w-3 fill-current" />
           {t('queue.startNow')}
@@ -587,7 +588,7 @@ function SortableQueueItem({
           disabled={isSkippingHeatSoak || !canUpdate}
           aria-label={t('heatSoak.skip')}
           title={!canUpdate ? t('queue.permissions.noStopPrint') : t('heatSoak.skip')}
-          className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-400/15 px-2.5 text-amber-800 dark:text-amber-200 transition-colors hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-50"
+          className="-my-0.5 inline-flex h-5 items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-400/15 px-2 text-amber-800 dark:text-amber-200 transition-colors hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <SkipForward className="h-3.5 w-3.5" />
         </button>
@@ -1131,7 +1132,8 @@ export function QueuePage() {
     () => activeItems.filter((item) => item.status === 'dispatching'),
     [activeItems],
   );
-  const printingCount = activeItems.length - dispatchingItems.length;
+  // Matches the Printing heading: every active job, dispatching included.
+  const printingCount = activeItems.length;
 
   // Get unique printer IDs from active items to fetch their statuses
   const activePrinterIds = useMemo(() => {
@@ -1524,7 +1526,7 @@ export function QueuePage() {
       {/* Summary Stats — about the print queue. */}
       <QueueStatsBar
         printingCount={printingCount}
-        queuedCount={pendingItems.length + dispatchingItems.length}
+        queuedCount={pendingItems.length}
         totalTime={totalQueueTime}
         totalWeight={totalWeight}
         historyCount={historyItems.length}
@@ -1800,9 +1802,15 @@ export function QueuePage() {
         />
       ) : (
         <div className="space-y-2 sm:space-y-3">
-          {/* Active prints: no heading, the card status gutter says what they are. */}
+          {/* Active prints */}
           {activeItems.length > 0 && (
             <div>
+              <QueueSectionHeading
+                testId="queue-section-printing"
+                label={t('queue.sections.printing')}
+                count={activeItems.length}
+                className="mb-2 sm:mb-3"
+              />
               <div className="space-y-2 sm:space-y-3">
                 {activeItems.map((item) => (
                   <SortableQueueItem
@@ -1828,6 +1836,12 @@ export function QueuePage() {
           {/* Pending Queue */}
           {pendingItems.length > 0 && (
             <div>
+              <QueueSectionHeading
+                testId="queue-section-up-next"
+                label={t('queue.sections.upNext')}
+                count={pendingItems.length}
+                className={`mb-2 sm:mb-3 ${activeItems.length > 0 ? 'mt-4 sm:mt-5' : ''}`}
+              />
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
@@ -1864,7 +1878,7 @@ export function QueuePage() {
                         return (
                           <div key={bucket.key}>
                             <div className="flex items-center gap-3 px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-t-lg">
-                              <Printer className={`w-4 h-4 ${bucket.isUnassigned ? 'text-orange-400' : bucket.targetModel ? 'text-blue-400' : 'text-bambu-green'}`} />
+                              <Printer className="w-4 h-4 text-bambu-gray-light" />
                               <span className="font-semibold text-white text-sm">{bucket.label}</span>
                               <span className="text-xs text-bambu-gray flex flex-wrap gap-x-3">
                                 <span>{t('queue.itemCount', { count: agg.count })}</span>

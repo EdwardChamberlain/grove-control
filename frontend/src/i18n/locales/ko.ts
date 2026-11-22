@@ -1138,6 +1138,8 @@ export default {
     },
     sections: {
       activeJobs: '활성 작업',
+      printing: '인쇄 중',
+      upNext: '다음 순서',
       queued: '대기 중',
       history: '기록'
     },

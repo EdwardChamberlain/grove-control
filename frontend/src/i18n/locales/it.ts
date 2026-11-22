@@ -1194,6 +1194,8 @@ export default {
     // Sections
     sections: {
       activeJobs: 'Lavori attivi',
+      printing: 'In stampa',
+      upNext: 'Prossimi',
       queued: 'In coda',
       history: 'Cronologia',
     },

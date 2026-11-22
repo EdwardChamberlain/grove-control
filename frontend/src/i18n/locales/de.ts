@@ -1194,6 +1194,8 @@ export default {
     // Sections
     sections: {
       activeJobs: 'Aktive Aufträge',
+      printing: 'Wird gedruckt',
+      upNext: 'Als Nächstes',
       queued: 'In Warteschlange',
       history: 'Verlauf',
     },

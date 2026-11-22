@@ -1194,6 +1194,8 @@ export default {
     // Sections
     sections: {
       activeJobs: '活动任务',
+      printing: '打印中',
+      upNext: '接下来',
       queued: '排队中',
       history: '历史',
     },
