@@ -4303,7 +4303,6 @@ export const api = {
   updateArchive: (id: number, data: {
     printer_id?: number | null;
     project_id?: number | null;
-    print_name?: string;
     is_favorite?: boolean;
     tags?: string;
     notes?: string;

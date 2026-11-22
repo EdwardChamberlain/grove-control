@@ -112,15 +112,23 @@ class TestArchivesAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_update_archive_name(self, async_client: AsyncClient, archive_factory, printer_factory, db_session):
-        """Verify archive name can be updated."""
+    async def test_update_archive_ignores_name(
+        self, async_client: AsyncClient, archive_factory, printer_factory, db_session
+    ):
+        """The recorded print name is read-only (#329); other fields in the same PATCH still apply."""
         printer = await printer_factory()
         archive = await archive_factory(printer.id, print_name="Original Name")
 
-        response = await async_client.patch(f"/api/v1/archives/{archive.id}", json={"print_name": "Updated Name"})
+        response = await async_client.patch(
+            f"/api/v1/archives/{archive.id}", json={"print_name": "Updated Name", "notes": "kept"}
+        )
 
         assert response.status_code == 200
-        assert response.json()["print_name"] == "Updated Name"
+        assert response.json()["print_name"] == "Original Name"
+        assert response.json()["notes"] == "kept"
+
+        reread = await async_client.get(f"/api/v1/archives/{archive.id}")
+        assert reread.json()["print_name"] == "Original Name"
 
     @pytest.mark.asyncio
     @pytest.mark.integration

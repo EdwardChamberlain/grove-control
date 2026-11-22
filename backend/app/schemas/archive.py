@@ -4,7 +4,8 @@ from pydantic import BaseModel, model_validator
 
 
 class ArchiveBase(BaseModel):
-    print_name: str | None = None
+    # print_name is deliberately absent: it is the name captured when the print
+    # was archived and is read-only here. Rename a copy in Files instead (#329).
     is_favorite: bool | None = None
     tags: str | None = None
     notes: str | None = None

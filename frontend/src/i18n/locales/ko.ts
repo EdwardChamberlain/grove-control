@@ -4565,7 +4565,7 @@ export default {
   editArchive: {
     title: '아카이브 편집',
     name: '이름',
-    namePlaceholder: '인쇄 이름',
+    nameReadOnlyHelp: '기록된 이름은 여기에서 변경할 수 없습니다. \'파일에 저장\'한 뒤 해당 사본의 이름을 변경하세요.',
     printer: '프린터',
     noPrinter: '프린터 없음',
     project: '프로젝트',

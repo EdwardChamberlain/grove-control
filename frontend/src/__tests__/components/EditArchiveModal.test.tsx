@@ -122,7 +122,7 @@ describe('EditArchiveModal', () => {
       expect(screen.getByText(/edit/i)).toBeInTheDocument();
     });
 
-    it('shows print name field', async () => {
+    it('shows the recorded print name as read-only text', () => {
       render(
         <EditArchiveModal
           archive={mockArchive}
@@ -130,11 +130,20 @@ describe('EditArchiveModal', () => {
         />
       );
 
-      await waitFor(() => {
-        // Name field should be present
-        const nameInput = screen.getByDisplayValue('Benchy');
-        expect(nameInput).toBeInTheDocument();
-      });
+      expect(screen.getByTestId('archive-print-name')).toHaveTextContent('Benchy');
+      expect(screen.queryByDisplayValue('Benchy')).not.toBeInTheDocument();
+      expect(screen.getByText(/Save to Files/)).toBeInTheDocument();
+    });
+
+    it('falls back to the filename when there is no print name', () => {
+      render(
+        <EditArchiveModal
+          archive={{ ...mockArchive, print_name: null }}
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(screen.getByTestId('archive-print-name')).toHaveTextContent('benchy.gcode.3mf');
     });
 
     it('shows notes field', async () => {
@@ -242,20 +251,24 @@ describe('EditArchiveModal', () => {
       expect(mockOnClose).toHaveBeenCalled();
     });
 
-    it('can edit print name', async () => {
+    it('does not send print_name when saving', async () => {
       const user = userEvent.setup();
-      render(
-        <EditArchiveModal
-          archive={mockArchive}
-          onClose={mockOnClose}
-        />
+      let patched: Record<string, unknown> | undefined;
+      server.use(
+        http.patch('/api/v1/archives/:id', async ({ request }) => {
+          patched = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ ...mockArchive, ...patched });
+        }),
       );
 
-      const nameInput = screen.getByDisplayValue('Benchy');
-      await user.clear(nameInput);
-      await user.type(nameInput, 'New Name');
+      render(<EditArchiveModal archive={mockArchive} onClose={mockOnClose} />);
+      await user.click(screen.getByRole('button', { name: /save/i }));
 
-      expect(nameInput).toHaveValue('New Name');
+      await waitFor(() => {
+        expect(patched).toBeDefined();
+      });
+      expect(patched).not.toHaveProperty('print_name');
+      expect(patched?.notes).toBe('Test notes');
     });
   });
 

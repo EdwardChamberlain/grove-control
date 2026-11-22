@@ -165,7 +165,7 @@ class TestArchiveOwnershipPermissions(TestOwnershipPermissionsSetup):
         response = await async_client.patch(
             f"/api/v1/archives/{archive.id}",
             headers={"X-API-Key": operator_api_key},
-            json={"print_name": "Should remain unchanged"},
+            json={"notes": "Should remain unchanged"},
         )
 
         assert response.status_code == 403
@@ -315,11 +315,11 @@ class TestArchiveOwnershipPermissions(TestOwnershipPermissionsSetup):
         response = await async_client.patch(
             f"/api/v1/archives/{archive.id}",
             headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
-            json={"print_name": "Admin Updated"},
+            json={"notes": "Admin Updated"},
         )
 
         assert response.status_code == 200
-        assert response.json()["print_name"] == "Admin Updated"
+        assert response.json()["notes"] == "Admin Updated"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -337,11 +337,11 @@ class TestArchiveOwnershipPermissions(TestOwnershipPermissionsSetup):
         response = await async_client.patch(
             f"/api/v1/archives/{archive.id}",
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
-            json={"print_name": "Operator Updated"},
+            json={"notes": "Operator Updated"},
         )
 
         assert response.status_code == 200
-        assert response.json()["print_name"] == "Operator Updated"
+        assert response.json()["notes"] == "Operator Updated"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -359,7 +359,7 @@ class TestArchiveOwnershipPermissions(TestOwnershipPermissionsSetup):
         response = await async_client.patch(
             f"/api/v1/archives/{archive.id}",
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
-            json={"print_name": "Attempted Update"},
+            json={"notes": "Attempted Update"},
         )
 
         assert response.status_code == 403
@@ -1148,7 +1148,7 @@ class TestAuthDisabledPermissions:
 
         response = await async_client.patch(
             f"/api/v1/archives/{archive.id}",
-            json={"print_name": "Updated Name"},
+            json={"notes": "Updated Name"},
         )
 
         assert response.status_code == 200

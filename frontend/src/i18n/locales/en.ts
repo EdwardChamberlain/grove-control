@@ -4842,7 +4842,7 @@ export default {
   editArchive: {
     title: 'Edit Archive',
     name: 'Name',
-    namePlaceholder: 'Print name',
+    nameReadOnlyHelp: 'The recorded name can\'t be changed here. Use Save to Files, then rename that copy.',
     printer: 'Printer',
     noPrinter: 'No printer',
     project: 'Project',
