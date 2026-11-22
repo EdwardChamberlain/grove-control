@@ -150,22 +150,24 @@ describe('Print controls', () => {
     expect(pauses).toHaveLength(0);
   });
 
-  it('glows orange and turns the progress bar orange when paused', async () => {
+  it('glows orange, turns the progress bar orange and shows a paused icon when paused', async () => {
     setup({ state: 'PAUSE', progress: 40, current_print: 'Bracket.3mf' });
     const card = await openCard();
 
-    expect(card.className).toContain('border-orange-500/60');
-    expect(card.querySelector('.bg-orange-500')).not.toBeNull();
-    expect(card.querySelector('.bg-bambu-green.h-1\\.5')).toBeNull();
+    expect(card).toHaveClass('!border-orange-500/60');
+    expect(within(card).getByTestId('printer-card-progress')).toHaveClass('bg-orange-500');
+    expect(within(card).getAllByRole('img', { name: 'Paused' }).length).toBeGreaterThan(0);
   });
 
-  it('keeps the green progress bar and no glow while running', async () => {
+  it('keeps the green progress bar, no glow and no paused icon while running', async () => {
     setup({ state: 'RUNNING', progress: 40, current_print: 'Bracket.3mf' });
     const card = await openCard();
 
-    expect(card.className).not.toContain('border-orange-500/60');
-    expect(card.querySelector('.bg-orange-500')).toBeNull();
-    expect(card.querySelector('.bg-bambu-green.h-1\\.5')).not.toBeNull();
+    expect(card).not.toHaveClass('!border-orange-500/60');
+    const bar = within(card).getByTestId('printer-card-progress');
+    expect(bar).toHaveClass('bg-bambu-green');
+    expect(bar).not.toHaveClass('bg-orange-500');
+    expect(within(card).queryByRole('img', { name: 'Paused' })).not.toBeInTheDocument();
   });
 
   it('resumes a paused print after confirmation', async () => {

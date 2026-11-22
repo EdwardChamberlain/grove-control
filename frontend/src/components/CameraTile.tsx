@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Maximize2 } from 'lucide-react';
+import { Loader2, Maximize2, Pause } from 'lucide-react';
 import { getAuthToken, withStreamToken } from '../api/client';
 import { PlateClearedIcon } from './icons/PlateClearedIcon';
 import { CameraPlaceholder } from './CameraPlaceholder';
@@ -130,7 +130,14 @@ export function CameraTile({
     : 0;
 
   return (
-    <div className="group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left">
+    <div
+      data-paused={bucket === 'paused' ? 'true' : undefined}
+      className={`group relative aspect-video w-full overflow-hidden rounded-lg border bg-black text-left ${
+        bucket === 'paused'
+          ? 'border-orange-500/60 shadow-[0_0_18px_2px_rgba(249,115,22,0.45)]'
+          : 'border-bambu-dark-tertiary'
+      }`}
+    >
       <CameraPlaceholder
         model={printerModel}
         className="absolute inset-0 h-full w-full object-cover"
@@ -217,7 +224,14 @@ export function CameraTile({
 
       {/* Printer name */}
       <div className={`pointer-events-none absolute inset-x-0 bottom-1.5 z-20 flex items-end justify-between gap-2 px-2 pb-1.5 pt-3 text-white ${showClearPlate ? 'pr-12' : ''}`}>
-        <span className={`block min-w-0 truncate text-xs font-medium ${CAMERA_TEXT_SHADOW}`}>{printerName}</span>
+        <span className="flex min-w-0 items-center gap-1 text-xs font-medium">
+          {bucket === 'paused' && (
+            <span role="img" aria-label={t('printers.status.paused', 'Paused')} title={t('printers.status.paused', 'Paused')} className="inline-flex shrink-0 text-orange-400">
+              <Pause className="h-3 w-3 fill-current" aria-hidden="true" />
+            </span>
+          )}
+          <span className={`truncate ${CAMERA_TEXT_SHADOW}`}>{printerName}</span>
+        </span>
         {isPrintingOrPaused && (
           <span className={`shrink-0 text-right text-[11px] font-semibold tabular-nums text-white ${CAMERA_TEXT_SHADOW}`}>
             {displayedProgress}%{etaLabel ? ` - ${etaLabel}` : ''}
@@ -234,7 +248,7 @@ export function CameraTile({
         className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-1.5 overflow-hidden bg-bambu-dark-tertiary"
       >
         <div
-          className={`h-full rounded-r-full transition-all ${bucket === 'paused' ? 'bg-status-warning' : 'bg-bambu-green'}`}
+          className={`h-full rounded-r-full transition-all ${bucket === 'paused' ? 'bg-orange-500' : 'bg-bambu-green'}`}
           style={{ width: `${displayedProgress}%` }}
         />
       </div>

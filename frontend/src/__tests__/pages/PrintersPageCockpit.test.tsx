@@ -238,20 +238,24 @@ describe('Cockpit print controls', () => {
     expect(await screen.findByText('Print stopped')).toBeInTheDocument();
   });
 
-  it('turns the cockpit progress bar orange when paused', async () => {
+  it('turns the cockpit progress bar orange and shows a paused icon when paused', async () => {
     setup({ state: 'PAUSE', progress: 25 });
     await openCockpit();
 
-    expect(document.querySelector('.from-orange-500')).not.toBeNull();
-    expect(document.querySelector('.from-bambu-green')).toBeNull();
+    const bar = screen.getByTestId('cockpit-progress-bar');
+    expect(bar).toHaveClass('from-orange-500');
+    expect(bar).not.toHaveClass('from-bambu-green');
+    expect(screen.getAllByRole('img', { name: 'Paused' }).length).toBeGreaterThan(0);
   });
 
-  it('keeps the cockpit progress bar green while running', async () => {
+  it('keeps the cockpit progress bar green with no paused icon while running', async () => {
     setup({ state: 'RUNNING', progress: 25 });
     await openCockpit();
 
-    expect(document.querySelector('.from-bambu-green')).not.toBeNull();
-    expect(document.querySelector('.from-orange-500')).toBeNull();
+    const bar = screen.getByTestId('cockpit-progress-bar');
+    expect(bar).toHaveClass('from-bambu-green');
+    expect(bar).not.toHaveClass('from-orange-500');
+    expect(screen.queryByRole('img', { name: 'Paused' })).not.toBeInTheDocument();
   });
 
   it('resumes a paused print only after confirmation', async () => {

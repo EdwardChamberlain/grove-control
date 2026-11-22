@@ -255,7 +255,7 @@ function KioskQueueStatusPill({
     }
     const paused = status?.state === 'PAUSE';
     return (
-      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} ${paused ? 'border-yellow-400/20 bg-yellow-400/10 text-yellow-400' : 'border-blue-400/20 bg-blue-400/10 text-blue-400'}`}>
+      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} ${paused ? 'border-orange-400/25 bg-orange-500/10 text-orange-400' : 'border-blue-400/20 bg-blue-400/10 text-blue-400'}`}>
         {paused ? <Pause className="h-3 w-3 shrink-0" /> : <Play className="h-3 w-3 shrink-0" />}
         <span className="truncate">{paused ? t('queue.status.paused') : t('queue.status.printing')}</span>
       </p>
