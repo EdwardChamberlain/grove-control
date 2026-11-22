@@ -187,10 +187,10 @@ export default {
     timeRemaining: '剩余 {{time}}',
     deleteConfirm: '确定要删除"{{name}}"吗？',
     maintenanceOk: '维护正常',
-    maintenanceWarning: '{{count}} 个警告',
-    maintenanceWarning_plural: '{{count}} 个警告',
-    maintenanceDue: '{{count}} 个到期',
-    maintenanceDue_plural: '{{count}} 个到期',
+    maintenanceWarning_one: '{{count}} 个警告',
+    maintenanceWarning_other: '{{count}} 个警告',
+    maintenanceDue_one: '{{count}} 个到期',
+    maintenanceDue_other: '{{count}} 个到期',
     // Sort options
     sort: {
       name: '名称',
@@ -402,8 +402,8 @@ export default {
     },
     // Queue info
     queue: {
-      inQueue: '队列中有 {{count}} 个打印任务',
-      inQueue_plural: '队列中有 {{count}} 个打印任务',
+      inQueue_one: '队列中有 {{count}} 个打印任务',
+      inQueue_other: '队列中有 {{count}} 个打印任务',
     },
     // Controls section
     controls: '控制',
@@ -947,8 +947,8 @@ export default {
       title: '选择要预览的打印板',
       hint: '此存档包含多个打印板。选择一个在 GCode 查看器中打开。',
       plateLabel: '打印板 {{index}}',
-      objectCount: '{{count}} 个对象',
-      objectCount_plural: '{{count}} 个对象',
+      objectCount_one: '{{count}} 个对象',
+      objectCount_other: '{{count}} 个对象',
       noGcode: '此存档没有可预览的已切片 G 代码。请先在 Bambu Studio 中打开并切片。',
     },
     card: {
@@ -1156,8 +1156,8 @@ export default {
     printingInProgress: '打印进行中...',
     viewArchive: '查看归档',
     viewInFileManager: '在文件管理器中查看',
-    itemCount: '{{count}} 个项目',
-    itemCount_plural: '{{count}} 个项目',
+    itemCount_one: '{{count}} 个项目',
+    itemCount_other: '{{count}} 个项目',
     dragToReorder: '拖动以重新排序（仅限尽快）',
     addedBy: '由 {{name}} 添加',
     selectJob: '选择 {{name}}',
@@ -1188,8 +1188,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} 项',
-      batch: '{{name}}（{{count}} 份）',
-      batch_plural: '{{name}}（{{count}} 份）',
+      batch_one: '{{name}}（{{count}} 份）',
+      batch_other: '{{name}}（{{count}} 份）',
     },
     // Sections
     sections: {
@@ -1275,8 +1275,8 @@ export default {
     },
     // Bulk edit
     bulkEdit: {
-      title: '编辑 {{count}} 个项目',
-      title_plural: '编辑 {{count}} 个项目',
+      title_one: '编辑 {{count}} 个项目',
+      title_other: '编辑 {{count}} 个项目',
       description: '仅更改的设置将应用于所选项目。',
       printer: '打印机',
       noChange: '— 不更改 —',

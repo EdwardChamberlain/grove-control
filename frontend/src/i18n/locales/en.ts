@@ -187,10 +187,10 @@ export default {
     timeRemaining: '{{time}} remaining',
     deleteConfirm: 'Are you sure you want to delete "{{name}}"?',
     maintenanceOk: 'Maintenance OK',
-    maintenanceWarning: '{{count}} warning',
-    maintenanceWarning_plural: '{{count}} warnings',
-    maintenanceDue: '{{count}} due',
-    maintenanceDue_plural: '{{count}} due',
+    maintenanceWarning_one: '{{count}} warning',
+    maintenanceWarning_other: '{{count}} warnings',
+    maintenanceDue_one: '{{count}} due',
+    maintenanceDue_other: '{{count}} due',
     // Sort options
     sort: {
       name: 'Name',
@@ -405,8 +405,8 @@ export default {
     },
     // Queue info
     queue: {
-      inQueue: '{{count}} print in queue',
-      inQueue_plural: '{{count}} prints in queue',
+      inQueue_one: '{{count}} print in queue',
+      inQueue_other: '{{count}} prints in queue',
     },
     // Controls section
     controls: 'Controls',
@@ -961,8 +961,8 @@ export default {
       title: 'Select plate to preview',
       hint: 'This archive has multiple plates. Pick one to open in the GCode viewer.',
       plateLabel: 'Plate {{index}}',
-      objectCount: '{{count}} object',
-      objectCount_plural: '{{count}} objects',
+      objectCount_one: '{{count}} object',
+      objectCount_other: '{{count}} objects',
       noGcode: 'This archive has no sliced G-code to preview. Open it in Bambu Studio to slice first.',
     },
     card: {
@@ -1170,8 +1170,8 @@ export default {
     printingInProgress: 'Printing in progress...',
     viewArchive: 'View archive',
     viewInFileManager: 'View in File Manager',
-    itemCount: '{{count}} item',
-    itemCount_plural: '{{count}} items',
+    itemCount_one: '{{count}} item',
+    itemCount_other: '{{count}} items',
     dragToReorder: 'Drag to reorder (ASAP only)',
     addedBy: 'Added by {{name}}',
     selectJob: 'Select {{name}}',
@@ -1208,8 +1208,8 @@ export default {
     // Drag ghost label when multi-dragging
     dragGhost: {
       multiCount: '{{count}} items',
-      batch: '{{name}} ({{count}} copy)',
-      batch_plural: '{{name}} ({{count}} copies)',
+      batch_one: '{{name}} ({{count}} copy)',
+      batch_other: '{{name}} ({{count}} copies)',
     },
     // Sections
     sections: {
@@ -1295,8 +1295,8 @@ export default {
     },
     // Bulk edit
     bulkEdit: {
-      title: 'Edit {{count}} Item',
-      title_plural: 'Edit {{count}} Items',
+      title_one: 'Edit {{count}} Item',
+      title_other: 'Edit {{count}} Items',
       description: 'Only changed settings will be applied to selected items.',
       printer: 'Printer',
       noChange: '— No change —',

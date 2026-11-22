@@ -187,10 +187,10 @@ export default {
     timeRemaining: '{{time}} rimanente',
     deleteConfirm: 'Sei sicuro di eliminare "{{name}}"?',
     maintenanceOk: 'Manutenzione OK',
-    maintenanceWarning: '{{count}} avviso',
-    maintenanceWarning_plural: '{{count}} avvisi',
-    maintenanceDue: '{{count}} in scadenza',
-    maintenanceDue_plural: '{{count}} in scadenza',
+    maintenanceWarning_one: '{{count}} avviso',
+    maintenanceWarning_other: '{{count}} avvisi',
+    maintenanceDue_one: '{{count}} in scadenza',
+    maintenanceDue_other: '{{count}} in scadenza',
     // Sort options
     sort: {
       name: 'Nome',
@@ -402,8 +402,8 @@ export default {
     },
     // Queue info
     queue: {
-      inQueue: '{{count}} stampa in coda',
-      inQueue_plural: '{{count}} stampe in coda',
+      inQueue_one: '{{count}} stampa in coda',
+      inQueue_other: '{{count}} stampe in coda',
     },
     // Controls section
     controls: 'Controlli',
@@ -947,8 +947,8 @@ export default {
       title: 'Seleziona la piastra da visualizzare',
       hint: 'Questo archivio contiene più piastre. Scegline una da aprire nel visualizzatore GCode.',
       plateLabel: 'Piastra {{index}}',
-      objectCount: '{{count}} oggetto',
-      objectCount_plural: '{{count}} oggetti',
+      objectCount_one: '{{count}} oggetto',
+      objectCount_other: '{{count}} oggetti',
       noGcode: 'Questo archivio non contiene G-code generato da visualizzare. Aprilo prima in Bambu Studio per sezionarlo.',
     },
     card: {
@@ -1156,8 +1156,8 @@ export default {
     printingInProgress: 'Stampa in corso...',
     viewArchive: 'Vedi archivio',
     viewInFileManager: 'Vedi nel Gestore file',
-    itemCount: '{{count}} elemento',
-    itemCount_plural: '{{count}} elementi',
+    itemCount_one: '{{count}} elemento',
+    itemCount_other: '{{count}} elementi',
     dragToReorder: 'Trascina per riordinare (solo ASAP)',
     addedBy: 'Aggiunto da {{name}}',
     selectJob: 'Seleziona {{name}}',
@@ -1188,8 +1188,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} elementi',
-      batch: '{{name}} ({{count}} copia)',
-      batch_plural: '{{name}} ({{count}} copie)',
+      batch_one: '{{name}} ({{count}} copia)',
+      batch_other: '{{name}} ({{count}} copie)',
     },
     // Sections
     sections: {
@@ -1275,8 +1275,8 @@ export default {
     },
     // Bulk edit
     bulkEdit: {
-      title: 'Modifica {{count}} elemento',
-      title_plural: 'Modifica {{count}} elementi',
+      title_one: 'Modifica {{count}} elemento',
+      title_other: 'Modifica {{count}} elementi',
       description: 'Solo le impostazioni modificate saranno applicate agli elementi selezionati.',
       printer: 'Stampante',
       noChange: '— Nessun cambio —',

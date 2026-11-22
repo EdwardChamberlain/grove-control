@@ -187,10 +187,10 @@ export default {
     timeRemaining: '{{time}} kaldı',
     deleteConfirm: '"{{name}}" silmek istediğinizden emin misiniz?',
     maintenanceOk: 'Bakım Tamam',
-    maintenanceWarning: '{{count}} uyarı',
-    maintenanceWarning_plural: '{{count}} uyarı',
-    maintenanceDue: '{{count}} bekliyor',
-    maintenanceDue_plural: '{{count}} bekliyor',
+    maintenanceWarning_one: '{{count}} uyarı',
+    maintenanceWarning_other: '{{count}} uyarı',
+    maintenanceDue_one: '{{count}} bekliyor',
+    maintenanceDue_other: '{{count}} bekliyor',
     // Sıralama seçenekleri
     sort: {
       name: 'Ad',
@@ -402,8 +402,8 @@ export default {
     },
     // Kuyruk bilgisi
     queue: {
-      inQueue: 'Kuyrukta {{count}} baskı',
-      inQueue_plural: 'Kuyrukta {{count}} baskı',
+      inQueue_one: 'Kuyrukta {{count}} baskı',
+      inQueue_other: 'Kuyrukta {{count}} baskı',
     },
     // Kontroller bölümü
     controls: 'Kontroller',
@@ -947,8 +947,8 @@ export default {
       title: 'Önizleme için plaka seçin',
       hint: 'Bu arşivde birden fazla plaka var. GCode görüntüleyicide açmak için birini seçin.',
       plateLabel: 'Plaka {{index}}',
-      objectCount: '{{count}} nesne',
-      objectCount_plural: '{{count}} nesne',
+      objectCount_one: '{{count}} nesne',
+      objectCount_other: '{{count}} nesne',
       noGcode: "Bu arşivin önizleme için dilimlenmiş G-kodu yok. Önce dilimlemek için Bambu Studio'da açın.",
     },
     card: {
@@ -1156,8 +1156,8 @@ export default {
     printingInProgress: 'Baskı devam ediyor...',
     viewArchive: 'Arşivi görüntüle',
     viewInFileManager: 'Dosya Yöneticisinde görüntüle',
-    itemCount: '{{count}} öğe',
-    itemCount_plural: '{{count}} öğe',
+    itemCount_one: '{{count}} öğe',
+    itemCount_other: '{{count}} öğe',
     dragToReorder: 'Yeniden sıralamak için sürükleyin (yalnızca ASAP)',
     addedBy: '{{name}} tarafından eklendi',
     selectJob: '{{name}} öğesini seç',
@@ -1188,8 +1188,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} öğe',
-      batch: '{{name}} ({{count}} kopya)',
-      batch_plural: '{{name}} ({{count}} kopya)',
+      batch_one: '{{name}} ({{count}} kopya)',
+      batch_other: '{{name}} ({{count}} kopya)',
     },
     // Bölümler
     sections: {
@@ -1275,8 +1275,8 @@ export default {
     },
     // Toplu düzenleme
     bulkEdit: {
-      title: '{{count}} Öğeyi Düzenle',
-      title_plural: '{{count}} Öğeyi Düzenle',
+      title_one: '{{count}} Öğeyi Düzenle',
+      title_other: '{{count}} Öğeyi Düzenle',
       description: 'Yalnızca değiştirilen ayarlar seçili öğelere uygulanacak.',
       printer: 'Yazıcı',
       noChange: '— Değişiklik yok —',
