@@ -134,6 +134,33 @@ describe('KioskPage', () => {
     expect(screen.getByRole('banner').parentElement).toHaveClass('h-screen', 'overflow-hidden');
   });
 
+  it('shows only the Up next heading when nothing is printing', async () => {
+    vi.spyOn(api, 'getQueue').mockResolvedValue(queue.filter((item) => item.status === 'pending') as never);
+    vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => (
+      { ...idle, id: Number(printerId), name: `Printer ${printerId}` } as never
+    ));
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(jobOrder()).toEqual(['kiosk-job-job-11', 'kiosk-job-job-12']);
+    });
+    expect(screen.queryByTestId('kiosk-section-printing')).not.toBeInTheDocument();
+    const upNext = screen.getByTestId('kiosk-section-up-next');
+    expect(upNext).toHaveTextContent(/Up next\s*2/);
+    // The heading rides inside the first queued line.
+    expect(screen.getByTestId('kiosk-job-job-11').parentElement).toContainElement(upNext);
+  });
+
+  it('shows only the Printing heading when nothing is queued', async () => {
+    vi.spyOn(api, 'getQueue').mockResolvedValue(queue.filter((item) => item.status === 'printing') as never);
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('kiosk-section-printing')).toHaveTextContent(/Printing\s*3/);
+    });
+    expect(screen.queryByTestId('kiosk-section-up-next')).not.toBeInTheDocument();
+  });
+
   it('summarises the fleet in a stats row', async () => {
     render(<KioskPage />);
 

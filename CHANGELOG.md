@@ -15,7 +15,9 @@
   to tell apart from what is waiting (#362). Printing includes paused and
   heat-soaking jobs, and on the kiosk the printers waiting for their plate to be
   cleared. Up next lists pending, scheduled, waiting and staged jobs in queue
-  order. A heading is hidden when its group is empty.
+  order. A heading is hidden when its group is empty. The Printing and Queued
+  counts above the Queue page list now match the headings, so a job being
+  dispatched counts as printing.
 - Kiosk: the kiosk now matches the Print Queue page (#359). The Printers strip
   and the separate Active jobs section are gone, replaced by one read-only list
   that uses the same job lines as the Queue page, so printing, paused,

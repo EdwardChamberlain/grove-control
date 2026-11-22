@@ -1132,7 +1132,8 @@ export function QueuePage() {
     () => activeItems.filter((item) => item.status === 'dispatching'),
     [activeItems],
   );
-  const printingCount = activeItems.length - dispatchingItems.length;
+  // Matches the Printing heading: every active job, dispatching included.
+  const printingCount = activeItems.length;
 
   // Get unique printer IDs from active items to fetch their statuses
   const activePrinterIds = useMemo(() => {
@@ -1525,7 +1526,7 @@ export function QueuePage() {
       {/* Summary Stats — about the print queue. */}
       <QueueStatsBar
         printingCount={printingCount}
-        queuedCount={pendingItems.length + dispatchingItems.length}
+        queuedCount={pendingItems.length}
         totalTime={totalQueueTime}
         totalWeight={totalWeight}
         historyCount={historyItems.length}

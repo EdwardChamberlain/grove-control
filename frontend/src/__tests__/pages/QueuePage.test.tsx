@@ -264,7 +264,7 @@ describe('QueuePage', () => {
       expect(screen.getByTestId('queue-section-up-next')).toBeInTheDocument();
     });
 
-    it('shows dispatching items as active without calling them printing', async () => {
+    it('counts dispatching items under Printing so the stats match the headings', async () => {
       const user = userEvent.setup();
       server.use(
         http.get('/api/v1/queue/', () => HttpResponse.json([
@@ -283,10 +283,13 @@ describe('QueuePage', () => {
       await waitFor(() => {
         expect(screen.getByText('Awaiting printer acknowledgement')).toBeInTheDocument();
         expect(screen.getAllByText('Dispatching').length).toBeGreaterThan(0);
-        expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/1\s*Printing/);
-        expect(screen.getByTestId('queue-stat-queued')).toHaveTextContent(/2\s*Queued/);
+        expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/2\s*Printing/);
+        expect(screen.getByTestId('queue-stat-queued')).toHaveTextContent(/1\s*Queued/);
         expect(screen.getAllByTitle('Stop Print')).toHaveLength(2);
       });
+      // The stats bar and the section headings agree.
+      expect(screen.getByTestId('queue-section-printing')).toHaveTextContent(/Printing\s*2/);
+      expect(screen.getByTestId('queue-section-up-next')).toHaveTextContent(/Up next\s*1/);
 
       await user.click(screen.getByRole('button', { name: /Timeline/ }));
       const timelineItem = await screen.findByTestId('queue-timeline-item-4');
