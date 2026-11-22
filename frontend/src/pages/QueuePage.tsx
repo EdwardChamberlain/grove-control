@@ -575,7 +575,7 @@ function SortableQueueItem({
           onClick={onStart}
           disabled={!canUpdate}
           title={!canUpdate ? t('queue.permissions.noStartPrint') : t('queue.actions.startPrint')}
-          className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-bambu-green bg-bambu-green/15 px-3 text-xs font-semibold text-green-700 dark:text-green-400 transition-colors hover:bg-bambu-green/25 disabled:cursor-not-allowed disabled:opacity-50"
+          className="-my-0.5 inline-flex h-5 items-center gap-1.5 rounded-md border border-bambu-green bg-bambu-green/15 px-2.5 text-xs font-semibold text-green-700 dark:text-green-400 transition-colors hover:bg-bambu-green/25 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Play className="h-3 w-3 fill-current" />
           {t('queue.startNow')}
@@ -588,7 +588,7 @@ function SortableQueueItem({
           disabled={isSkippingHeatSoak || !canUpdate}
           aria-label={t('heatSoak.skip')}
           title={!canUpdate ? t('queue.permissions.noStopPrint') : t('heatSoak.skip')}
-          className="inline-flex h-[26px] items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-400/15 px-2.5 text-amber-800 dark:text-amber-200 transition-colors hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-50"
+          className="-my-0.5 inline-flex h-5 items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-400/15 px-2 text-amber-800 dark:text-amber-200 transition-colors hover:bg-amber-400/25 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <SkipForward className="h-3.5 w-3.5" />
         </button>
