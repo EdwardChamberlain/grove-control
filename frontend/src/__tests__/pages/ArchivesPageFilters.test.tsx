@@ -10,6 +10,7 @@ import { http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { ArchivesPage } from '../../pages/ArchivesPage';
 import { server } from '../mocks/server';
+import { setAuthToken } from '../../api/client';
 
 type Overrides = Record<string, unknown>;
 
@@ -526,5 +527,57 @@ describe('ArchivesPage last-printed label and deep links on a cold load', () => 
       delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
       window.history.pushState({}, '', '/');
     }
+  });
+});
+
+describe('ArchivesPage user filter', () => {
+  /** Turn auth on and sign in as user 7 holding exactly these permissions. */
+  function signInWith(permissions: string[]) {
+    setAuthToken('test-token', 'session');
+    server.use(
+      http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+      http.get('/api/v1/auth/me', () =>
+        HttpResponse.json({ id: 7, username: 'reader', groups: [], permissions }),
+      ),
+    );
+  }
+
+  it('offers the user filter to a viewer who can see everyone\'s prints', async () => {
+    useArchives([archive(1, 'Benchy')]);
+    signInWith(['archives:read_all', 'users:read']);
+    server.use(http.get('/api/v1/users', () => HttpResponse.json([{ id: 1, username: 'alice', is_active: true }])));
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    const panel = await openFilters(user);
+    expect(await panel.findByRole('button', { name: 'All Users' })).toBeInTheDocument();
+  });
+
+  it('hides the user filter, and skips the user list, for a viewer limited to their own prints', async () => {
+    useArchives([archive(1, 'Benchy')]);
+    signInWith(['archives:read_own']);
+    let usersRequested = false;
+    server.use(http.get('/api/v1/users', () => {
+      usersRequested = true;
+      return HttpResponse.json([]);
+    }));
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    const panel = await openFilters(user);
+    expect(panel.queryByRole('button', { name: 'All Users' })).not.toBeInTheDocument();
+    expect(usersRequested).toBe(false);
+  });
+
+  it('drops a saved user filter the viewer can no longer use', async () => {
+    setStorage({ archiveViewMode: 'grid', logFilterUser: 'alice' });
+    useArchives([archive(1, 'Benchy')]);
+    signInWith(['archives:read_own']);
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await waitFor(() => expect(screen.queryByText('alice')).not.toBeInTheDocument());
   });
 });

@@ -20,6 +20,8 @@ interface HistoryFilterBarProps {
   chips: ActiveFilterChip[];
   printers: { id: number; name: string }[] | undefined;
   users: { username: string }[] | undefined;
+  /** False hides the User filter, for viewers who can only see their own prints. */
+  showUserFilter?: boolean;
   /** Options derived from the archives on hand. */
   uniqueMaterials: string[];
   uniqueColors: string[];
@@ -41,7 +43,7 @@ const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-w
  * row of removable chips for whatever is active.
  */
 export function HistoryFilterBar({
-  filters, viewMode, onViewModeChange, chips, printers, users, uniqueMaterials, uniqueColors, uniqueTags,
+  filters, viewMode, onViewModeChange, chips, printers, users, showUserFilter = true, uniqueMaterials, uniqueColors, uniqueTags,
   shownCount, searchInputRef, onManageTags, onClearLog, clearLogDisabled,
 }: HistoryFilterBarProps) {
   const { t } = useTranslation();
@@ -216,16 +218,18 @@ export function HistoryFilterBar({
                 )}
                 <div className={sectionHeadingClass}>{t('archives.filters.whoWhen')}</div>
                 <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <ToolbarDropdown
-                    value={filterUser || 'all'}
-                    fullWidth={isMobile}
-                    onChange={(value) => setFilterUser(value === 'all' ? null : value)}
-                    minWidthClass="min-w-32"
-                    options={[
-                      { value: 'all', label: t('archives.log.allUsers') },
-                      ...(users?.map((u) => ({ value: u.username, label: u.username })) ?? []),
-                    ]}
-                  />
+                  {showUserFilter && (
+                    <ToolbarDropdown
+                      value={filterUser || 'all'}
+                      fullWidth={isMobile}
+                      onChange={(value) => setFilterUser(value === 'all' ? null : value)}
+                      minWidthClass="min-w-32"
+                      options={[
+                        { value: 'all', label: t('archives.log.allUsers') },
+                        ...(users?.map((u) => ({ value: u.username, label: u.username })) ?? []),
+                      ]}
+                    />
+                  )}
                   <label className="sr-only" htmlFor="history-date-from">{t('archives.log.dateFrom')}</label>
                   <input
                     id="history-date-from"
