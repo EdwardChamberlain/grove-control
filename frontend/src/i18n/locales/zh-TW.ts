@@ -187,10 +187,10 @@ export default {
     timeRemaining: '剩餘 {{time}}',
     deleteConfirm: '確定要刪除"{{name}}"嗎？',
     maintenanceOk: '維護正常',
-    maintenanceWarning: '{{count}} 個警告',
-    maintenanceWarning_plural: '{{count}} 個警告',
-    maintenanceDue: '{{count}} 個到期',
-    maintenanceDue_plural: '{{count}} 個到期',
+    maintenanceWarning_one: '{{count}} 個警告',
+    maintenanceWarning_other: '{{count}} 個警告',
+    maintenanceDue_one: '{{count}} 個到期',
+    maintenanceDue_other: '{{count}} 個到期',
     // Sort options
     sort: {
       name: '名稱',
@@ -402,8 +402,8 @@ export default {
     },
     // Queue info
     queue: {
-      inQueue: '佇列中有 {{count}} 個列印任務',
-      inQueue_plural: '佇列中有 {{count}} 個列印任務',
+      inQueue_one: '佇列中有 {{count}} 個列印任務',
+      inQueue_other: '佇列中有 {{count}} 個列印任務',
     },
     // Controls section
     controls: '控制',
@@ -947,8 +947,8 @@ export default {
       title: '選擇要預覽的列印板',
       hint: '此存檔包含多個列印板。選擇一個在 GCode 檢視器中開啟。',
       plateLabel: '列印板 {{index}}',
-      objectCount: '{{count}} 個物件',
-      objectCount_plural: '{{count}} 個物件',
+      objectCount_one: '{{count}} 個物件',
+      objectCount_other: '{{count}} 個物件',
       noGcode: '此存檔沒有可預覽的已切片 G 代碼。請先在 Bambu Studio 中開啟並切片。',
     },
     card: {
@@ -1156,8 +1156,8 @@ export default {
     printingInProgress: '列印進行中...',
     viewArchive: '檢視歸檔',
     viewInFileManager: '在檔案管理器中檢視',
-    itemCount: '{{count}} 個項目',
-    itemCount_plural: '{{count}} 個項目',
+    itemCount_one: '{{count}} 個項目',
+    itemCount_other: '{{count}} 個項目',
     dragToReorder: '拖曳以重新排序（僅限盡快）',
     addedBy: '由 {{name}} 新增',
     selectJob: '選取 {{name}}',
@@ -1188,8 +1188,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} 項',
-      batch: '{{name}}（{{count}} 份）',
-      batch_plural: '{{name}}（{{count}} 份）',
+      batch_one: '{{name}}（{{count}} 份）',
+      batch_other: '{{name}}（{{count}} 份）',
     },
     // Sections
     sections: {
@@ -1275,8 +1275,8 @@ export default {
     },
     // Bulk edit
     bulkEdit: {
-      title: '編輯 {{count}} 個項目',
-      title_plural: '編輯 {{count}} 個項目',
+      title_one: '編輯 {{count}} 個項目',
+      title_other: '編輯 {{count}} 個項目',
       description: '僅更改的設定將套用於所選項目。',
       printer: '印表機',
       noChange: '— 不更改 —',

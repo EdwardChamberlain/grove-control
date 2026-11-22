@@ -76,6 +76,16 @@ describe('compareLocales (parity-script self-test)', () => {
     expect(hasReport(result.reports, 'plural key mismatch', 'missing _other')).toBe(true);
   });
 
+  it('rejects the legacy _plural suffix, which i18next 25 ignores', () => {
+    const result = compareLocales({
+      en: toMap({ item: 'item', item_plural: 'items' }),
+      'zh-CN': toMap({ item: '项', item_plural: '项' }),
+    });
+    expect(result.failed).toBe(true);
+    expect(hasReport(result.reports, 'en: legacy _plural', 'item_plural')).toBe(true);
+    expect(hasReport(result.reports, 'zh-CN: legacy _plural', 'item_plural')).toBe(true);
+  });
+
   it('flags a non-en _one key that does not exist in en', () => {
     const result = compareLocales({
       en: toMap({ item: 'item' }),

@@ -187,10 +187,10 @@ export default {
     timeRemaining: '{{time}} restante',
     deleteConfirm: '¿Está seguro de que desea eliminar "{{name}}"?',
     maintenanceOk: 'Mantenimiento correcto',
-    maintenanceWarning: '{{count}} advertencia',
-    maintenanceWarning_plural: '{{count}} advertencias',
-    maintenanceDue: '{{count}} pendiente',
-    maintenanceDue_plural: '{{count}} pendientes',
+    maintenanceWarning_one: '{{count}} advertencia',
+    maintenanceWarning_other: '{{count}} advertencias',
+    maintenanceDue_one: '{{count}} pendiente',
+    maintenanceDue_other: '{{count}} pendientes',
     // Sort options
     sort: {
       name: 'Nombre',
@@ -402,8 +402,8 @@ export default {
     },
     // Queue info
     queue: {
-      inQueue: '{{count}} impresión en cola',
-      inQueue_plural: '{{count}} impresiones en cola',
+      inQueue_one: '{{count}} impresión en cola',
+      inQueue_other: '{{count}} impresiones en cola',
     },
     // Controls section
     controls: 'Controles',
@@ -947,8 +947,8 @@ export default {
       title: 'Seleccione la cama para la vista previa',
       hint: 'Este archivo tiene varias camas. Elija una para abrirla en el visor de G-code.',
       plateLabel: 'Cama {{index}}',
-      objectCount: '{{count}} objeto',
-      objectCount_plural: '{{count}} objetos',
+      objectCount_one: '{{count}} objeto',
+      objectCount_other: '{{count}} objetos',
       noGcode: 'Este archivo no tiene G-code laminado para previsualizar. Ábralo en Bambu Studio para laminarlo primero.',
     },
     card: {
@@ -1156,8 +1156,8 @@ export default {
     printingInProgress: 'Impresión en curso...',
     viewArchive: 'Ver archivo',
     viewInFileManager: 'Ver en el gestor de archivos',
-    itemCount: '{{count}} elemento',
-    itemCount_plural: '{{count}} elementos',
+    itemCount_one: '{{count}} elemento',
+    itemCount_other: '{{count}} elementos',
     dragToReorder: 'Arrastre para reordenar (solo elementos «lo antes posible»)',
     addedBy: 'Añadido por {{name}}',
     selectJob: 'Seleccionar {{name}}',
@@ -1188,8 +1188,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} elementos',
-      batch: '{{name}} ({{count}} copia)',
-      batch_plural: '{{name}} ({{count}} copias)',
+      batch_one: '{{name}} ({{count}} copia)',
+      batch_other: '{{name}} ({{count}} copias)',
     },
     // Sections
     sections: {
@@ -1275,8 +1275,8 @@ export default {
     },
     // Bulk edit
     bulkEdit: {
-      title: 'Editar {{count}} elemento',
-      title_plural: 'Editar {{count}} elementos',
+      title_one: 'Editar {{count}} elemento',
+      title_other: 'Editar {{count}} elementos',
       description: 'Solo se aplicarán los ajustes modificados a los elementos seleccionados.',
       printer: 'Impresora',
       noChange: '— Sin cambios —',

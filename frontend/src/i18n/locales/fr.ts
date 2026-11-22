@@ -187,10 +187,10 @@ export default {
     timeRemaining: '{{time}} restant',
     deleteConfirm: 'Êtes-vous sûr de vouloir supprimer "{{name}}" ?',
     maintenanceOk: 'Maintenance OK',
-    maintenanceWarning: '{{count}} avertissement',
-    maintenanceWarning_plural: '{{count}} avertissements',
-    maintenanceDue: '{{count}} échéance',
-    maintenanceDue_plural: '{{count}} échéances',
+    maintenanceWarning_one: '{{count}} avertissement',
+    maintenanceWarning_other: '{{count}} avertissements',
+    maintenanceDue_one: '{{count}} échéance',
+    maintenanceDue_other: '{{count}} échéances',
     // Sort options
     sort: {
       name: 'Nom',
@@ -402,8 +402,8 @@ export default {
     },
     // Queue info
     queue: {
-      inQueue: '{{count}} impression en file',
-      inQueue_plural: '{{count}} impressions en file',
+      inQueue_one: '{{count}} impression en file',
+      inQueue_other: '{{count}} impressions en file',
     },
     // Controls section
     controls: 'Contrôles',
@@ -947,8 +947,8 @@ export default {
       title: 'Choisir une plaque à prévisualiser',
       hint: 'Cette archive contient plusieurs plaques. Sélectionnez-en une pour l\'ouvrir dans la visionneuse GCode.',
       plateLabel: 'Plaque {{index}}',
-      objectCount: '{{count}} objet',
-      objectCount_plural: '{{count}} objets',
+      objectCount_one: '{{count}} objet',
+      objectCount_other: '{{count}} objets',
       noGcode: 'Cette archive ne contient pas de G-code généré à prévisualiser. Ouvrez-la d\'abord dans Bambu Studio pour la trancher.',
     },
     card: {
@@ -1156,8 +1156,8 @@ export default {
     printingInProgress: 'Impression en cours...',
     viewArchive: 'Voir l\'archive',
     viewInFileManager: 'Voir dans le gestionnaire',
-    itemCount: '{{count}} élément',
-    itemCount_plural: '{{count}} éléments',
+    itemCount_one: '{{count}} élément',
+    itemCount_other: '{{count}} éléments',
     dragToReorder: 'Glisser pour réordonner (ASAP uniquement)',
     addedBy: 'Ajouté par {{name}}',
     selectJob: 'Sélectionner {{name}}',
@@ -1188,8 +1188,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} éléments',
-      batch: '{{name}} ({{count}} copie)',
-      batch_plural: '{{name}} ({{count}} copies)',
+      batch_one: '{{name}} ({{count}} copie)',
+      batch_other: '{{name}} ({{count}} copies)',
     },
     // Sections
     sections: {
@@ -1275,8 +1275,8 @@ export default {
     },
     // Bulk edit
     bulkEdit: {
-      title: 'Modifier {{count}} élément',
-      title_plural: 'Modifier {{count}} éléments',
+      title_one: 'Modifier {{count}} élément',
+      title_other: 'Modifier {{count}} éléments',
       description: 'Seuls les changements seront appliqués.',
       printer: 'Imprimante',
       noChange: '— Aucun changement —',
