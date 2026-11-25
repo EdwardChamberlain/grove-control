@@ -578,6 +578,11 @@ class FirmwareCheckService:
         for v in await self.get_available_versions(model):
             if v.version == version:
                 return v
+        # The version list is empty for models without a wiki page, where the
+        # single-version lookup is all check_for_update has to offer.
+        latest = await self.get_latest_version(model)
+        if latest and latest.version == version:
+            return latest
         return None
 
     async def check_for_update(self, model: str, current_version: str) -> dict:

@@ -449,3 +449,15 @@ async def test_download_without_version_uses_newest_downloadable(tmp_path, monke
 
     with patch.object(svc, "get_available_versions", AsyncMock(return_value=[ANNOUNCED_ONLY, DOWNLOADABLE])):
         assert await svc.download_firmware("H2D") == cached
+
+
+@pytest.mark.asyncio
+async def test_version_info_falls_back_to_single_lookup_when_list_is_empty():
+    """Models with no version list still resolve the version check_for_update offered (#376)."""
+    svc = FirmwareCheckService()
+    with (
+        patch.object(svc, "get_available_versions", AsyncMock(return_value=[])),
+        patch.object(svc, "get_latest_version", AsyncMock(return_value=DOWNLOADABLE)),
+    ):
+        assert await svc.get_version_info("H2D", "01.02.10.00") == DOWNLOADABLE
+        assert await svc.get_version_info("H2D", "01.00.00.00") is None

@@ -283,7 +283,11 @@ async def start_firmware_upload(
         )
 
     # Start the upload
-    started = await update_service.start_upload(printer_id, db, target_version=version)
+    # Install the release the pre-flight check just validated, not a fresh
+    # "latest" lookup that could resolve differently if the cache refreshes.
+    started = await update_service.start_upload(
+        printer_id, db, target_version=version or prepare_result["latest_version"]
+    )
 
     if not started:
         state = get_upload_state(printer_id)
