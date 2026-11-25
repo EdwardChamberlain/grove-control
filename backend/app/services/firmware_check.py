@@ -557,11 +557,32 @@ class FirmwareCheckService:
         self._cache_time = time.time()
         return merged
 
+    async def get_latest_downloadable_version(self, model: str) -> FirmwareVersion | None:
+        """Newest version whose firmware file can actually be downloaded.
+
+        Bambu announces a release on the wiki before the file is published, so
+        the newest announced version (``get_latest_version``) may have no
+        ``download_url``. Anything that installs firmware, or decides whether an
+        update is on offer, should use this instead (#376).
+        """
+        for v in await self.get_available_versions(model):
+            if v.download_url:
+                return v
+        # Version lists come back empty for models without a wiki page; the
+        # single-version lookup can still find a downloadable latest.
+        latest = await self.get_latest_version(model)
+        return latest if latest and latest.download_url else None
+
     async def get_version_info(self, model: str, version: str) -> FirmwareVersion | None:
         """Find a specific version's info (including download URL) for a model."""
         for v in await self.get_available_versions(model):
             if v.version == version:
                 return v
+        # The version list is empty for models without a wiki page, where the
+        # single-version lookup is all check_for_update has to offer.
+        latest = await self.get_latest_version(model)
+        if latest and latest.version == version:
+            return latest
         return None
 
     async def check_for_update(self, model: str, current_version: str) -> dict:
@@ -604,9 +625,28 @@ class FirmwareCheckService:
         if not current_version:
             return result
 
-        latest = available[0] if available else await self.get_latest_version(model)
+        # Bambu announces a release on the wiki before the file appears on the
+        # download page, so the newest announced version may not be installable
+        # yet. Judge "update available" against the newest version that has a
+        # file, otherwise the user gets an amber marker they cannot act on.
+        # Fall back to the newest announced version for display when nothing is
+        # downloadable (e.g. the download page is unreachable).
+        downloadable = [v for v in available if v.download_url]
+        if downloadable:
+            latest = downloadable[0]
+        elif available:
+            latest = available[0]
+        else:
+            latest = await self.get_latest_version(model)
         if not latest:
             return result
+        if available and latest is not available[0]:
+            logger.debug(
+                "Firmware %s for %s is announced but has no download file yet; offering %s instead",
+                available[0].version,
+                model,
+                latest.version,
+            )
 
         result["latest_version"] = latest.version
         result["download_url"] = latest.download_url or None
@@ -623,7 +663,8 @@ class FirmwareCheckService:
             while len(latest_parts) < 4:
                 latest_parts.append(0)
 
-            result["update_available"] = latest_parts > current_parts
+            # Only a version we can actually fetch counts as an available update.
+            result["update_available"] = bool(latest.download_url) and latest_parts > current_parts
         except (ValueError, AttributeError):
             logger.warning("Could not compare versions: %s vs %s", current_version, latest.version)
 
@@ -661,7 +702,7 @@ class FirmwareCheckService:
         if version:
             target = await self.get_version_info(model, version)
         else:
-            target = await self.get_latest_version(model)
+            target = await self.get_latest_downloadable_version(model)
         if not target or not target.download_url:
             return None
 
@@ -694,7 +735,7 @@ class FirmwareCheckService:
         if version:
             latest = await self.get_version_info(model, version)
         else:
-            latest = await self.get_latest_version(model)
+            latest = await self.get_latest_downloadable_version(model)
         if not latest or not latest.download_url:
             logger.warning("No firmware download URL available for model %s version %s", model, version)
             return None

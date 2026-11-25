@@ -159,14 +159,23 @@ class FirmwareUpdateService:
             result["update_available"] = update_info["update_available"]
             result["latest_version"] = update_info["latest_version"]
         else:
-            # If we don't know current version, just get latest
-            latest = await firmware_service.get_latest_version(model)
+            # If we don't know current version, offer the newest version we can
+            # actually download. An announced release with no file yet is shown
+            # as the latest version but is not an update we can install (#376).
+            latest = await firmware_service.get_latest_downloadable_version(model)
             if latest:
                 result["latest_version"] = latest.version
                 result["update_available"] = True  # Assume update needed
+            else:
+                announced = await firmware_service.get_latest_version(model)
+                if announced:
+                    result["latest_version"] = announced.version
 
         # Get firmware file info (for target_version if specified, else latest)
-        file_info = await firmware_service.get_firmware_file_info(model, version=target_version)
+        # Without an explicit target, use the version the update check offered
+        # so the file, size and latest_version all describe the same release.
+        file_version = target_version or (result["latest_version"] if result["update_available"] else None)
+        file_info = await firmware_service.get_firmware_file_info(model, version=file_version)
         if file_info:
             result["firmware_filename"] = file_info["filename"]
             # Estimate size (typical firmware is 50-150MB)
@@ -302,7 +311,7 @@ class FirmwareUpdateService:
             if target_version:
                 state.firmware_version = target_version
             else:
-                latest = await firmware_service.get_latest_version(model)
+                latest = await firmware_service.get_latest_downloadable_version(model)
                 if latest:
                     state.firmware_version = latest.version
 

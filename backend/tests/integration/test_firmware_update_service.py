@@ -27,6 +27,7 @@ def firmware():
     svc = MagicMock()
     svc.check_for_update = AsyncMock(return_value={"update_available": True, "latest_version": "01.09.00.00"})
     svc.get_latest_version = AsyncMock(return_value=SimpleNamespace(version="01.09.00.00"))
+    svc.get_latest_downloadable_version = AsyncMock(return_value=SimpleNamespace(version="01.09.00.00"))
     svc.get_firmware_file_info = AsyncMock(return_value={"filename": "x1c-01.09.00.00.bin"})
     svc.download_firmware = AsyncMock(return_value=Path("/tmp/x1c-01.09.00.00.bin"))
     svc.download_page_unreachable = False
@@ -122,6 +123,29 @@ class TestPrepareUpdate:
 
         assert (result["latest_version"], result["update_available"]) == ("01.09.00.00", True)
         firmware.check_for_update.assert_not_awaited()
+
+    async def test_unknown_current_version_ignores_announced_only_release(self, db_session, printer_factory, firmware):
+        """A wiki-announced release with no file must not count as an update (#376)."""
+        firmware.get_latest_downloadable_version.return_value = None
+        firmware.get_latest_version.return_value = SimpleNamespace(version="01.10.00.00")
+        firmware.get_firmware_file_info.return_value = None
+        printer = await printer_factory()
+
+        with _connected(firmware_version=None), _storage(2000 * MB):
+            result = await fu.FirmwareUpdateService().prepare_update(printer.id, db_session)
+
+        assert (result["latest_version"], result["update_available"]) == ("01.10.00.00", False)
+        assert result["can_proceed"] is False
+
+    async def test_file_info_matches_the_offered_version(self, db_session, printer_factory, firmware):
+        """Without an explicit target the file is looked up for the version the update check offered (#376)."""
+        firmware.check_for_update.return_value = {"update_available": True, "latest_version": "01.08.10.00"}
+        printer = await printer_factory(model="X1C")
+
+        with _connected(), _storage(2000 * MB):
+            await fu.FirmwareUpdateService().prepare_update(printer.id, db_session)
+
+        firmware.get_firmware_file_info.assert_awaited_with("X1C", version="01.08.10.00")
 
     async def test_explicit_target_allows_reinstall(self, db_session, printer_factory, firmware):
         firmware.check_for_update.return_value = {"update_available": False, "latest_version": "01.08.00.00"}
