@@ -356,3 +356,48 @@ async def test_check_for_update_includes_available_versions():
     assert result["available_versions"][0]["file_available"] is True
     assert result["available_versions"][1]["file_available"] is False
     assert result["available_versions"][1]["download_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_check_for_update_ignores_announced_version_without_file():
+    """A wiki-only release must not raise the update flag until its file exists (#376)."""
+    svc = FirmwareCheckService()
+    available = [
+        FirmwareVersion(version="01.03.00.00", download_url=""),  # announced, no file yet
+        FirmwareVersion(version="01.02.02.00", download_url="https://cdn/current.bin"),
+    ]
+    with patch.object(svc, "get_available_versions", AsyncMock(return_value=available)):
+        result = await svc.check_for_update("H2D", "01.02.02.00")
+
+    assert result["update_available"] is False
+    assert result["latest_version"] == "01.02.02.00"
+    # The announced version is still listed, flagged as unavailable
+    assert result["available_versions"][0]["version"] == "01.03.00.00"
+    assert result["available_versions"][0]["file_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_check_for_update_offers_newest_downloadable_when_latest_is_announced_only():
+    svc = FirmwareCheckService()
+    available = [
+        FirmwareVersion(version="01.03.00.00", download_url=""),
+        FirmwareVersion(version="01.02.10.00", download_url="https://cdn/1.bin"),
+    ]
+    with patch.object(svc, "get_available_versions", AsyncMock(return_value=available)):
+        result = await svc.check_for_update("H2D", "01.02.02.00")
+
+    assert result["update_available"] is True
+    assert result["latest_version"] == "01.02.10.00"
+    assert result["download_url"] == "https://cdn/1.bin"
+
+
+@pytest.mark.asyncio
+async def test_check_for_update_nothing_downloadable_is_not_an_update():
+    """E.g. the download page is unreachable: show the announced version but don't flag an update."""
+    svc = FirmwareCheckService()
+    available = [FirmwareVersion(version="01.03.00.00", download_url="")]
+    with patch.object(svc, "get_available_versions", AsyncMock(return_value=available)):
+        result = await svc.check_for_update("H2D", "01.02.02.00")
+
+    assert result["update_available"] is False
+    assert result["latest_version"] == "01.03.00.00"

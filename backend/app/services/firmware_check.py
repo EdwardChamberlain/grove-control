@@ -604,7 +604,19 @@ class FirmwareCheckService:
         if not current_version:
             return result
 
-        latest = available[0] if available else await self.get_latest_version(model)
+        # Bambu announces a release on the wiki before the file appears on the
+        # download page, so the newest announced version may not be installable
+        # yet. Judge "update available" against the newest version that has a
+        # file, otherwise the user gets an amber marker they cannot act on.
+        # Fall back to the newest announced version for display when nothing is
+        # downloadable (e.g. the download page is unreachable).
+        downloadable = [v for v in available if v.download_url]
+        if downloadable:
+            latest = downloadable[0]
+        elif available:
+            latest = available[0]
+        else:
+            latest = await self.get_latest_version(model)
         if not latest:
             return result
 
@@ -623,7 +635,8 @@ class FirmwareCheckService:
             while len(latest_parts) < 4:
                 latest_parts.append(0)
 
-            result["update_available"] = latest_parts > current_parts
+            # Only a version we can actually fetch counts as an available update.
+            result["update_available"] = bool(latest.download_url) and latest_parts > current_parts
         except (ValueError, AttributeError):
             logger.warning("Could not compare versions: %s vs %s", current_version, latest.version)
 

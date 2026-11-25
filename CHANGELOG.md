@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Printers: a firmware update is only flagged as available once Bambu Lab has
+  published the file (#376). Bambu announces a release a little before the
+  download is ready, which previously turned the health marker amber with an
+  update that failed with "Firmware file for … is not available". The
+  announced version still shows in the update dialog's version list as
+  unavailable until its file appears.
 - Queue and Kiosk: a job waiting for something that clears by itself is no
   longer purple (#373). Purple now only marks a wait a person has to act on, such
   as a missing material or filament. A job waiting for its printer to finish, for
