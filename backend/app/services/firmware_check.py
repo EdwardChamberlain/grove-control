@@ -557,6 +557,22 @@ class FirmwareCheckService:
         self._cache_time = time.time()
         return merged
 
+    async def get_latest_downloadable_version(self, model: str) -> FirmwareVersion | None:
+        """Newest version whose firmware file can actually be downloaded.
+
+        Bambu announces a release on the wiki before the file is published, so
+        the newest announced version (``get_latest_version``) may have no
+        ``download_url``. Anything that installs firmware, or decides whether an
+        update is on offer, should use this instead (#376).
+        """
+        for v in await self.get_available_versions(model):
+            if v.download_url:
+                return v
+        # Version lists come back empty for models without a wiki page; the
+        # single-version lookup can still find a downloadable latest.
+        latest = await self.get_latest_version(model)
+        return latest if latest and latest.download_url else None
+
     async def get_version_info(self, model: str, version: str) -> FirmwareVersion | None:
         """Find a specific version's info (including download URL) for a model."""
         for v in await self.get_available_versions(model):
@@ -619,6 +635,13 @@ class FirmwareCheckService:
             latest = await self.get_latest_version(model)
         if not latest:
             return result
+        if available and latest is not available[0]:
+            logger.debug(
+                "Firmware %s for %s is announced but has no download file yet; offering %s instead",
+                available[0].version,
+                model,
+                latest.version,
+            )
 
         result["latest_version"] = latest.version
         result["download_url"] = latest.download_url or None
@@ -674,7 +697,7 @@ class FirmwareCheckService:
         if version:
             target = await self.get_version_info(model, version)
         else:
-            target = await self.get_latest_version(model)
+            target = await self.get_latest_downloadable_version(model)
         if not target or not target.download_url:
             return None
 
@@ -707,7 +730,7 @@ class FirmwareCheckService:
         if version:
             latest = await self.get_version_info(model, version)
         else:
-            latest = await self.get_latest_version(model)
+            latest = await self.get_latest_downloadable_version(model)
         if not latest or not latest.download_url:
             logger.warning("No firmware download URL available for model %s version %s", model, version)
             return None

@@ -401,3 +401,51 @@ async def test_check_for_update_nothing_downloadable_is_not_an_update():
 
     assert result["update_available"] is False
     assert result["latest_version"] == "01.03.00.00"
+
+
+ANNOUNCED_ONLY = FirmwareVersion(version="01.03.00.00", download_url="")
+DOWNLOADABLE = FirmwareVersion(version="01.02.10.00", download_url="https://cdn/fw-01.02.10.00.bin")
+
+
+@pytest.mark.asyncio
+async def test_latest_downloadable_version_skips_announced_only_release():
+    svc = FirmwareCheckService()
+    with patch.object(svc, "get_available_versions", AsyncMock(return_value=[ANNOUNCED_ONLY, DOWNLOADABLE])):
+        assert await svc.get_latest_downloadable_version("H2D") == DOWNLOADABLE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fallback", "expected"),
+    [(DOWNLOADABLE, DOWNLOADABLE), (ANNOUNCED_ONLY, None), (None, None)],
+)
+async def test_latest_downloadable_version_falls_back_to_single_lookup(fallback, expected):
+    svc = FirmwareCheckService()
+    with (
+        patch.object(svc, "get_available_versions", AsyncMock(return_value=[])),
+        patch.object(svc, "get_latest_version", AsyncMock(return_value=fallback)),
+    ):
+        assert await svc.get_latest_downloadable_version("H2D") == expected
+
+
+@pytest.mark.asyncio
+async def test_file_info_without_version_uses_newest_downloadable():
+    """With no explicit version the install path must not pick the announced-only release (#376)."""
+    svc = FirmwareCheckService()
+    with patch.object(svc, "get_available_versions", AsyncMock(return_value=[ANNOUNCED_ONLY, DOWNLOADABLE])):
+        info = await svc.get_firmware_file_info("H2D")
+
+    assert info is not None
+    assert (info["version"], info["filename"]) == ("01.02.10.00", "fw-01.02.10.00.bin")
+
+
+@pytest.mark.asyncio
+async def test_download_without_version_uses_newest_downloadable(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.app.services.firmware_check._data_dir", tmp_path)
+    svc = FirmwareCheckService()
+    cached = tmp_path / "firmware" / "fw-01.02.10.00.bin"
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(b"fw")
+
+    with patch.object(svc, "get_available_versions", AsyncMock(return_value=[ANNOUNCED_ONLY, DOWNLOADABLE])):
+        assert await svc.download_firmware("H2D") == cached
