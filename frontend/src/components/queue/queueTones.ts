@@ -1,4 +1,4 @@
-import { Calendar, Clock, Hand, List, Pause, Printer, Timer, type LucideIcon } from 'lucide-react';
+import { Ban, Calendar, CheckCircle, Clock, Hand, List, Pause, Printer, SkipForward, Timer, XCircle, type LucideIcon } from 'lucide-react';
 import type { PrintQueueItem, PrinterStatus } from '../../api/client';
 import { parseUTCDate } from '../../utils/date';
 
@@ -75,6 +75,46 @@ export const QUEUE_TONES = {
   },
 } satisfies Record<string, QueueTone>;
 
+// History tab: finished jobs follow the rule above loosely, since the point is to
+// spot problems at a glance. Failed is red and skipped reuses the paused orange so
+// both stand out; completed gets a green gutter only (its card stays neutral, so
+// green still reads as "printing" on the live queue); cancelled is neutral. A
+// failure or skip reason is drawn by QueueJobLine's error footer, which is always
+// red, so a skipped card has an orange gutter and a red reason strip.
+const HISTORY_TONES = {
+  completed: {
+    ...QUEUE_TONES.neutral,
+    text: 'text-green-700 dark:text-green-400',
+    gutter: 'bg-bambu-green/10 border-bambu-dark-tertiary',
+  },
+  failed: {
+    text: 'text-red-600 dark:text-red-400',
+    gutter: 'bg-red-400/15 border-red-400/40',
+    border: 'border-red-400/40',
+    wash: 'bg-red-400/[0.06]',
+    footer: 'bg-red-400/10 border-red-400/25 text-red-600 dark:text-red-400',
+    ring: 'ring-1 ring-red-400',
+    bar: 'bg-red-400',
+  },
+  skipped: {
+    ...QUEUE_TONES.paused,
+  },
+  cancelled: QUEUE_TONES.neutral,
+} satisfies Record<string, QueueTone>;
+
+/** Status colour, icon and label for a finished job in the Queue page's History tab. */
+export function resolveHistoryTone(
+  status: string,
+  t: (key: string) => string,
+): { tone: QueueTone; Icon: LucideIcon; label: string } {
+  switch (status) {
+    case 'completed': return { tone: HISTORY_TONES.completed, Icon: CheckCircle, label: t('queue.status.completed') };
+    case 'failed': return { tone: HISTORY_TONES.failed, Icon: XCircle, label: t('queue.status.failed') };
+    case 'skipped': return { tone: HISTORY_TONES.skipped, Icon: SkipForward, label: t('queue.status.skipped') };
+    default: return { tone: HISTORY_TONES.cancelled, Icon: Ban, label: t('queue.status.cancelled') };
+  }
+}
+
 /**
  * Printer stage numbers (`stg_cur`) that mean the print is paused, mapped to
  * the i18n key for why. Other stages are not pause reasons.
@@ -89,7 +129,7 @@ export const PAUSE_REASON_KEYS: Record<number, string> = {
 
 /**
  * Status colour, icon and label for a queue card's gutter. Only statuses that
- * render as a queue job line are handled; finished jobs use CompactHistoryRow.
+ * render as a queue job line are handled; finished jobs use resolveHistoryTone.
  */
 export function resolveQueueTone(
   item: Pick<PrintQueueItem, 'status' | 'scheduled_time' | 'waiting_reason'> &

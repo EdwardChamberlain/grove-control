@@ -732,7 +732,7 @@ function HistorySection({
           </Button>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+      <div className="flex flex-col gap-2" data-testid="history-list">
         {rows.map((row) => {
           if (row.kind === 'item') {
             return (

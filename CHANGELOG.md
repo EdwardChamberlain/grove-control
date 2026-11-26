@@ -12,6 +12,10 @@
 - Archives: a card's 3MF preview image is now shown in full instead of being
   cropped to fill the thumbnail area (#378). The preview keeps its aspect ratio
   and its transparent background, so the whole print stays visible.
+- Queue: the History tab is now a single list with one row per job instead of a
+  multi-column grid, using the same card as the active queue: the outcome
+  in a coloured status gutter and the failure or skip reason in a footer
+  strip (#382).
 - Printers: a firmware update is only flagged as available once Bambu Lab has
   published the file (#376). Bambu announces a release a little before the
   download is ready, which previously turned the health marker amber with an
