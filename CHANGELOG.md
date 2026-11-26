@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Maintenance: each printer's Status view now has an **Enter maintenance mode** /
+  **Exit maintenance mode** button, just left of **Log a repair** (#379). The
+  label follows the printer's current mode, so operators can take a printer out
+  of service, or bring it back, without leaving the Maintenance page. It needs
+  the printer-edit permission and asks for confirmation before interrupting a
+  print, as on the Printers page.
 - Archives: a card's 3MF preview image is now shown in full instead of being
   cropped to fill the thumbnail area (#378). The preview keeps its aspect ratio
   and its transparent background, so the whole print stays visible.

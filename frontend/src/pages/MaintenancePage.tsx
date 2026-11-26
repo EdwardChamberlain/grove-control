@@ -37,6 +37,7 @@ import {
   Printer,
   ExternalLink,
   ListChecks,
+  Power,
 } from 'lucide-react';
 import { api } from '../api/client';
 import type {
@@ -587,6 +588,8 @@ function PrinterView({
   onToggle,
   onSetHours,
   onLogRepair,
+  onToggleMaintenanceMode,
+  maintenanceModePending,
   hasPermission,
   t,
 }: {
@@ -596,6 +599,8 @@ function PrinterView({
   onToggle: (id: number, enabled: boolean) => void;
   onSetHours: (printerId: number, hours: number) => void;
   onLogRepair: (printerId: number) => void;
+  onToggleMaintenanceMode: (printerId: number, enterMaintenance: boolean) => void;
+  maintenanceModePending: boolean;
   hasPermission: (permission: Permission) => boolean;
   t: TFunction;
 }) {
@@ -659,12 +664,26 @@ function PrinterView({
             </span>
           )}
         </div>
-        {hasPermission('maintenance:create') && (
-          <Button variant="secondary" onClick={() => onLogRepair(overview.printer_id)}>
-            <Wrench className="h-4 w-4" />
-            {t('maintenance.logRepair')}
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {hasPermission('printers:update') && (
+            <Button
+              variant="secondary"
+              disabled={maintenanceModePending}
+              onClick={() => onToggleMaintenanceMode(overview.printer_id, overview.is_active !== false)}
+            >
+              <Power className="h-4 w-4" />
+              {overview.is_active === false
+                ? t('printers.maintenance.menuExit')
+                : t('printers.maintenance.menuEnter')}
+            </Button>
+          )}
+          {hasPermission('maintenance:create') && (
+            <Button variant="secondary" onClick={() => onLogRepair(overview.printer_id)}>
+              <Wrench className="h-4 w-4" />
+              {t('maintenance.logRepair')}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -766,6 +785,8 @@ function StatusTab({
   onToggle,
   onSetHours,
   onLogRepair,
+  onToggleMaintenanceMode,
+  maintenanceModePending,
   hasPermission,
   t,
 }: {
@@ -775,6 +796,8 @@ function StatusTab({
   onToggle: (id: number, enabled: boolean) => void;
   onSetHours: (printerId: number, hours: number) => void;
   onLogRepair: (printerId: number) => void;
+  onToggleMaintenanceMode: (printerId: number, enterMaintenance: boolean) => void;
+  maintenanceModePending: boolean;
   hasPermission: (permission: Permission) => boolean;
   t: TFunction;
 }) {
@@ -807,6 +830,8 @@ function StatusTab({
           onToggle={onToggle}
           onSetHours={onSetHours}
           onLogRepair={onLogRepair}
+          onToggleMaintenanceMode={onToggleMaintenanceMode}
+          maintenanceModePending={maintenanceModePending}
           hasPermission={hasPermission}
           t={t}
         />
@@ -1902,6 +1927,50 @@ export function MaintenancePage() {
     },
   });
 
+  // Maintenance Mode wraps the printer's `is_active` flag, as on the Printers page.
+  const [confirmEnterMaintenance, setConfirmEnterMaintenance] = useState<{ id: number; name: string } | null>(null);
+  const maintenanceModeMutation = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; name: string; isActive: boolean }) =>
+      api.updatePrinter(id, { is_active: isActive }),
+    onSuccess: (_data, { id, name, isActive }) => {
+      queryClient.invalidateQueries({ queryKey: ['maintenanceOverview'] });
+      queryClient.invalidateQueries({ queryKey: ['maintenanceSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', id] });
+      showToast(
+        isActive
+          ? t('printers.maintenance.toastExited', { name })
+          : t('printers.maintenance.toastEntered', { name }),
+      );
+    },
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
+  const handleToggleMaintenanceMode = async (printerId: number, enterMaintenance: boolean) => {
+    const name = overview?.find((printer) => printer.printer_id === printerId)?.printer_name ?? '';
+    if (!enterMaintenance) {
+      maintenanceModeMutation.mutate({ id: printerId, name, isActive: true });
+      return;
+    }
+    // Entering mode disconnects MQTT, so confirm first when a job is in flight.
+    let printing = false;
+    try {
+      const status = await queryClient.fetchQuery({
+        queryKey: ['printerStatus', printerId],
+        queryFn: () => api.getPrinterStatus(printerId),
+        staleTime: 0,
+      });
+      printing = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+    } catch {
+      printing = false;
+    }
+    if (printing) {
+      setConfirmEnterMaintenance({ id: printerId, name });
+    } else {
+      maintenanceModeMutation.mutate({ id: printerId, name, isActive: false });
+    }
+  };
+
   const createLogMutation = useMutation({
     mutationFn: api.createMaintenanceLog,
     onSuccess: () => {
@@ -2115,6 +2184,8 @@ export function MaintenancePage() {
             setLogComposePrinterId(printerId);
             setActiveTab('log');
           }}
+          onToggleMaintenanceMode={handleToggleMaintenanceMode}
+          maintenanceModePending={maintenanceModeMutation.isPending}
           hasPermission={hasPermission}
           t={t}
         />
@@ -2166,6 +2237,20 @@ export function MaintenancePage() {
           onRemoveItem={(itemId) => removeItemMutation.mutate(itemId)}
           hasPermission={hasPermission}
           t={t}
+        />
+      )}
+
+      {confirmEnterMaintenance && (
+        <ConfirmModal
+          title={t('printers.maintenance.confirmMidPrintTitle')}
+          message={t('printers.maintenance.confirmMidPrintMessage', { name: confirmEnterMaintenance.name })}
+          confirmText={t('printers.maintenance.menuEnter')}
+          variant="danger"
+          onConfirm={() => {
+            maintenanceModeMutation.mutate({ id: confirmEnterMaintenance.id, name: confirmEnterMaintenance.name, isActive: false });
+            setConfirmEnterMaintenance(null);
+          }}
+          onCancel={() => setConfirmEnterMaintenance(null)}
         />
       )}
     </div>
