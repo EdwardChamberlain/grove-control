@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse, type JsonBodyType } from 'msw';
+import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { FileManagerPage } from '../../pages/FileManagerPage';
@@ -117,6 +117,48 @@ describe('folder actions', () => {
     await user.click(screen.getByRole('button', { name: /Unlink/ }));
     await waitFor(() => expect(calls.at(-1)).toMatchObject({ path: '/api/v1/library/folders/2' }));
     expect(await screen.findByText('Folder unlinked')).toBeInTheDocument();
+  });
+
+  it('shows a spinner on Rename while the new folder name is being saved', async () => {
+    server.use(
+      http.put('/api/v1/library/folders/:id', async () => {
+        await delay('infinite');
+        return HttpResponse.json({});
+      }),
+    );
+    const user = userEvent.setup();
+    await ready();
+
+    await openFolderMenu(user, 'Brackets');
+    await user.click(screen.getByRole('button', { name: /^Rename$/ }));
+    const input = screen.getByDisplayValue('Brackets');
+    await user.clear(input);
+    await user.type(input, 'Wall Brackets');
+    const rename = lastButton(/^Rename$/);
+    await user.click(rename);
+
+    await waitFor(() => expect(rename.querySelector('.spinner')).not.toBeNull());
+    expect(rename).toBeDisabled();
+  });
+
+  it('shows a spinner on Link while a folder link is being saved', async () => {
+    server.use(
+      http.put('/api/v1/library/folders/:id', async () => {
+        await delay('infinite');
+        return HttpResponse.json({});
+      }),
+    );
+    const user = userEvent.setup();
+    await ready();
+
+    await openFolderMenu(user, 'Brackets');
+    await user.click(screen.getByRole('button', { name: /Link to\.\.\./ }));
+    await user.click(await screen.findByRole('button', { name: /Shop/ }));
+    const link = screen.getByRole('button', { name: /^Link$/ });
+    await user.click(link);
+
+    await waitFor(() => expect(link.querySelector('.spinner')).not.toBeNull());
+    expect(link).toBeDisabled();
   });
 
   it('deletes a folder after confirming', async () => {

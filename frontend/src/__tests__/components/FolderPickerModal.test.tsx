@@ -28,7 +28,7 @@ const folder = (id: number, name: string, extra: Record<string, unknown> = {}) =
   ...extra,
 });
 
-function setup(props: { currentFolderId?: number | null } = {}) {
+function setup(props: { currentFolderId?: number | null; isLoading?: boolean } = {}) {
   server.use(
     http.get('/api/v1/library/folders', () =>
       HttpResponse.json([
@@ -100,5 +100,15 @@ describe('FolderPickerModal', () => {
 
     expect(onClose).toHaveBeenCalled();
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('shows a spinner in place of the confirm label while loading', async () => {
+    setup({ isLoading: true });
+    await screen.findByText('Parent');
+
+    const confirm = screen.getAllByRole('button').find((b) => b.querySelector('.spinner'));
+    expect(confirm).toBeDefined();
+    expect(confirm).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Go' })).toBeNull();
   });
 });

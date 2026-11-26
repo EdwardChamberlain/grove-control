@@ -378,4 +378,25 @@ describe('CameraTile', () => {
     const eta = screen.getByText(/42%/);
     expect(eta.className).toContain('drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]');
   });
+
+  it('swaps the plate-clear icon for a spinner and blocks clicks while clearing', async () => {
+    const onClearPlate = vi.fn();
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="X1C-Camera"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        showClearPlate
+        clearPlatePending
+        onClearPlate={onClearPlate}
+      />,
+    );
+    await flushMicrotasks();
+
+    const button = screen.getByRole('button', { name: 'Mark plate as cleared' });
+    expect(button.querySelector('.spinner')).not.toBeNull();
+    expect(button).toBeDisabled();
+  });
 });

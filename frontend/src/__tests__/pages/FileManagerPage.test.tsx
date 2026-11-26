@@ -7,7 +7,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { FileManagerPage } from '../../pages/FileManagerPage';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 
 // Mock data
@@ -473,6 +473,43 @@ describe('FileManagerPage', () => {
       await waitFor(() => {
         expect(screen.queryByText('Folder Name')).not.toBeInTheDocument();
       });
+    });
+  });
+
+  describe('folder dialogs while saving', () => {
+    const hangingPost = (path: string) =>
+      http.post(path, async () => {
+        await delay('infinite');
+        return HttpResponse.json({});
+      });
+
+    it('shows a spinner on Create while a new folder is being saved', async () => {
+      server.use(hangingPost('/api/v1/library/folders'));
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      await user.click(await screen.findByText('New Folder'));
+      await user.type(await screen.findByPlaceholderText('e.g., Functional Parts'), 'Slow folder');
+      const createButton = screen.getByRole('button', { name: 'Create' });
+      await user.click(createButton);
+
+      await waitFor(() => expect(createButton.querySelector('.spinner')).not.toBeNull());
+      expect(createButton).toBeDisabled();
+    });
+
+    it('shows a spinner on Link Folder while an external folder is being linked', async () => {
+      server.use(hangingPost('/api/v1/library/folders/external'));
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      await user.click(await screen.findByRole('button', { name: /Link External$/ }));
+      await user.type(await screen.findByPlaceholderText('e.g., NAS Prints'), 'NAS');
+      await user.type(screen.getByPlaceholderText('/mnt/nas/3d-prints'), '/mnt/nas');
+      const linkButton = screen.getByRole('button', { name: 'Link Folder' });
+      await user.click(linkButton);
+
+      await waitFor(() => expect(linkButton.querySelector('.spinner')).not.toBeNull());
+      expect(linkButton).toBeDisabled();
     });
   });
 

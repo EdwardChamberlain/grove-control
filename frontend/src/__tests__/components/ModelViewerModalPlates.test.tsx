@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { ModelViewerModal } from '../../components/ModelViewerModal';
@@ -119,5 +119,23 @@ describe('open in slicer', () => {
 
     await waitFor(() => expect(clickedLinks.some((h) => h.startsWith('orcaslicer://'))).toBe(true));
     expect(decodeURIComponent(clickedLinks.find((h) => h.startsWith('orcaslicer'))!)).toContain(expected);
+  });
+});
+
+describe('plate loading', () => {
+  it("shows a spinner beside the plates heading while another file's plates load", async () => {
+    const { rerender } = render(<ModelViewerModal archiveId={1} title="Big job" onClose={vi.fn()} />);
+    expect(await screen.findByText('Plate 1')).toBeInTheDocument();
+    expect(document.querySelector('.spinner')).toBeNull();
+
+    server.use(
+      http.get('/api/v1/archives/:id/plates', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ is_multi_plate: true, plates: [] });
+      }),
+    );
+    rerender(<ModelViewerModal archiveId={2} title="Other job" onClose={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelector('.spinner')).not.toBeNull());
   });
 });

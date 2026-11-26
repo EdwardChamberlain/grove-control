@@ -187,7 +187,7 @@ export function PrinterPlateDetectionControl({
           aria-label={!canUpdate ? noPermissionTitle : (enabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
         >
           {togglePending ? (
-            <Spinner className={`${iconClassName}`} />
+            <Spinner className={iconClassName} />
           ) : (
             <ScanSearch className={iconClassName} />
           )}
@@ -201,7 +201,7 @@ export function PrinterPlateDetectionControl({
           aria-label={!canUpdate ? noPermissionTitle : t('printers.plateDetection.manageCalibration')}
         >
           {isCheckingPlate ? (
-            <Spinner className={`${iconClassName}`} />
+            <Spinner className={iconClassName} />
           ) : (
             <ChevronDown className={iconClassName} />
           )}

@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse, type JsonBodyType } from 'msw';
+import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import InventoryPageRouter from '../../pages/InventoryPage';
@@ -261,5 +261,24 @@ describe('bulk actions', () => {
     await confirm(user, /Restore/);
 
     await waitFor(() => expect(calls.find((c) => c.path.endsWith('/bulk-restore'))?.body).toEqual({ ids: [5] }));
+  });
+});
+
+describe('CSV export', () => {
+  it('shows a spinner on Export CSV while the file is being prepared', async () => {
+    server.use(
+      http.get('/api/v1/inventory/spools/export', async () => {
+        await delay('infinite');
+        return new HttpResponse('', { headers: { 'Content-Type': 'text/csv' } });
+      }),
+    );
+    const user = userEvent.setup();
+    await ready();
+
+    const exportButton = screen.getByRole('button', { name: /Export CSV/ });
+    await user.click(exportButton);
+
+    await waitFor(() => expect(exportButton.querySelector('.spinner')).not.toBeNull());
+    expect(exportButton).toBeDisabled();
   });
 });

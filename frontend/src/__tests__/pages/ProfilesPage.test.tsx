@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { render } from '../utils';
 import { ProfilesPage } from '../../pages/ProfilesPage';
@@ -141,6 +141,24 @@ describe('ProfilesPage — signed out', () => {
     expect(screen.getByPlaceholderText('your@email.com')).toBeInTheDocument();
   });
 
+  it('shows a spinner on the login button while the sign-in is sent', async () => {
+    server.use(
+      http.post('*/api/v1/cloud/login', async () => {
+        await delay('infinite');
+        return HttpResponse.json(loginResponse);
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ProfilesPage />);
+    await user.type(await screen.findByPlaceholderText('your@email.com'), 'me@example.com');
+    await user.type(screen.getByPlaceholderText('••••••••'), 'hunter2');
+    const login = screen.getByRole('button', { name: /^Login$/ });
+    await user.click(login);
+
+    await waitFor(() => expect(login.querySelector('.spinner')).not.toBeNull());
+    expect(login).toBeDisabled();
+  });
+
   it('shows the server message when login fails without verification', async () => {
     loginResponse = { success: false, needs_verification: false, message: 'Wrong password' };
     const user = userEvent.setup();
@@ -209,6 +227,28 @@ describe('ProfilesPage — connected', () => {
     await user.click(within(confirmRow).getByRole('button', { name: /Delete/ }));
 
     await waitFor(() => expect(captured).toContainEqual({ method: 'DELETE', path: '/api/v1/cloud/settings/PFUS001', body: null }));
+  });
+
+  it('shows a spinner on the delete confirmation while a preset is being deleted', async () => {
+    cloudStatus = { is_authenticated: true, email: 'me@example.com', region: 'global' };
+    server.use(
+      http.delete('*/api/v1/cloud/settings/:id', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ProfilesPage />);
+    await user.click(await screen.findByText('My PLA @BBL X1C'));
+    await screen.findByText(/nozzle_temperature/);
+
+    await user.click(screen.getByRole('button', { name: /^Delete$/ }));
+    const confirmRow = (await screen.findByText('Delete this preset?')).closest('div')!.parentElement!;
+    const confirm = within(confirmRow).getByRole('button', { name: /Delete/ });
+    await user.click(confirm);
+
+    await waitFor(() => expect(confirm.querySelector('.spinner')).not.toBeNull());
+    expect(confirm).toBeDisabled();
   });
 
   it('does not offer delete for built-in presets', async () => {

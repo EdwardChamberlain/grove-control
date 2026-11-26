@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent, render as rawRender } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import { server } from '../mocks/server';
@@ -271,5 +271,24 @@ describe('LocalProfilesView', () => {
         ([arg]) => arg && (arg as { queryKey: unknown[] }).queryKey?.[0] === 'localPresets',
       ),
     ).toBe(true);
+  });
+
+  it('shows a spinner on the confirm button while a preset is being deleted', async () => {
+    server.use(
+      http.delete('/api/v1/local-presets/:id', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    render(<LocalProfilesView />);
+    await screen.findByText('Overture PLA Matte @BBL X1C');
+
+    fireEvent.click(screen.getAllByTitle(/delete/i)[0]);
+    const confirmButtons = await screen.findAllByRole('button', { name: /^delete$/i });
+    const confirm = confirmButtons[confirmButtons.length - 1];
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(confirm.querySelector('.spinner')).not.toBeNull());
+    expect(confirm).toBeDisabled();
   });
 });

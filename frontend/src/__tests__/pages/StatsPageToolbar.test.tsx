@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
 import { StatsPage } from '../../pages/StatsPage';
@@ -156,6 +156,26 @@ describe('toolbar actions', () => {
 
     await waitFor(() => expect(calls).toContain('recalculate'));
     expect(await screen.findByText('Recalculated costs for 12 archives')).toBeInTheDocument();
+  });
+
+  it('shows a spinner beside the title while the statistics are refreshed', async () => {
+    let statsRequests = 0;
+    server.use(
+      http.get('/api/v1/archives/stats', async () => {
+        statsRequests += 1;
+        if (statsRequests > 1) await delay('infinite');
+        return HttpResponse.json({ total_prints: 4, successful_prints: 3, failed_prints: 1, cancelled_prints: 0, total_print_time_hours: 4,
+          total_filament_grams: 80, total_cost: 4, prints_by_filament_type: { PLA: 4 }, prints_by_printer: { '1': 4 },
+          average_time_accuracy: 99, time_accuracy_by_printer: { '1': 99 }, total_energy_kwh: 1, total_energy_cost: 0.2 });
+      }),
+    );
+    const user = userEvent.setup();
+    await ready();
+    await waitFor(() => expect(document.querySelector('.spinner')).toBeNull());
+
+    await user.click(screen.getByRole('button', { name: /Recalculate Costs/ }));
+
+    await waitFor(() => expect(document.querySelector('.spinner')).not.toBeNull());
   });
 
   it('reports a failed recalculation', async () => {

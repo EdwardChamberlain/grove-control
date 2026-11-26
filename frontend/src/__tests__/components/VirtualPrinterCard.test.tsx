@@ -488,3 +488,22 @@ describe('VirtualPrinterCard - access code inherits from target', () => {
     expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
   });
 });
+
+describe('VirtualPrinterCard - saving the access code', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows a spinner on Save while the new access code is being stored', async () => {
+    vi.mocked(multiVirtualPrinterApi.update).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    render(<VirtualPrinterCard printer={createMockPrinter()} models={models} />);
+
+    await user.type(await screen.findByPlaceholderText('Enter 8-char code'), '12345678');
+    const save = screen.getByRole('button', { name: 'Save' });
+    await user.click(save);
+
+    await waitFor(() => expect(save.querySelector('.spinner')).not.toBeNull());
+    expect(save).toBeDisabled();
+  });
+});
