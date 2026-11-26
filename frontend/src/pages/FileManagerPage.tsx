@@ -841,11 +841,13 @@ function FileActionsMenu({
 
   return (
     <div className={className} onClick={(event) => event.stopPropagation()}>
-      <button
+      <Button
         ref={triggerRef}
         type="button"
-        className="p-1.5 rounded bg-bambu-dark-secondary/90 hover:bg-bambu-dark-tertiary text-bambu-gray hover:text-white"
+        variant="secondary"
+        size="sm"
         aria-label={t('common.actions')}
+        title={t('common.actions')}
         aria-haspopup="menu"
         aria-expanded={menuPosition !== null}
         onClick={(event) => {
@@ -854,7 +856,7 @@ function FileActionsMenu({
         }}
       >
         <MoreVertical className="w-4 h-4" />
-      </button>
+      </Button>
       {menuPosition && (
         <ContextMenu
           x={menuPosition.x}
@@ -970,20 +972,22 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
         )}
       </div>
 
-      <div className="px-3 pb-3 flex items-center justify-end gap-1.5">
+      <div className="px-3 pb-3 flex items-center gap-1">
       {onPrint && isSlicedFilename(file.filename) && (
-        <button
-          type="button"
-          className="px-2 py-1 rounded bg-bambu-green hover:bg-bambu-green-light text-white text-xs font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+        <Button
+          variant="primary"
+          size="sm"
+          className="flex-1 min-w-0 overflow-hidden"
           onClick={() => onPrint(file)}
           disabled={!hasPermission('queue:create')}
           title={!hasPermission('queue:create') ? t('fileManager.noPermissionAddToQueue') : undefined}
         >
-          <Printer className="w-3.5 h-3.5" />
-          {t('common.print')}
-        </button>
+          <Printer className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">{t('common.print')}</span>
+        </Button>
       )}
       <FileActionsMenu
+        className={onPrint && isSlicedFilename(file.filename) ? 'flex-shrink-0' : 'ml-auto flex-shrink-0'}
         file={file}
         onDelete={onDelete}
         onDownload={onDownload}
