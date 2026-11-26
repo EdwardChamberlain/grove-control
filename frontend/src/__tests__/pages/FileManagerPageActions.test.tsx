@@ -5,7 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
@@ -229,6 +229,27 @@ describe('file actions', () => {
 
     expect(await screen.findByRole('heading', { name: 'Print' })).toBeInTheDocument();
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+  });
+
+  it('keeps the selection checkbox visible on mobile and hover-only on desktop', async () => {
+    await ready();
+    const checkbox = () => screen.getByRole('checkbox', { name: 'Select benchy.gcode.3mf' });
+    expect(checkbox()).toHaveClass('opacity-0');
+    cleanup();
+
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true, media: query, onchange: null,
+      addListener: () => {}, removeListener: () => {},
+      addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true,
+    })) as typeof window.matchMedia;
+    try {
+      await ready();
+      await waitFor(() => expect(checkbox()).toHaveClass('opacity-100'));
+      expect(checkbox()).not.toHaveClass('opacity-0');
+    } finally {
+      window.matchMedia = original;
+    }
   });
 
   it('groups selected sliced files as versions', async () => {
