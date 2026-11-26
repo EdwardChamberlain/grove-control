@@ -622,6 +622,9 @@ function PrinterView({
   }, [overview.maintenance_items]);
 
   const counts = summariseTasks(overview.maintenance_items);
+  const maintenanceModeLabel = overview.is_active === false
+    ? t('printers.maintenance.menuExit')
+    : t('printers.maintenance.menuEnter');
 
   const handleSaveHours = () => {
     const hours = parseFloat(hoursInput);
@@ -667,14 +670,14 @@ function PrinterView({
         <div className="flex flex-wrap items-center gap-2">
           {hasPermission('printers:update') && (
             <Button
-              variant="secondary"
+              variant="ghost"
               disabled={maintenanceModePending}
               onClick={() => onToggleMaintenanceMode(overview.printer_id, overview.is_active !== false)}
+              aria-label={maintenanceModeLabel}
+              title={maintenanceModeLabel}
+              className="bg-blue-500/20 px-2.5 text-blue-400 hover:bg-blue-500/30 hover:text-blue-300 focus:ring-blue-400"
             >
               <Power className="h-4 w-4" />
-              {overview.is_active === false
-                ? t('printers.maintenance.menuExit')
-                : t('printers.maintenance.menuEnter')}
             </Button>
           )}
           {hasPermission('maintenance:create') && (
