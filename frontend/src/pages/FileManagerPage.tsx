@@ -16,6 +16,7 @@ import {
   HardDrive,
   File,
   MoveRight,
+  Check,
   CheckSquare,
   Square,
   Layers,
@@ -874,14 +875,13 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
     <div
       data-file-id={file.id}
       data-highlighted={isHighlighted ? 'true' : undefined}
-      className={`group relative bg-bambu-dark-secondary rounded-lg border transition-all cursor-pointer overflow-hidden ${
+      className={`group relative bg-bambu-dark-secondary rounded-lg border transition-all overflow-hidden ${
         isSelected
           ? 'border-bambu-green ring-1 ring-bambu-green'
           : isHighlighted
           ? 'border-bambu-green ring-2 ring-bambu-green/70'
           : 'border-bambu-dark-tertiary hover:border-bambu-green/50'
       }`}
-      onClick={() => onSelect(file.id)}
     >
       {/* Thumbnail */}
       <div className="aspect-square bg-bambu-dark flex items-center justify-center overflow-hidden">
@@ -970,8 +970,20 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
         )}
       </div>
 
+      <div className="px-3 pb-3 flex items-center justify-end gap-1.5">
+      {onPrint && isSlicedFilename(file.filename) && (
+        <button
+          type="button"
+          className="px-2 py-1 rounded bg-bambu-green hover:bg-bambu-green-light text-white text-xs font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => onPrint(file)}
+          disabled={!hasPermission('queue:create')}
+          title={!hasPermission('queue:create') ? t('fileManager.noPermissionAddToQueue') : undefined}
+        >
+          <Printer className="w-3.5 h-3.5" />
+          {t('common.print')}
+        </button>
+      )}
       <FileActionsMenu
-        className="absolute bottom-2 right-2"
         file={file}
         onDelete={onDelete}
         onDownload={onDownload}
@@ -987,15 +999,23 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
         canModify={canModify}
         t={t}
       />
+      </div>
 
       {/* Selection checkbox - always visible on mobile, hover on desktop */}
-      <div className={`absolute top-2 left-2 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-        isSelected
-          ? 'bg-bambu-green border-bambu-green'
-          : `border-white/30 bg-black/30 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`
-      }`}>
-        {isSelected && <div className="w-2 h-2 bg-white rounded-sm" />}
-      </div>
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={isSelected}
+        aria-label={t(isSelected ? 'fileManager.deselectFile' : 'fileManager.selectFile', { name: file.print_name || file.filename })}
+        onClick={() => onSelect(file.id)}
+        className={`absolute top-2 left-2 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+          isSelected
+            ? 'bg-bambu-green border-bambu-green'
+            : `border-white/30 bg-black/30 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`
+        }`}
+      >
+        {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+      </button>
     </div>
   );
 }

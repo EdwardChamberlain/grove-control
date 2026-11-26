@@ -3629,6 +3629,8 @@ export default {
     noPermissionPrint: '您沒有列印的權限',
     noPermissionSlice: '您沒有切片檔案的權限',
     noPermissionAddToQueue: '您沒有新增到佇列的權限',
+    selectFile: '選取 {{name}}',
+    deselectFile: '取消選取 {{name}}',
     noPermissionDownload: '您沒有下載檔案的權限',
     noPermissionRenameFile: '您沒有重新命名此檔案的權限',
     noPermissionGenerateThumbnail: '您沒有產生縮圖的權限',

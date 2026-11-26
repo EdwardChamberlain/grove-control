@@ -3630,6 +3630,8 @@ export default {
     noPermissionPrint: 'Non hai il permesso di stampare',
     noPermissionSlice: 'Non hai il permesso di sezionare i file',
     noPermissionAddToQueue: 'Non hai il permesso di aggiungere alla coda',
+    selectFile: 'Seleziona {{name}}',
+    deselectFile: 'Deseleziona {{name}}',
     noPermissionDownload: 'Non hai il permesso di scaricare file',
     noPermissionRenameFile: 'Non hai il permesso di rinominare questo file',
     noPermissionGenerateThumbnail: 'Non hai il permesso di generare miniature',

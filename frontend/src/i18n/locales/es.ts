@@ -3643,6 +3643,8 @@ export default {
     noPermissionDeleteFolder: 'No tiene permiso para eliminar carpetas',
     noPermissionPrint: 'No tiene permiso para imprimir',
     noPermissionAddToQueue: 'No tiene permiso para añadir a la cola',
+    selectFile: 'Seleccionar {{name}}',
+    deselectFile: 'Deseleccionar {{name}}',
     noPermissionSlice: 'No tiene permiso para laminar archivos',
     noPermissionDownload: 'No tiene permiso para descargar archivos',
     noPermissionRenameFile: 'No tiene permiso para renombrar este archivo',

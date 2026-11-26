@@ -3665,6 +3665,8 @@ export default {
     noPermissionDeleteFolder: 'You do not have permission to delete folders',
     noPermissionPrint: 'You do not have permission to print',
     noPermissionAddToQueue: 'You do not have permission to add to queue',
+    selectFile: 'Select {{name}}',
+    deselectFile: 'Deselect {{name}}',
     noPermissionSlice: 'You do not have permission to slice files',
     noPermissionDownload: 'You do not have permission to download files',
     noPermissionRenameFile: 'You do not have permission to rename this file',

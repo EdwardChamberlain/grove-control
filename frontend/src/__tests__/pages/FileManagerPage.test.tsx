@@ -404,11 +404,11 @@ describe('FileManagerPage', () => {
         expect(screen.getByText('Benchy')).toBeInTheDocument();
       });
 
-      // Click on the file card to select it
-      const fileCard = screen.getByText('Benchy').closest('div[class*="cursor-pointer"]');
-      if (fileCard) {
-        await user.click(fileCard);
-      }
+      // Selection happens only from the checkbox, not the card body
+      await user.click(screen.getByText('Benchy'));
+      expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('checkbox', { name: 'Select Benchy' }));
+      expect(screen.getByRole('checkbox', { name: 'Deselect Benchy' })).toHaveAttribute('aria-checked', 'true');
 
       await waitFor(() => {
         expect(screen.getByText('1 selected')).toBeInTheDocument();
@@ -537,7 +537,8 @@ describe('FileManagerPage', () => {
     // "Print" button only when exactly one sliced file is selected, and
     // hides it for multi-selection. The button is targeted by its accessible
     // name ("Print") + role to disambiguate from the file-card dropdown's
-    // own Print entry, which stays collapsed unless its kebab is opened.
+    // own Print entry, which stays collapsed unless its kebab is opened, and
+    // from the card's own Print button (#388), counted before and after.
     it('shows a Print button in the bulk toolbar when one sliced file is selected', async () => {
       const user = userEvent.setup();
       render(<FileManagerPage />);
@@ -546,14 +547,12 @@ describe('FileManagerPage', () => {
         expect(screen.getByText('Benchy')).toBeInTheDocument();
       });
 
-      // Select a sliced file (benchy.gcode.3mf) by clicking on its card
-      const fileCard = screen.getByText('Benchy').closest('div[class*="cursor-pointer"]');
-      if (fileCard) {
-        await user.click(fileCard);
-      }
+      // The sliced card has its own Print button; selecting it adds the bulk one.
+      const before = screen.getAllByRole('button', { name: /^Print$/ }).length;
+      await user.click(screen.getByRole('checkbox', { name: 'Select Benchy' }));
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /^Print$/ })).toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: /^Print$/ }).length).toBe(before + 1);
       });
     });
 
@@ -565,12 +564,13 @@ describe('FileManagerPage', () => {
         expect(screen.getByText('Select All')).toBeInTheDocument();
       });
 
-      // Select all files
+      const before = screen.getAllByRole('button', { name: /^Print$/ }).length;
       await user.click(screen.getByText('Select All'));
 
       await waitFor(() => {
-        expect(screen.queryByRole('button', { name: /^Print$/ })).not.toBeInTheDocument();
+        expect(screen.getByText(/\d+ selected/)).toBeInTheDocument();
       });
+      expect(screen.getAllByRole('button', { name: /^Print$/ }).length).toBe(before);
     });
   });
 

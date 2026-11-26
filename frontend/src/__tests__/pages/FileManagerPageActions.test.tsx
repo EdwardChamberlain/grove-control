@@ -220,13 +220,24 @@ describe('file actions', () => {
     expect(await screen.findByRole('heading', { name: 'Print' })).toBeInTheDocument();
   });
 
+  it('opens the print flow from the card Print button without selecting it', async () => {
+    const user = userEvent.setup();
+    await ready();
+
+    const card = screen.getByText('benchy.gcode.3mf').closest('[data-file-id]') as HTMLElement;
+    await user.click(within(card).getByRole('button', { name: 'Print' }));
+
+    expect(await screen.findByRole('heading', { name: 'Print' })).toBeInTheDocument();
+    expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+  });
+
   it('groups selected sliced files as versions', async () => {
     const user = userEvent.setup();
     await ready();
 
-    // Clicking a card selects it.
+    // Only the checkbox selects a card.
     for (const name of ['benchy.gcode.3mf', 'cube.gcode.3mf']) {
-      await user.click(screen.getByText(name).closest('div[class*="cursor-pointer"]') as HTMLElement);
+      await user.click(screen.getByRole('checkbox', { name: new RegExp(`^Select ${name.replace('.', '\\.')}$`) }));
     }
     expect(await screen.findByText('2 selected')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Group as versions/ }));
