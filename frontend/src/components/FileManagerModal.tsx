@@ -51,7 +51,6 @@ interface PrinterFileViewerModalProps {
 function PrinterFileViewerModal({ printerId, filePath, filename, onClose }: PrinterFileViewerModalProps) {
   const [activeTab, setActiveTab] = useState<PrinterViewerTab | null>(null);
   const [plates, setPlates] = useState<PlateMetadata[]>([]);
-  const [platesLoading, setPlatesLoading] = useState(false);
   const [selectedPlateId, setSelectedPlateId] = useState<number | null>(null);
 
   const ext = filename.toLowerCase().split('.').pop() || '';
@@ -68,11 +67,9 @@ function PrinterFileViewerModal({ printerId, filePath, filename, onClose }: Prin
 
     if (!hasModel) return;
 
-    setPlatesLoading(true);
     api.getPrinterFilePlates(printerId, filePath)
       .then((data) => setPlates(data.plates || []))
-      .catch(() => setPlates([]))
-      .finally(() => setPlatesLoading(false));
+      .catch(() => setPlates([]));
   }, [filePath, hasModel, printerId]);
 
   const hasMultiplePlates = plates.length > 1;
@@ -134,7 +131,6 @@ function PrinterFileViewerModal({ printerId, filePath, filename, onClose }: Prin
                   <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
                     <Box className="w-4 h-4" />
                     Plates
-                    {platesLoading && <Spinner className="w-3 h-3" />}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                     <button
