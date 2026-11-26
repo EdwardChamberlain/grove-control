@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { MapPin, Plus, Loader2, Pencil, Trash2, X } from 'lucide-react';
+import { MapPin, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, type StorageLocation } from '../api/client';
 import { Button } from './Button';
 import { ConfirmModal } from './ConfirmModal';
@@ -190,7 +191,7 @@ export function LocationsModal({ open, onClose, onPickLocation, startCreating }:
         <div className="overflow-y-auto">
           {isLoading ? (
             <div className="flex items-center justify-center py-16 text-bambu-gray">
-              <Loader2 className="w-6 h-6 animate-spin mr-2" />
+              <Spinner className="w-6 h-6 mr-2" />
               {t('common.loading')}
             </div>
           ) : locations.length === 0 ? (
@@ -282,7 +283,7 @@ export function LocationsModal({ open, onClose, onPickLocation, startCreating }:
                   {t('common.cancel')}
                 </Button>
                 <Button type="submit" disabled={saveMutation.isPending || !name.trim()}>
-                  {saveMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {saveMutation.isPending && <Spinner className="w-4 h-4" />}
                   {t('common.save')}
                 </Button>
               </div>

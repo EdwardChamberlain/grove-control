@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Check, AlertTriangle, Printer, Eye, EyeOff, Info, ChevronDown, ArrowRightLeft } from 'lucide-react';
+import { Check, AlertTriangle, Printer, Eye, EyeOff, Info, ChevronDown, ArrowRightLeft } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, virtualPrinterApi } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
 import { Button } from './Button';
@@ -172,7 +173,7 @@ export function VirtualPrinterSettings() {
     return (
       <Card>
         <CardContent className="py-8 flex justify-center">
-          <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+          <Spinner className="w-6 h-6 text-bambu-green" />
         </CardContent>
       </Card>
     );
@@ -306,7 +307,7 @@ export function VirtualPrinterSettings() {
                   disabled={!localAccessCode || pendingAction === 'accessCode'}
                   variant="primary"
                 >
-                  {pendingAction === 'accessCode' ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.save')}
+                  {pendingAction === 'accessCode' ? <Spinner className="w-4 h-4" /> : t('common.save')}
                 </Button>
               </div>
               <p className="text-xs text-bambu-gray mt-2">

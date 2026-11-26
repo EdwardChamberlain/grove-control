@@ -4,13 +4,13 @@ import {
   Upload,
   X,
   File,
-  Loader2,
   CheckCircle,
   XCircle,
   Archive as ArchiveIcon,
   Printer,
   Image,
 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { LibraryFileUploadResponse } from '../api/client';
 import { Button } from './Button';
@@ -348,7 +348,7 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
                     </button>
                   )}
                   {uploadFile.status === 'uploading' && (
-                    <Loader2 className="w-4 h-4 text-bambu-green animate-spin" />
+                    <Spinner className="w-4 h-4 text-bambu-green" />
                   )}
                   {uploadFile.status === 'success' && (
                     <CheckCircle className="w-4 h-4 text-green-500" />
@@ -385,7 +385,7 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
             >
               {isUploading ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner className="w-4 h-4 mr-2" />
                   {t('fileManager.uploading')}
                 </>
               ) : (

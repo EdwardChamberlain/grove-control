@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Trash2, Clock } from 'lucide-react';
+import { Trash2, Clock } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { SpoolUsageRecord } from '../api/client';
 import { Button } from './Button';
@@ -44,7 +45,7 @@ export function SpoolUsageHistory({ spoolId }: SpoolUsageHistoryProps) {
   if (isLoading) {
     return (
       <div className="flex justify-center py-4">
-        <Loader2 className="w-5 h-5 animate-spin text-bambu-green" />
+        <Spinner className="w-5 h-5 text-bambu-green" />
       </div>
     );
   }

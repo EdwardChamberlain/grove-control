@@ -3,7 +3,6 @@ import { useQueryClient, useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
   Printer as PrinterIcon,
-  Loader2,
   AlertCircle,
   AlertTriangle,
   Check,
@@ -11,6 +10,7 @@ import {
   Wand2,
   Users,
 } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { api, type PrinterStatus } from '../../api/client';
 import { getColorName } from '../../utils/colors';
 import { isGcodeCompatible } from '../../utils/printer';
@@ -355,7 +355,7 @@ export function PrinterSelector({
   if (isLoading) {
     return (
       <div className="flex justify-center py-8">
-        <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+        <Spinner className="w-6 h-6 text-bambu-green" />
       </div>
     );
   }

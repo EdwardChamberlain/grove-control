@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, RotateCcw, Save, Trash2, Loader2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 
 import { api } from '../api/client';
 import { Button } from '../components/Button';
@@ -238,7 +239,7 @@ export function LibraryTrashPage() {
 
       {trashQuery.isLoading ? (
         <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
-          <Loader2 className="w-4 h-4 animate-spin" /> {t('libraryTrash.loading')}
+          <Spinner className="w-4 h-4" /> {t('libraryTrash.loading')}
         </div>
       ) : items.length === 0 ? (
         <div className="border border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-12 text-center">

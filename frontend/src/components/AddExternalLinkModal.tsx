@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Save, Loader2, Upload, Trash2 } from 'lucide-react';
+import { X, Save, Upload, Trash2 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { ExternalLink, ExternalLinkCreate, ExternalLinkUpdate } from '../api/client';
@@ -304,7 +305,7 @@ export function AddExternalLinkModal({ link, onClose }: AddExternalLinkModalProp
               className="flex-1"
             >
               {isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Save className="w-4 h-4" />
               )}

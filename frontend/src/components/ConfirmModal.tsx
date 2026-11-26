@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
 
@@ -114,7 +115,7 @@ export function ConfirmModal({
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner className="w-4 h-4 mr-2" />
                   {resolvedLoadingText}
                 </>
               ) : (

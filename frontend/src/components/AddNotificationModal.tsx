@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Save, Loader2, Send, CheckCircle, XCircle } from 'lucide-react';
+import { X, Save, Send, CheckCircle, XCircle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { NotificationProvider, NotificationProviderCreate, NotificationProviderUpdate, ProviderType } from '../api/client';
 import { Button } from './Button';
@@ -384,7 +385,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
               className="flex-1"
             >
               {testMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Send className="w-4 h-4" />
               )}
@@ -675,7 +676,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
               className="flex-1"
             >
               {isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Save className="w-4 h-4" />
               )}

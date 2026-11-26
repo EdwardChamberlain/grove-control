@@ -3,12 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
-  Plus, Loader2, Trash2, Archive, RotateCcw, Edit2, Package,
+  Plus, Trash2, Archive, RotateCcw, Edit2, Package,
   Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   TrendingDown, Layers, Printer, AlertTriangle, X, Clock, LayoutGrid, TableProperties, Columns,
   ArrowUp, ArrowDown, ArrowUpDown, Group, ChevronDown, Check, RefreshCw, TrendingUp, Lock, Copy, Eraser, MapPin,
   Upload, Download,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { ForecastPanel } from '../components/ForecastPanel';
 import { api, ApiError } from '../api/client';
 import type { InventorySpool, SpoolCatalogEntry } from '../api/client';
@@ -1338,7 +1339,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             onClick={handleExportCsv}
             title={spoolmanCsvHint}
           >
-            {exportingCsv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {exportingCsv ? <Spinner className="w-4 h-4" /> : <Download className="w-4 h-4" />}
             {t('inventory.csv.exportButton', 'Export CSV')}
           </Button>
           <Button variant="secondary" onClick={() => setLocationsModalOpen(true)}>
@@ -1855,7 +1856,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
       {/* Content */}
       {isLoading ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+          <Spinner className="w-8 h-8 text-bambu-green" />
         </div>
       ) : viewMode === 'forecast' ? (
         /* Forecast view */

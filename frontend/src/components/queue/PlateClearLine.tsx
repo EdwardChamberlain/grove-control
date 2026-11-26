@@ -1,4 +1,5 @@
-import { Hand, Loader2 } from 'lucide-react';
+import { Hand } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Printer, type PrinterStatus } from '../../api/client';
 import { useToast } from '../../contexts/ToastContext';
@@ -96,7 +97,7 @@ export function PlateClearLine({ printer, status, nextJobName, canClearPlate, ti
               className="-my-0.5 inline-flex h-5 items-center gap-1.5 rounded-md border border-yellow-400 bg-yellow-400/15 px-2.5 text-xs font-semibold text-yellow-700 transition-colors hover:bg-yellow-400/25 disabled:cursor-not-allowed disabled:opacity-50 dark:text-yellow-300"
             >
               {clearPlateMutation.isPending
-                ? <Loader2 className="h-3 w-3 animate-spin" />
+                ? <Spinner className="h-3 w-3" />
                 : <PlateClearedIcon className="h-3 w-3" />}
               {t('printers.plateStatus.markCleared')}
             </button>

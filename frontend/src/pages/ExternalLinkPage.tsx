@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
@@ -19,7 +20,7 @@ export function ExternalLinkPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }

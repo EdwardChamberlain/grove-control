@@ -121,7 +121,7 @@ function serve(body: ArrayBuffer | string, status = 200) {
 }
 
 async function loaded() {
-  await waitFor(() => expect(document.querySelector('.animate-spin')).toBeNull());
+  await waitFor(() => expect(document.querySelector('.spinner')).toBeNull());
 }
 
 let originalRaf: typeof window.requestAnimationFrame;

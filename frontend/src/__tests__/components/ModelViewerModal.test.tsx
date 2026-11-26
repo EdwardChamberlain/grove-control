@@ -139,7 +139,7 @@ describe('ModelViewerModal', () => {
         />
       );
 
-      const loader = document.querySelector('.animate-spin');
+      const loader = document.querySelector('.spinner');
       expect(loader).toBeInTheDocument();
     });
   });

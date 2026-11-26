@@ -9,6 +9,11 @@
   service, or bring it back, without leaving the Maintenance page. It needs the
   printer-edit permission and asks for confirmation before interrupting a print,
   as on the Printers page.
+- UI: the loading indicator is now a small print animation (#386). A nozzle lays
+  three layers down from the bed upwards, replacing the spinning three-quarter
+  circle. It follows the accent colour setting, and shows a gentle pulse instead
+  of moving when reduced motion is requested. The Printing card on the System
+  Info page now uses the printer icon rather than a spinner glyph.
 - Archives: a card's 3MF preview image is now shown in full instead of being
   cropped to fill the thumbnail area (#378). The preview keeps its aspect ratio
   and its transparent background, so the whole print stays visible.

@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Save, Loader2, Search, Check, Minus, Shield, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Save, Search, Check, Minus, Shield, AlertTriangle } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import type { Permission, PermissionCategory } from '../api/client';
 import { Button } from '../components/Button';
@@ -154,7 +155,7 @@ export function GroupEditPage() {
   if (groupLoading || permissionsLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -312,7 +313,7 @@ export function GroupEditPage() {
         <Button onClick={handleSave} disabled={isSaving || !name.trim()}>
           {isSaving ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               {t('common.saving')}
             </>
           ) : (

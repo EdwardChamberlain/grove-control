@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   Download,
   Trash2,
-  Loader2,
   HardDrive,
   RefreshCw,
   Film,
@@ -22,6 +21,7 @@ import {
   MinusSquare,
   Box,
 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { parseUTCDate } from '../utils/date';
 import { Button } from './Button';
@@ -134,7 +134,7 @@ function PrinterFileViewerModal({ printerId, filePath, filename, onClose }: Prin
                   <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
                     <Box className="w-4 h-4" />
                     Plates
-                    {platesLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {platesLoading && <Spinner className="w-3 h-3" />}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                     <button
@@ -539,7 +539,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
         <div className="flex-1 overflow-y-auto p-2 min-h-0">
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+                <Spinner className="w-8 h-8 text-bambu-green" />
               </div>
             ) : !data?.files?.length ? (
               <div className="text-center py-12 text-bambu-gray">
@@ -689,7 +689,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
             >
               {downloadProgress ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   {downloadProgress.current}/{downloadProgress.total}
                 </>
               ) : (
@@ -706,7 +706,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
               className="text-red-400 hover:text-red-300"
             >
               {deleteMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Trash2 className="w-4 h-4" />
               )}

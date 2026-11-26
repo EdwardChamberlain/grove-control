@@ -1,5 +1,6 @@
 import { Fragment, useMemo } from 'react';
-import { Check, Loader2, Printer as PrinterIcon, Sparkles } from 'lucide-react';
+import { Check, Printer as PrinterIcon, Sparkles } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { useTranslation } from 'react-i18next';
 import type {
   CalibrationProfile,
@@ -328,7 +329,7 @@ export function PrinterProfilesSection({
             not be made while the printers are still being asked -- reading each
             one's calibration table is several MQTT round trips. */}
         <p className="text-bambu-gray flex items-center justify-center gap-2">
-          {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+          {isLoading && <Spinner className="w-4 h-4" />}
           {isLoading ? t('common.loading') : t('inventory.noPrintersConfigured')}
         </p>
       </div>

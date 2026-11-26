@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
-import { Search, Filter, RefreshCw, Droplet, Settings2, Printer as PrinterIcon, Layers, X, Loader2, Clock } from 'lucide-react';
+import { Search, Filter, RefreshCw, Droplet, Settings2, Printer as PrinterIcon, Layers, X, Clock } from 'lucide-react';
+import { Spinner } from './Spinner';
 
 import { api } from '../api/client';
 import type { OrcaProfileListResponse, OrcaProfileMeta, Printer } from '../api/client';
@@ -381,7 +382,7 @@ function OrcaPresetDetailModal({ setting, onClose, t }: OrcaPresetDetailModalPro
         <div className="flex-1 overflow-y-auto p-4">
           {isLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+              <Spinner className="w-8 h-8 text-bambu-green" />
             </div>
           ) : error ? (
             <p className="text-center text-bambu-gray py-16">{(error as Error).message}</p>

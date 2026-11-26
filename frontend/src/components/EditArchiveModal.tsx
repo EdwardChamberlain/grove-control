@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Save, Tag, Camera, Trash2, Loader2, Plus, FolderKanban, Hash, Link } from 'lucide-react';
+import { X, Save, Tag, Camera, Trash2, Plus, FolderKanban, Hash, Link } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { Archive } from '../api/client';
 import { Button } from './Button';
@@ -480,7 +481,7 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
                   disabled={uploadingPhoto}
                 />
                 {uploadingPhoto ? (
-                  <Loader2 className="w-6 h-6 text-bambu-gray animate-spin" />
+                  <Spinner className="w-6 h-6 text-bambu-gray" />
                 ) : (
                   <Plus className="w-6 h-6 text-bambu-gray" />
                 )}

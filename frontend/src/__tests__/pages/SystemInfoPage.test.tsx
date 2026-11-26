@@ -107,7 +107,7 @@ describe('SystemInfoPage', () => {
     render(<SystemInfoPage />);
 
     // Should show loading spinner
-    expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(document.querySelector('.spinner')).toBeInTheDocument();
   });
 
   it('renders system info when data loads', async () => {

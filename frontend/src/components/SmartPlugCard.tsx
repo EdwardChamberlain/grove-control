@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { Plug, Power, PowerOff, Loader2, Trash2, Settings2, Thermometer, Clock, Wifi, WifiOff, Edit2, Bell, Calendar, LayoutGrid, ExternalLink, Home, Radio, Eye, Globe } from 'lucide-react';
+import { Plug, Power, PowerOff, Trash2, Settings2, Thermometer, Clock, Wifi, WifiOff, Edit2, Bell, Calendar, LayoutGrid, ExternalLink, Home, Radio, Eye, Globe } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { SmartPlug, SmartPlugUpdate } from '../api/client';
@@ -153,7 +154,7 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
             {/* Status indicator */}
             <div className="flex flex-col items-end gap-1 flex-shrink-0">
               {statusLoading ? (
-                <Loader2 className="w-4 h-4 text-bambu-gray animate-spin" />
+                <Spinner className="w-4 h-4 text-bambu-gray" />
               ) : plug.plug_type === 'mqtt' ? (
                 /* MQTT plugs - show badge and checkmark when receiving data */
                 <div className="flex items-center gap-1.5 text-sm whitespace-nowrap">
@@ -248,7 +249,7 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
                 onClick={() => setShowPowerOnConfirm(true)}
                 className="flex-1"
               >
-                {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
+                {isPending ? <Spinner className="w-4 h-4" /> : <Power className="w-4 h-4" />}
                 {t('smartPlugs.on')}
               </Button>
               <Button
@@ -258,7 +259,7 @@ export function SmartPlugCard({ plug, onEdit }: SmartPlugCardProps) {
                 onClick={() => setShowPowerOffConfirm(true)}
                 className="flex-1"
               >
-                {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <PowerOff className="w-4 h-4" />}
+                {isPending ? <Spinner className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
                 {t('smartPlugs.off')}
               </Button>
             </div>

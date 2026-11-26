@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Check, X, RefreshCw, Link2, Link2Off, Database, ChevronDown, Info, AlertTriangle, Package, ExternalLink } from 'lucide-react';
+import { Check, X, RefreshCw, Link2, Link2Off, Database, ChevronDown, Info, AlertTriangle, Package, ExternalLink } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, ApiError } from '../api/client';
 import type { SpoolmanSyncResult, Printer } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
@@ -208,7 +209,7 @@ export function SpoolmanSettings() {
         </CardHeader>
         <CardContent>
           <div className="flex justify-center py-8">
-            <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+            <Spinner className="w-6 h-6 text-bambu-green" />
           </div>
         </CardContent>
       </Card>
@@ -224,7 +225,7 @@ export function SpoolmanSettings() {
             <h2 className="text-lg font-semibold text-white">{t('settings.filamentTracking')}</h2>
           </div>
           {saveMutation.isPending && (
-            <Loader2 className="w-4 h-4 text-bambu-green animate-spin" />
+            <Spinner className="w-4 h-4 text-bambu-green" />
           )}
         </div>
       </CardHeader>
@@ -333,7 +334,7 @@ export function SpoolmanSettings() {
               disabled={amsSyncMutation.isPending}
             >
               {amsSyncMutation.isPending ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <Spinner className="w-4 h-4 mr-2" />
               ) : (
                 <RefreshCw className="w-4 h-4 mr-2" />
               )}
@@ -449,7 +450,7 @@ export function SpoolmanSettings() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-bambu-gray">{t('settings.status')}:</span>
                   {statusLoading ? (
-                    <Loader2 className="w-4 h-4 text-bambu-gray animate-spin" />
+                    <Spinner className="w-4 h-4 text-bambu-gray" />
                   ) : status?.connected ? (
                     <span className="flex items-center gap-1 text-sm text-green-500">
                       <Check className="w-4 h-4" />
@@ -471,7 +472,7 @@ export function SpoolmanSettings() {
                       disabled={disconnectMutation.isPending}
                     >
                       {disconnectMutation.isPending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Spinner className="w-4 h-4" />
                       ) : (
                         <Link2Off className="w-4 h-4" />
                       )}
@@ -484,7 +485,7 @@ export function SpoolmanSettings() {
                       disabled={connectMutation.isPending || !localUrl}
                     >
                       {connectMutation.isPending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Spinner className="w-4 h-4" />
                       ) : (
                         <Link2 className="w-4 h-4" />
                       )}
@@ -535,7 +536,7 @@ export function SpoolmanSettings() {
                       disabled={isSyncing}
                     >
                       {isSyncing ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Spinner className="w-4 h-4" />
                       ) : (
                         <RefreshCw className="w-4 h-4" />
                       )}
@@ -560,7 +561,7 @@ export function SpoolmanSettings() {
                       disabled={spoolmanAmsSyncMutation.isPending}
                     >
                       {spoolmanAmsSyncMutation.isPending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Spinner className="w-4 h-4" />
                       ) : (
                         <RefreshCw className="w-4 h-4" />
                       )}

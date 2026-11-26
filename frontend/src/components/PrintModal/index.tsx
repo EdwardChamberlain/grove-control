@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, AlertTriangle, ChevronDown, ChevronUp, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ChevronDown, ChevronUp, Palette, Pencil, Printer, X } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PrintQueueItemCreate, PrintQueueItemCreateResponse, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
@@ -1642,7 +1643,7 @@ export function PrintModal({
               >
                 {isPending ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                     {modalConfig.loadingText}
                   </>
                 ) : (

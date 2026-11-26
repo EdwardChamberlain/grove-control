@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Stethoscope, CheckCircle2, XCircle, MinusCircle, Loader2 } from 'lucide-react';
+import { X, Stethoscope, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, type CameraDiagnoseResult, type CameraDiagnoseStage } from '../api/client';
 
 interface CameraDiagnoseModalProps {
@@ -71,7 +72,7 @@ export function CameraDiagnoseModal({ printerId, printerName, onClose }: CameraD
         <div className="p-6 space-y-4">
           {diagnose.isPending && (
             <div className="flex items-center gap-2 text-bambu-gray">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               <span>{t('camera.diagnose.running')}</span>
             </div>
           )}

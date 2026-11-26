@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Plus, Edit2, Trash2, Save, Loader2, Users as UsersIcon, Shield, ArrowLeft, RotateCcw } from 'lucide-react';
+import { X, Plus, Edit2, Trash2, Save, Users as UsersIcon, Shield, ArrowLeft, RotateCcw } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import type { UserCreate, UserUpdate, UserResponse } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -308,7 +309,7 @@ export function UsersPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+          <Spinner className="w-8 h-8 text-bambu-green" />
         </div>
       ) : (
         <Card>
@@ -596,7 +597,7 @@ export function UsersPage() {
                 >
                   {createMutation.isPending ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       {t('users.modal.creating')}
                     </>
                   ) : (
@@ -766,7 +767,7 @@ export function UsersPage() {
                 >
                   {updateMutation.isPending ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       {t('users.modal.saving')}
                     </>
                   ) : (

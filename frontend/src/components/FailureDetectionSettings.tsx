@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, ScanEye, Check, X, AlertTriangle, Info } from 'lucide-react';
+import { ScanEye, Check, X, AlertTriangle, Info } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
 import { Button } from './Button';
@@ -312,7 +313,7 @@ export function FailureDetectionSettings() {
           <CardContent>
             {!status ? (
               <div className="flex items-center gap-2 text-bambu-gray">
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
                 <span>{t('common.loading')}</span>
               </div>
             ) : (

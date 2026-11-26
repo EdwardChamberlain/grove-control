@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Upload, X, AlertTriangle, CheckCircle, SkipForward, RefreshCw, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Upload, X, AlertTriangle, CheckCircle, SkipForward, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
 import { Toggle } from './Toggle';
@@ -261,7 +262,7 @@ export function RestoreModal({ onClose, onRestore, onSuccess }: RestoreModalProp
           {/* Restoring State */}
           {state === 'restoring' && (
             <div className="p-8 flex flex-col items-center gap-4">
-              <Loader2 className="w-12 h-12 text-bambu-green animate-spin" />
+              <Spinner className="w-12 h-12 text-bambu-green" />
               <p className="text-bambu-gray">{t('backup.processingBackup')}</p>
             </div>
           )}

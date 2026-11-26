@@ -6,7 +6,6 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Edit3,
-  Loader2,
   Package,
   Clock,
   CheckCircle,
@@ -33,6 +32,7 @@ import {
   Pencil,
   FileBox,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import { parseUTCDate, formatDateOnly, formatDateTime, formatDurationFromHours, type TimeFormat } from '../utils/date';
 import type { Archive, ProjectUpdate, BOMItem, BOMItemCreate, BOMItemUpdate, LibraryFileListItem } from '../api/client';
@@ -456,7 +456,7 @@ export function ProjectDetailPage() {
   if (projectLoading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -837,7 +837,7 @@ export function ProjectDetailPage() {
                   disabled={updateMutation.isPending}
                 >
                   {updateMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                    <Spinner className="w-4 h-4 mr-1" />
                   ) : (
                     <Save className="w-4 h-4 mr-1" />
                   )}
@@ -911,7 +911,7 @@ export function ProjectDetailPage() {
                     {/* File list within the folder */}
                     {isLoading ? (
                       <div className="flex items-center gap-2 px-3 py-2 text-bambu-gray text-sm">
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Spinner className="w-4 h-4" />
                       </div>
                     ) : files.length === 0 ? (
                       <p className="text-bambu-gray/60 text-xs italic px-3">
@@ -1074,7 +1074,7 @@ export function ProjectDetailPage() {
                 </Button>
                 <Button type="submit" size="sm" disabled={!newBomName.trim() || createBomMutation.isPending}>
                   {createBomMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                   ) : (
                     t('projectDetail.bom.addPart')
                   )}
@@ -1085,7 +1085,7 @@ export function ProjectDetailPage() {
 
           {bomLoading ? (
             <div className="flex items-center justify-center py-4">
-              <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+              <Spinner className="w-6 h-6 text-bambu-green" />
             </div>
           ) : bomItems && bomItems.length > 0 ? (
             <div className="space-y-2">
@@ -1149,7 +1149,7 @@ export function ProjectDetailPage() {
                         </Button>
                         <Button type="submit" size="sm" disabled={!editBomName.trim() || updateBomMutation.isPending}>
                           {updateBomMutation.isPending ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <Spinner className="w-4 h-4" />
                           ) : (
                             t('common.save')
                           )}
@@ -1277,7 +1277,7 @@ export function ProjectDetailPage() {
 
           {timelineLoading ? (
             <div className="flex items-center justify-center py-4">
-              <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+              <Spinner className="w-6 h-6 text-bambu-green" />
             </div>
           ) : timeline && timeline.length > 0 ? (
             <div className="space-y-3">
@@ -1324,7 +1324,7 @@ export function ProjectDetailPage() {
             title={!hasPermission('projects:create') ? t('projectDetail.template.noCreatePermission') : undefined}
           >
             {createTemplateMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              <Spinner className="w-4 h-4 mr-2" />
             ) : (
               <Copy className="w-4 h-4 mr-2" />
             )}
@@ -1375,7 +1375,7 @@ export function ProjectDetailPage() {
         </div>
         {archivesLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+            <Spinner className="w-6 h-6 text-bambu-green" />
           </div>
         ) : (
           <ArchiveGrid archives={archives || []} t={t} />

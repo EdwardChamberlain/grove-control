@@ -4,7 +4,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
   FolderOpen,
-  Loader2,
   Plus,
   Upload,
   Trash2,
@@ -44,6 +43,7 @@ import {
   Tag as TagIcon,
   CalendarClock,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import type {
   LibraryFolderTree,
@@ -122,7 +122,7 @@ function NewFolderModal({ parentId, onClose, onSave, isLoading, t }: NewFolderMo
               {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={!name.trim() || isLoading}>
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.create')}
+              {isLoading ? <Spinner className="w-4 h-4" /> : t('common.create')}
             </Button>
           </div>
         </form>
@@ -220,7 +220,7 @@ function ExternalFolderModal({ onClose, onSave, isLoading, t }: ExternalFolderMo
               {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={!name.trim() || !path.trim() || isLoading}>
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t('fileManager.linkFolder')}
+              {isLoading ? <Spinner className="w-4 h-4" /> : t('fileManager.linkFolder')}
             </Button>
           </div>
         </form>
@@ -305,7 +305,7 @@ function RenameModal({ type, currentName, onClose, onSave, isLoading, t }: Renam
               {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={!name.trim() || name.trim() === baseName || !!filenameError || isLoading}>
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.rename')}
+              {isLoading ? <Spinner className="w-4 h-4" /> : t('common.rename')}
             </Button>
           </div>
         </form>
@@ -471,7 +471,7 @@ function LinkFolderModal({ folder, onClose, onLink, isLoading, t }: LinkFolderMo
               {t('common.cancel')}
             </Button>
             <Button onClick={handleSave} disabled={!selectedId || isLoading}>
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t('fileManager.link')}
+              {isLoading ? <Spinner className="w-4 h-4" /> : t('fileManager.link')}
             </Button>
           </div>
         </div>
@@ -1780,7 +1780,7 @@ export function FileManagerPage() {
             title={!hasAnyPermission('library:update_own', 'library:update_all') ? t('fileManager.noPermissionGenerateThumbnail') : t('fileManager.generateThumbnailsForMissing')}
           >
             {batchThumbnailMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              <Spinner className="w-4 h-4 mr-2" />
             ) : (
               <Image className="w-4 h-4 mr-2" />
             )}
@@ -2215,7 +2215,7 @@ export function FileManagerPage() {
                 title={t('fileManager.scanFolder')}
               >
                 {scanExternalFolderMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                 ) : (
                   <RefreshCw className="w-4 h-4" />
                 )}
@@ -2451,7 +2451,7 @@ export function FileManagerPage() {
           {isLoading ? (
             <div className="flex-1 flex items-center justify-center">
               <div className="flex flex-col items-center gap-3">
-                <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+                <Spinner className="w-8 h-8 text-bambu-green" />
                 <p className="text-sm text-bambu-gray">{t('fileManager.loadingFiles')}</p>
               </div>
             </div>

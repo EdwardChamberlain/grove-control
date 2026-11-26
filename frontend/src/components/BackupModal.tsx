@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Download, X, Settings, Bell, FileText, Plug, Printer, Palette, Wrench, Archive, Loader2, Key, AlertTriangle, Link, FolderKanban, Upload, Camera } from 'lucide-react';
+import { Download, X, Settings, Bell, FileText, Plug, Printer, Palette, Wrench, Archive, Key, AlertTriangle, Link, FolderKanban, Upload, Camera } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -327,7 +328,7 @@ export function BackupModal({ onClose, onExport }: BackupModalProps) {
               >
                 {isExporting ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <Spinner className="w-4 h-4 mr-2" />
                     {t('backup.exporting', { defaultValue: 'Exporting...' })}
                   </>
                 ) : (

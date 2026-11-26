@@ -8,8 +8,8 @@ import {
   XCircle,
   AlertTriangle,
   MinusCircle,
-  Loader2,
-} from 'lucide-react';
+  } from 'lucide-react';
+import { Spinner } from './Spinner';
 import {
   api,
   type DiagnosticCheck,
@@ -176,7 +176,7 @@ export function ConnectionDiagnosticModal(props: ConnectionDiagnosticModalProps)
           {diagnose.isPending && (
             <div className="space-y-1.5">
               <div className="flex items-center gap-2 text-bambu-gray">
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
                 <span>
                   {elapsedSeconds > 0
                     ? t('diagnostic.runningElapsed', { elapsed: elapsedSeconds })

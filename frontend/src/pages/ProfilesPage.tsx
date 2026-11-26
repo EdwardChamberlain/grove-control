@@ -5,7 +5,6 @@ import {
   Cloud,
   LogIn,
   LogOut,
-  Loader2,
   Settings2,
   Printer as PrinterIcon,
   Droplet,
@@ -41,6 +40,7 @@ import {
   Plus as PlusIcon,
   HardDrive,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import { formatRelativeTime } from '../utils/date';
 import type { SlicerSetting, SlicerSettingsResponse, SlicerSettingDetail, SlicerSettingCreate, Printer, FieldDefinition, Permission } from '../api/client';
@@ -268,7 +268,7 @@ function LoginForm({ onSuccess, t }: { onSuccess: () => void; t: TFunction }) {
               </Button>
             )}
             <Button type="submit" disabled={isPending} className="flex-1">
-              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
+              {isPending ? <Spinner className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
               {step === 'email' ? t('profiles.login.loginButton') : step === 'code' ? t('profiles.login.verifyButton') : t('profiles.login.setTokenButton')}
             </Button>
           </div>
@@ -565,7 +565,7 @@ function PresetDetailModal({
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             {isLoading ? (
               <div className="flex items-center justify-center py-16">
-                <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+                <Spinner className="w-8 h-8 text-bambu-green" />
               </div>
             ) : detail ? (
               <pre className="text-xs text-bambu-gray font-mono whitespace-pre-wrap break-all bg-bambu-dark p-4 rounded-lg border border-bambu-dark-tertiary overflow-x-auto max-w-full">
@@ -591,7 +591,7 @@ function PresetDetailModal({
                   {t('common.cancel')}
                 </Button>
                 <Button variant="danger" onClick={() => deleteMutation.mutate()} disabled={deleteMutation.isPending} className="flex-1">
-                  {deleteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  {deleteMutation.isPending ? <Spinner className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
                   {t('common.delete')}
                 </Button>
               </div>
@@ -1783,7 +1783,7 @@ function CreatePresetModal({
                   <Check className="w-3 h-3 text-bambu-green" />
                   {t('profiles.presets.inheritsFrom')} <span className="text-white">{baseName}</span>
                   {isLoadingBasePreset && (
-                    <Loader2 className="w-3 h-3 animate-spin ml-1" />
+                    <Spinner className="w-3 h-3 ml-1" />
                   )}
                 </p>
               </div>
@@ -2209,7 +2209,7 @@ function CreatePresetModal({
               disabled={saveMutation.isPending || !name.trim() || (!isEditMode && !baseId) || !!jsonError}
               className="flex-1"
             >
-              {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : (isEditMode ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />)}
+              {saveMutation.isPending ? <Spinner className="w-4 h-4" /> : (isEditMode ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />)}
               {isEditMode ? t('common.save') : (initialData ? t('common.duplicate') : t('common.create'))}
             </Button>
           </div>
@@ -2846,7 +2846,7 @@ export function ProfilesPage() {
   if (statusLoading) {
     return (
       <div className="p-4 md:p-8 flex items-center justify-center min-h-[400px]">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -2960,7 +2960,7 @@ export function ProfilesPage() {
             <LoginForm onSuccess={handleLoginSuccess} t={t} />
           ) : settingsLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+              <Spinner className="w-8 h-8 text-bambu-green" />
             </div>
           ) : settings ? (
             <CloudProfilesView

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Plug, Power, PowerOff, Loader2, Wifi, WifiOff, Zap, Radio, Eye } from 'lucide-react';
+import { Plug, Power, PowerOff, Wifi, WifiOff, Zap, Radio, Eye } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { SmartPlug } from '../api/client';
 import { ConfirmModal } from './ConfirmModal';
@@ -62,7 +63,7 @@ function SwitchItem({ plug }: { plug: SmartPlug }) {
             <p className="text-sm text-white font-medium">{plug.name}</p>
             <div className="flex items-center gap-1 text-xs">
               {statusLoading ? (
-                <Loader2 className="w-3 h-3 text-bambu-gray animate-spin" />
+                <Spinner className="w-3 h-3 text-bambu-gray" />
               ) : isMqtt ? (
                 /* MQTT plugs show power and monitor-only indicator */
                 isReachable ? (
@@ -114,7 +115,7 @@ function SwitchItem({ plug }: { plug: SmartPlug }) {
               } disabled:opacity-50 disabled:cursor-not-allowed`}
               title="Turn On"
             >
-              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
+              {isPending ? <Spinner className="w-4 h-4" /> : <Power className="w-4 h-4" />}
             </button>
             <button
               onClick={() => setConfirmAction('off')}
@@ -126,7 +127,7 @@ function SwitchItem({ plug }: { plug: SmartPlug }) {
               } disabled:opacity-50 disabled:cursor-not-allowed`}
               title="Turn Off"
             >
-              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <PowerOff className="w-4 h-4" />}
+              {isPending ? <Spinner className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
             </button>
           </div>
         )}
@@ -174,7 +175,7 @@ export function SwitchbarPopover({ onClose }: SwitchbarPopoverProps) {
       <div className="p-2 max-h-80 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-6 h-6 text-bambu-gray animate-spin" />
+            <Spinner className="w-6 h-6 text-bambu-gray" />
           </div>
         ) : switchbarPlugs.length === 0 ? (
           <div className="text-center py-6 px-4">

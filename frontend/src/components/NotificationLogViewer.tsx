@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { History, CheckCircle, XCircle, Loader2, Trash2, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { History, CheckCircle, XCircle, Trash2, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { parseUTCDate, formatTimeOnly, formatDateTime, type TimeFormat } from '../utils/date';
 import type { NotificationLogEntry } from '../api/client';
@@ -152,7 +153,7 @@ export function NotificationLogViewer({ onClose }: NotificationLogViewerProps) {
             disabled={isRefetching}
           >
             {isRefetching ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
             ) : (
               <RefreshCw className="w-4 h-4" />
             )}
@@ -167,7 +168,7 @@ export function NotificationLogViewer({ onClose }: NotificationLogViewerProps) {
             className="text-red-400 hover:text-red-300"
           >
             {clearMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
             ) : (
               <Trash2 className="w-4 h-4" />
             )}
@@ -179,7 +180,7 @@ export function NotificationLogViewer({ onClose }: NotificationLogViewerProps) {
         <div className="flex-1 overflow-y-auto p-4">
           {isLoading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+              <Spinner className="w-6 h-6 text-bambu-green" />
             </div>
           ) : logs && logs.length > 0 ? (
             <div className="space-y-2">

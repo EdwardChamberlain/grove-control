@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { X, Loader2, ChevronDown } from 'lucide-react';
+import { X, ChevronDown } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { InventorySpool } from '../api/client';
 import { Button } from './Button';
@@ -510,7 +511,7 @@ export function BulkEditSpoolsModal({
             >
               {isPending ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Spinner className="w-4 h-4 mr-2" />
                   {t('inventory.bulk.applyPending')}
                 </>
               ) : (

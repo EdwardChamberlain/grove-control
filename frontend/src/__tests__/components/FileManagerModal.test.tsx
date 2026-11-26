@@ -409,7 +409,7 @@ describe('FileManagerModal', () => {
       );
 
       // The loader should be present initially
-      const loader = document.querySelector('.animate-spin');
+      const loader = document.querySelector('.spinner');
       expect(loader).toBeInTheDocument();
     });
   });

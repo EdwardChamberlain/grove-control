@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Eye, EyeOff, Link2, Plus, Pencil, Trash2, GripVertical, Loader2, ExternalLink as ExternalLinkIcon, RotateCcw } from 'lucide-react';
+import { Eye, EyeOff, Link2, Plus, Pencil, Trash2, GripVertical, ExternalLink as ExternalLinkIcon, RotateCcw } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { ExternalLink } from '../api/client';
@@ -234,7 +235,7 @@ export function ExternalLinksSettings() {
 
           {isLoading ? (
             <div className="flex justify-center py-8">
-              <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+              <Spinner className="w-6 h-6 text-bambu-green" />
             </div>
           ) : (
             <div className="space-y-2">

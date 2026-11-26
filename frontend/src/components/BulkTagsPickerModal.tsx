@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Tag, Loader2, Plus, X } from 'lucide-react';
+import { Tag, Plus, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 
 import { api, type LibraryTag } from '../api/client';
 import { Button } from './Button';
@@ -186,7 +187,7 @@ export function BulkTagsPickerModal({ open, fileIds, onClose }: BulkTagsPickerMo
         <div className="overflow-y-auto flex-1 min-h-[8rem] max-h-[24rem]">
           {isLoading ? (
             <div className="flex items-center justify-center py-12 text-bambu-gray">
-              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+              <Spinner className="w-5 h-5 mr-2" />
               {t('common.loading')}
             </div>
           ) : filteredTags.length === 0 ? (
@@ -235,7 +236,7 @@ export function BulkTagsPickerModal({ open, fileIds, onClose }: BulkTagsPickerMo
               onClick={() => createTagMutation.mutate(newTagName.trim())}
               disabled={createDisabled}
             >
-              {createTagMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {createTagMutation.isPending ? <Spinner className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               {t('fileManager.tags.createButton')}
             </Button>
           </div>
@@ -250,7 +251,7 @@ export function BulkTagsPickerModal({ open, fileIds, onClose }: BulkTagsPickerMo
             onClick={() => applyMutation.mutate()}
             disabled={selected.size === 0 || applyMutation.isPending || fileIds.length === 0}
           >
-            {applyMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+            {applyMutation.isPending && <Spinner className="w-4 h-4" />}
             {action === 'add' ? t('fileManager.tags.applyAdd') : t('fileManager.tags.applyRemove')}
           </Button>
         </div>

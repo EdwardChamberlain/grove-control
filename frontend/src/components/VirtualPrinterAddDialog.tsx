@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, ChevronDown, ArrowRightLeft } from 'lucide-react';
+import { ChevronDown, ArrowRightLeft } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, multiVirtualPrinterApi } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -144,7 +145,7 @@ export function VirtualPrinterAddDialog({ onClose }: VirtualPrinterAddDialogProp
               disabled={createMutation.isPending}
             >
               {createMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 t('virtualPrinter.addDialog.create')
               )}

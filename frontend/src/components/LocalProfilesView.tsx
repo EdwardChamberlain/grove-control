@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
   Upload,
-  Loader2,
   Search,
   Trash2,
   ChevronDown,
@@ -14,6 +13,7 @@ import {
   Layers,
   AlertCircle,
 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { LocalPreset, LocalPresetsResponse } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -340,7 +340,7 @@ export function LocalProfilesView() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -368,7 +368,7 @@ export function LocalProfilesView() {
           />
           {importMutation.isPending ? (
             <div className="flex items-center justify-center gap-2">
-              <Loader2 className="w-5 h-5 text-bambu-green animate-spin" />
+              <Spinner className="w-5 h-5 text-bambu-green" />
               <span className="text-bambu-gray">{t('profiles.localProfiles.importing')}</span>
             </div>
           ) : (
@@ -508,7 +508,7 @@ export function LocalProfilesView() {
                 onClick={() => deleteMutation.mutate(deleteConfirm)}
                 disabled={deleteMutation.isPending}
               >
-                {deleteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                {deleteMutation.isPending ? <Spinner className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
                 {t('profiles.localProfiles.delete')}
               </Button>
             </div>

@@ -103,7 +103,7 @@ describe('NotificationsPage', () => {
 
     it('shows loading spinner initially', () => {
       render(<NotificationsPage />);
-      expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+      expect(document.querySelector('.spinner')).toBeInTheDocument();
     });
   });
 

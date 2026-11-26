@@ -44,7 +44,6 @@ import {
   FileSpreadsheet,
   GitCompare,
   GitBranch,
-  Loader2,
   FolderKanban,
   ChevronLeft,
   ChevronRight,
@@ -55,6 +54,7 @@ import {
   Cog,
   History,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import { SliceModal } from '../components/SliceModal';
 import { SaveArchiveToFilesModal } from '../components/SaveArchiveToFilesModal';
@@ -626,7 +626,7 @@ function ArchiveCard({
         if (!projects) {
           items.push({
             label: t('archives.menu.loading'),
-            icon: <Loader2 className="w-4 h-4 animate-spin" />,
+            icon: <Spinner className="w-4 h-4" />,
             onClick: () => {},
             disabled: true,
           });
@@ -2032,7 +2032,7 @@ export function ArchivesPage() {
               disabled={isExporting || shownCount === 0}
             >
               {isExporting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <FileSpreadsheet className="w-4 h-4" />
               )}

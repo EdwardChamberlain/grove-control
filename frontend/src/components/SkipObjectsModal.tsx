@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Loader2, Monitor, AlertCircle, Box, Maximize2 } from 'lucide-react';
+import { X, Monitor, AlertCircle, Box, Maximize2 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, withStreamToken } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -96,7 +97,7 @@ export function SkipObjectsModal({ printerId, isOpen, onClose }: SkipObjectsModa
 
         {!objectsData ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-bambu-gray" />
+            <Spinner className="w-5 h-5 text-bambu-gray" />
           </div>
         ) : objectsData.objects.length === 0 ? (
           <div className="text-center py-8 px-4 text-bambu-gray">

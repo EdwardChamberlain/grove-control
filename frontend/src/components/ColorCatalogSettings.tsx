@@ -1,6 +1,7 @@
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Palette, Plus, Trash2, RotateCcw, Loader2, Pencil, Check, X, Search, Download, Upload, Cloud } from 'lucide-react';
+import { Palette, Plus, Trash2, RotateCcw, Pencil, Check, X, Search, Download, Upload, Cloud } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, getAuthToken } from '../api/client';
 import type { ColorCatalogEntry } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
@@ -357,7 +358,7 @@ export function ColorCatalogSettings() {
             className="px-3 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-bambu-gray hover:text-white transition-colors flex items-center gap-1.5"
             title={t('settings.colorCatalog.syncTooltip')}
           >
-            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
+            {syncing ? <Spinner className="w-4 h-4" /> : <Cloud className="w-4 h-4" />}
             <span className="hidden sm:inline">
               {syncing
                 ? syncProgress
@@ -478,7 +479,7 @@ export function ColorCatalogSettings() {
                   disabled={saving}
                   className="w-24 px-3 py-2 bg-bambu-green text-white rounded-lg hover:bg-bambu-green/80 flex items-center justify-center gap-3"
                 >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  {saving ? <Spinner className="w-4 h-4" /> : <Check className="w-4 h-4" />}
                   {t('common.add')}
                 </button>
                 <button
@@ -523,7 +524,7 @@ export function ColorCatalogSettings() {
         {/* Catalog list */}
         {loading ? (
           <div className="flex items-center justify-center py-8 text-bambu-gray">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            <Spinner className="w-5 h-5 mr-2" />
             {t('common.loading')}
           </div>
         ) : (
@@ -615,7 +616,7 @@ export function ColorCatalogSettings() {
                                 disabled={saving}
                                 className="p-1.5 rounded hover:bg-green-500/20 text-green-500"
                               >
-                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                {saving ? <Spinner className="w-4 h-4" /> : <Check className="w-4 h-4" />}
                               </button>
                               <button onClick={cancelEdit} className="p-1.5 rounded hover:bg-bambu-dark-tertiary text-bambu-gray">
                                 <X className="w-4 h-4" />

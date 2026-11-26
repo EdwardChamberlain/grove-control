@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Loader2, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Trash2, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 
 import { api } from '../api/client';
 import { Button } from './Button';
@@ -117,7 +118,7 @@ export function PurgeArchivesModal({ onClose, initialDays }: PurgeArchivesModalP
           <div className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3">
             {previewQuery.isLoading || previewQuery.isFetching ? (
               <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <Loader2 className="w-4 h-4 animate-spin" /> {t('archivePurge.previewLoading')}
+                <Spinner className="w-4 h-4" /> {t('archivePurge.previewLoading')}
               </div>
             ) : previewQuery.isError ? (
               <div className="text-sm text-red-600 dark:text-red-400">
@@ -175,7 +176,7 @@ export function PurgeArchivesModal({ onClose, initialDays }: PurgeArchivesModalP
           >
             {purgeMutation.isPending ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                <Spinner className="w-4 h-4 mr-1" />
                 {t('archivePurge.purging')}
               </>
             ) : (

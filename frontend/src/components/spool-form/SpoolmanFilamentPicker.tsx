@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { ChevronDown, Loader2, Package } from 'lucide-react';
+import { ChevronDown, Package } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { useTranslation } from 'react-i18next';
 import type { SpoolmanFilamentEntry } from '../../api/client';
 
@@ -81,7 +82,7 @@ export function SpoolmanFilamentPicker({
         className="w-full flex items-center gap-2 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-left focus:outline-none focus:border-bambu-green hover:border-bambu-gray transition-colors"
       >
         {isLoading ? (
-          <Loader2 className="w-4 h-4 text-bambu-gray animate-spin shrink-0" />
+          <Spinner className="w-4 h-4 text-bambu-gray shrink-0" />
         ) : selected ? (
           <>
             <span
@@ -124,7 +125,7 @@ export function SpoolmanFilamentPicker({
           <ul className="max-h-56 overflow-y-auto py-1">
             {isLoading ? (
               <li className="flex items-center justify-center gap-2 py-4 text-bambu-gray text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
                 <span>{t('common.loading', 'Loading…')}</span>
               </li>
             ) : filtered.length === 0 ? (

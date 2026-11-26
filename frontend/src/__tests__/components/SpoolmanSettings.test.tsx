@@ -78,7 +78,7 @@ describe('SpoolmanSettings', () => {
       vi.mocked(api.getSpoolmanSettings).mockImplementation(() => new Promise(() => {}));
       render(<SpoolmanSettings />);
 
-      expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+      expect(document.querySelector('.spinner')).toBeInTheDocument();
     });
 
     it('renders filament tracking title', async () => {

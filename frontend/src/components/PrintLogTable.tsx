@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { parseUTCDate } from '../utils/date';
 
@@ -32,7 +32,7 @@ export function PrintLogTable({ archiveId }: PrintLogTableProps) {
   if (isLoading) {
     return (
       <div className="flex justify-center py-4">
-        <Loader2 className="w-5 h-5 text-bambu-gray animate-spin" />
+        <Spinner className="w-5 h-5 text-bambu-gray" />
       </div>
     );
   }

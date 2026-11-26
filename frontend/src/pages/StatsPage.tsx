@@ -14,7 +14,6 @@ import {
   TrendingDown,
   FileSpreadsheet,
   FileText,
-  Loader2,
   Eye,
   RotateCcw,
   Calculator,
@@ -24,6 +23,7 @@ import {
   BarChart3,
   Boxes,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import type { LucideIcon } from 'lucide-react';
 import {
   BarChart,
@@ -781,7 +781,7 @@ function FailureAnalysisWidget({ size = 1, dateFrom, dateTo, createdById }: {
   if (isLoading) {
     return (
       <div className="flex justify-center py-4">
-        <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+        <Spinner className="w-6 h-6 text-bambu-green" />
       </div>
     );
   }
@@ -1196,7 +1196,7 @@ export function StatsPage() {
               <BarChart3 className="w-7 h-7 text-bambu-green" />
               {t('stats.title')}
             </h1>
-            {isRefetching && <Loader2 className="w-5 h-5 text-bambu-green animate-spin" />}
+            {isRefetching && <Spinner className="w-5 h-5 text-bambu-green" />}
           </div>
           <p className="text-bambu-gray mt-1">{t('stats.subtitle')}</p>
         </div>
@@ -1236,7 +1236,7 @@ export function StatsPage() {
             title={!hasPermission('archives:update_all') ? t('stats.noPermissionRecalculate') : t('stats.recalculateCostsHint')}
           >
             {isRecalculating ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
             ) : (
               <Calculator className="w-4 h-4" />
             )}
@@ -1250,7 +1250,7 @@ export function StatsPage() {
               disabled={isExporting}
             >
               {isExporting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <FileSpreadsheet className="w-4 h-4" />
               )}

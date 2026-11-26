@@ -5,7 +5,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import JSZip from 'jszip';
-import { Loader2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
+import { RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { Button } from './Button';
 import { getAuthToken } from '../api/client';
 
@@ -911,7 +912,7 @@ export function ModelViewer({
 
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-bambu-dark/80">
-          <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+          <Spinner className="w-8 h-8 text-bambu-green" />
         </div>
       )}
 

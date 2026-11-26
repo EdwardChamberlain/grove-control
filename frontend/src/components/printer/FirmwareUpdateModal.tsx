@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Box, CheckCircle, Download, Loader2 } from 'lucide-react';
+import { AlertCircle, Box, CheckCircle, Download } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { useTranslation } from 'react-i18next';
 
 import { firmwareApi } from '../../api/client';
@@ -197,7 +198,7 @@ export function FirmwareUpdateModal({
           {/* Status / Progress (only when a version is selected) */}
           {!selectedVersion ? null : isPreparing ? (
             <div className="flex items-center gap-2 text-bambu-gray text-sm mb-4">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               {t('printers.firmwareModal.checkingPrereqs')}
             </div>
           ) : prepareInfo && !isUploading && !uploadStatus ? (
@@ -273,7 +274,7 @@ export function FirmwareUpdateModal({
               >
                 {uploadMutation.isPending ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    <Spinner className="w-4 h-4 mr-2" />
                     {t('printers.firmwareModal.starting')}
                   </>
                 ) : (

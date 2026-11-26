@@ -81,7 +81,7 @@ describe('VirtualPrinterSettings', () => {
       render(<VirtualPrinterSettings />);
 
       // Should show loading spinner
-      expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+      expect(document.querySelector('.spinner')).toBeInTheDocument();
     });
 
     it('renders component title', async () => {

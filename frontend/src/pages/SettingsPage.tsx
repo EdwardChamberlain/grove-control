@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, Save, Mail, Flame, ListOrdered, Code, Search, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
+import { Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, Save, Mail, Flame, ListOrdered, Code, Search, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -1302,7 +1303,7 @@ export function SettingsPage() {
   if (isLoading || !localSettings) {
     return (
       <div className="p-4 md:p-8 flex justify-center">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -2134,7 +2135,7 @@ export function SettingsPage() {
                                 disabled={extCameraTestLoading[printer.id] || !(localCameraUrls[printer.id] ?? printer.external_camera_url)}
                               >
                                 {extCameraTestLoading[printer.id] ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  <Spinner className="w-4 h-4" />
                                 ) : (
                                   t('settings.test')
                                 )}
@@ -2173,7 +2174,7 @@ export function SettingsPage() {
                                     disabled={extCameraTestLoading[printer.id] || !(localSnapshotUrls[printer.id] ?? printer.external_camera_snapshot_url)}
                                   >
                                     {extCameraTestLoading[printer.id] ? (
-                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                      <Spinner className="w-4 h-4" />
                                     ) : (
                                       t('settings.test')
                                     )}
@@ -2462,7 +2463,7 @@ export function SettingsPage() {
                 <div className="mt-3">
                   {storageUsageLoading ? (
                     <div className="flex items-center gap-2 text-sm text-bambu-gray">
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       {t('common.loading', 'Loading')}
                     </div>
                   ) : storageUsage ? (
@@ -2618,7 +2619,7 @@ export function SettingsPage() {
                     disabled={isCheckingUpdate}
                   >
                     {isCheckingUpdate ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                     ) : (
                       <RefreshCw className="w-4 h-4" />
                     )}
@@ -2663,7 +2664,7 @@ export function SettingsPage() {
                     {updateStatus?.status === 'downloading' || updateStatus?.status === 'installing' ? (
                       <div className="mt-3">
                         <div className="flex items-center gap-2 text-sm text-bambu-gray">
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Spinner className="w-4 h-4" />
                           <span>{updateStatus.message}</span>
                         </div>
                         <div className="mt-2 w-full bg-bambu-dark-tertiary rounded-full h-2">
@@ -2703,7 +2704,7 @@ export function SettingsPage() {
                         disabled={applyUpdateMutation.isPending}
                       >
                         {applyUpdateMutation.isPending ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Spinner className="w-4 h-4" />
                         ) : (
                           <Download className="w-4 h-4" />
                         )}
@@ -2996,7 +2997,7 @@ export function SettingsPage() {
                           }
                         }}
                       >
-                        {haTestLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+                        {haTestLoading ? <Spinner className="w-4 h-4" /> : <Wifi className="w-4 h-4" />}
                         {t('settings.testConnection')}
                       </Button>
                     </div>
@@ -3287,7 +3288,7 @@ export function SettingsPage() {
                     title={t('settings.turnAllPlugsOn')}
                   >
                     {bulkPlugActionMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                     ) : (
                       <Power className="w-4 h-4 text-bambu-green" />
                     )}
@@ -3302,7 +3303,7 @@ export function SettingsPage() {
                     title={t('settings.turnAllPlugsOff')}
                   >
                     {bulkPlugActionMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                     ) : (
                       <PowerOff className="w-4 h-4 text-red-400" />
                     )}
@@ -3331,7 +3332,7 @@ export function SettingsPage() {
                   <Zap className="w-4 h-4 text-yellow-400" />
                   {t('settings.energySummary')}
                   {energyLoading && (
-                    <Loader2 className="w-4 h-4 animate-spin text-bambu-gray ml-2" />
+                    <Spinner className="w-4 h-4 text-bambu-gray ml-2" />
                   )}
                 </h3>
               </CardHeader>
@@ -3415,7 +3416,7 @@ export function SettingsPage() {
 
           {plugsLoading ? (
             <div className="flex justify-center py-12">
-              <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+              <Spinner className="w-8 h-8 text-bambu-green" />
             </div>
           ) : smartPlugs && smartPlugs.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -3649,7 +3650,7 @@ export function SettingsPage() {
                     disabled={testAllMutation.isPending}
                   >
                     {testAllMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                     ) : (
                       <Send className="w-4 h-4" />
                     )}
@@ -3782,7 +3783,7 @@ export function SettingsPage() {
 
             {providersLoading ? (
               <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+                <Spinner className="w-6 h-6 text-bambu-green" />
               </div>
             ) : notificationProviders && notificationProviders.length > 0 ? (
               <div className="space-y-3">
@@ -3853,7 +3854,7 @@ export function SettingsPage() {
 
             {templatesLoading ? (
               <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+                <Spinner className="w-6 h-6 text-bambu-green" />
               </div>
             ) : notificationTemplates && notificationTemplates.length > 0 ? (
               (() => {
@@ -4175,7 +4176,7 @@ export function SettingsPage() {
                       disabled={createAPIKeyMutation.isPending}
                     >
                       {createAPIKeyMutation.isPending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Spinner className="w-4 h-4" />
                       ) : (
                         <Plus className="w-4 h-4" />
                       )}
@@ -4192,7 +4193,7 @@ export function SettingsPage() {
             {/* Existing Keys List */}
             {apiKeysLoading ? (
               <div className="flex justify-center py-12">
-                <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+                <Spinner className="w-8 h-8 text-bambu-green" />
               </div>
             ) : apiKeys && apiKeys.length > 0 ? (
               <div className="space-y-3">
@@ -5853,7 +5854,7 @@ export function SettingsPage() {
                   <CardContent>
                     {usersLoading ? (
                       <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+                        <Spinner className="w-6 h-6 text-bambu-green" />
                       </div>
                     ) : usersData.length === 0 ? (
                       <p className="text-center text-bambu-gray py-8">{t('settings.noUsersFound')}</p>
@@ -5930,7 +5931,7 @@ export function SettingsPage() {
                   <CardContent>
                     {groupsLoading ? (
                       <div className="flex items-center justify-center py-8">
-                        <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+                        <Spinner className="w-6 h-6 text-bambu-green" />
                       </div>
                     ) : groupsData.length === 0 ? (
                       <p className="text-center text-bambu-gray py-8">{t('settings.noGroupsFound')}</p>
@@ -6250,7 +6251,7 @@ export function SettingsPage() {
                 >
                   {createUserMutation.isPending ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       {t('settings.creating')}
                     </>
                   ) : (
@@ -6412,7 +6413,7 @@ export function SettingsPage() {
                     >
                       {resetPasswordMutation.isPending ? (
                         <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Spinner className="w-4 h-4" />
                           {t('users.form.resettingPassword') || 'Resetting Password...'}
                         </>
                       ) : (
@@ -6471,7 +6472,7 @@ export function SettingsPage() {
                 >
                   {updateUserMutation.isPending ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       {t('users.modal.saving') || 'Saving...'}
                     </>
                   ) : (
@@ -6761,7 +6762,7 @@ export function SettingsPage() {
                 >
                   {changePasswordLoading ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       {t('settings.changing')}
                     </>
                   ) : (
