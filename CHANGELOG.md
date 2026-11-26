@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Theme: the default dark theme now uses a darker, bluer palette with a
+  `#121417` page background, and cards, borders, text and chart colours are
+  retuned to match (#392). Colours only; nothing moves.
 - Maintenance: each printer's Status view now has a maintenance mode button, an
   icon just left of **Log a repair** (#379). It is grey normally and turns blue
   while the printer is in maintenance mode, and its tooltip reads **Enter** or

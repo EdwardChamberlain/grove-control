@@ -114,8 +114,8 @@ const DURATION_BUCKETS = [
 ];
 
 const RECHARTS_TOOLTIP_STYLE = {
-  backgroundColor: '#2d2d2d',
-  border: '1px solid #3d3d3d',
+  backgroundColor: '#1a1c20',
+  border: '1px solid #2a2d33',
   borderRadius: '8px',
 };
 
@@ -244,7 +244,7 @@ function SuccessRateWidget({
             cy={gaugeSize / 2}
             r={radius}
             fill="none"
-            stroke="#3d3d3d"
+            stroke="#2a2d33"
             strokeWidth="10"
           />
           <circle
@@ -358,7 +358,7 @@ function TimeAccuracyWidget({
             cy={gaugeSize / 2}
             r={radius}
             fill="none"
-            stroke="#3d3d3d"
+            stroke="#2a2d33"
             strokeWidth="10"
           />
           <circle
@@ -663,7 +663,7 @@ function PrinterStatsWidget({
         {printerData.length > 0 ? (
           <ResponsiveContainer width="100%" height={Math.max(140, printerData.length * 40)}>
             <BarChart data={printerData} layout="vertical" margin={{ left: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#3d3d3d" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2d33" />
               <XAxis type="number" stroke="#9ca3af" tick={{ fontSize: 11 }} unit={ps.unit} />
               <YAxis type="category" dataKey="name" stroke="#9ca3af" tick={{ fontSize: 11 }} width={100} />
               <Tooltip
@@ -688,7 +688,7 @@ function PrinterStatsWidget({
           {archives.length > 0 ? (
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={durationData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#3d3d3d" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2d33" />
                 <XAxis dataKey="name" stroke="#9ca3af" tick={{ fontSize: 11 }} />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} allowDecimals={false} />
                 <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} />
@@ -709,7 +709,7 @@ function PrinterStatsWidget({
           {archives.length > 0 ? (
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={habitsData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#3d3d3d" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2d33" />
                 <XAxis dataKey="name" stroke="#9ca3af" tick={{ fontSize: 11 }} />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} unit={hs.unit} />
                 <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} formatter={(v: number | undefined) => [`${v ?? 0}${hs.unit}`, hLabel]} />
@@ -727,7 +727,7 @@ function PrinterStatsWidget({
           {archives.length > 0 ? (
             <ResponsiveContainer width="100%" height={160}>
               <BarChart data={hourlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#3d3d3d" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2d33" />
                 <XAxis dataKey="label" stroke="#9ca3af" tick={{ fontSize: 10 }} interval={5} />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} allowDecimals={false} />
                 <Tooltip contentStyle={RECHARTS_TOOLTIP_STYLE} />

@@ -5,7 +5,7 @@
  */
 
 .simple-keyboard.vkb-theme {
-  background: #1a1a1a;
+  background: #121417;
   border-top: 1px solid #333;
   padding: 8px 4px;
   font-family: inherit;
@@ -32,7 +32,7 @@
   flex-grow: 1;
   flex-shrink: 1;
   flex-basis: auto;
-  background: #2d2d2d;
+  background: #1a1c20;
   color: #e0e0e0;
   border: none;
   border-radius: 6px;
