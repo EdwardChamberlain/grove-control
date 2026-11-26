@@ -10,6 +10,10 @@ import { FileManagerModal } from '../../components/FileManagerModal';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 
+vi.mock('../../components/ModelViewer', () => ({
+  ModelViewer: () => <div data-testid="model-viewer" />,
+}));
+
 const mockFiles = [
   {
     name: 'cache',
@@ -411,6 +415,64 @@ describe('FileManagerModal', () => {
       // The loader should be present initially
       const loader = document.querySelector('.spinner');
       expect(loader).toBeInTheDocument();
+    });
+  });
+
+  describe('printer file viewer plates', () => {
+    const plate = (index: number) => ({
+      index,
+      name: null,
+      objects: [],
+      has_thumbnail: false,
+      thumbnail_url: null,
+      print_time_seconds: null,
+      filament_used_grams: null,
+      filaments: [],
+    });
+
+    const openViewer = async () => {
+      render(
+        <FileManagerModal printerId={1} printerName="X1 Carbon" onClose={mockOnClose} />
+      );
+      await waitFor(() => {
+        expect(screen.getByText('benchy.3mf')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getAllByTitle('3D View')[0]);
+      await screen.findByTestId('model-viewer');
+    };
+
+    it('shows the plates panel for a multi-plate file', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/files/plates', () =>
+          HttpResponse.json({
+            printer_id: 1,
+            path: '/benchy.3mf',
+            filename: 'benchy.3mf',
+            plates: [plate(1), plate(2)],
+            is_multi_plate: true,
+          })
+        )
+      );
+
+      await openViewer();
+
+      expect(await screen.findByText('All Plates')).toBeInTheDocument();
+      expect(screen.getByText('Plate 2')).toBeInTheDocument();
+    });
+
+    it('hides the plates panel when loading plates fails', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/files/plates', () =>
+          HttpResponse.json({ detail: 'boom' }, { status: 500 })
+        )
+      );
+
+      await openViewer();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('model-viewer')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('All Plates')).not.toBeInTheDocument();
     });
   });
 });
