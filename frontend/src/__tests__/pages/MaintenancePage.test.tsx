@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { MaintenancePage } from '../../pages/MaintenancePage';
+import { setAuthToken } from '../../api/client';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 
@@ -445,6 +446,68 @@ describe('MaintenancePage', () => {
       // No cached status to fall back on and nothing known to say it is printing, so the toggle goes ahead.
       fireEvent.click(await screen.findByRole('button', { name: 'Enter maintenance mode' }));
       await waitFor(() => expect(body).toEqual({ is_active: false }));
+    });
+
+    it('sends the change once when the button is clicked twice quickly', async () => {
+      let patches = 0;
+      server.use(
+        overviewFor(true),
+        http.get('/api/v1/printers/1/status', async () => {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return HttpResponse.json({ connected: true, state: 'IDLE' });
+        }),
+        http.patch('/api/v1/printers/1', () => {
+          patches += 1;
+          return HttpResponse.json({ id: 1 });
+        }),
+      );
+      await openPrinter();
+
+      const button = await screen.findByRole('button', { name: 'Enter maintenance mode' });
+      fireEvent.click(button);
+      fireEvent.click(button);
+
+      await waitFor(() => expect(patches).toBe(1));
+      // Give a stray second request time to arrive before asserting there was none.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(patches).toBe(1);
+    });
+
+    it('disables the button while the print check is in flight', async () => {
+      let patched = false;
+      server.use(
+        overviewFor(true),
+        http.get('/api/v1/printers/1/status', async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return HttpResponse.json({ connected: true, state: 'IDLE' });
+        }),
+        http.patch('/api/v1/printers/1', () => {
+          patched = true;
+          return HttpResponse.json({ id: 1 });
+        }),
+      );
+      await openPrinter();
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Enter maintenance mode' }));
+      expect(screen.getByRole('button', { name: 'Enter maintenance mode' })).toBeDisabled();
+      // Let the request finish so it can't leak into the next test's handlers.
+      await waitFor(() => expect(patched).toBe(true));
+    });
+
+    it('hides the button without the printer-edit permission', async () => {
+      setAuthToken('viewer-token');
+      server.use(
+        overviewFor(true),
+        http.get('*/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: true, requires_setup: false })),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({ id: 2, username: 'viewer', is_admin: false, permissions: ['maintenance:read', 'maintenance:create'] }),
+        ),
+      );
+      await openPrinter();
+
+      expect(await screen.findByRole('button', { name: 'Log a repair' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /maintenance mode/i })).not.toBeInTheDocument();
+      setAuthToken(null);
     });
 
     it('asks for confirmation before interrupting a running print', async () => {

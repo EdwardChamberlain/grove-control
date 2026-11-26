@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -1954,12 +1954,29 @@ export function MaintenancePage() {
     onError: (error: Error) => showToast(error.message, 'error'),
   });
 
+  // Entering mode first checks the printer's live status, which takes a moment. Ignore further clicks until
+  // that check and the update finish, so a double click can't send the change twice or stack dialogs.
+  const [checkingMaintenanceMode, setCheckingMaintenanceMode] = useState(false);
+  const checkingMaintenanceModeRef = useRef(false);
+
   const handleToggleMaintenanceMode = async (printerId: number, enterMaintenance: boolean) => {
+    if (checkingMaintenanceModeRef.current || maintenanceModeMutation.isPending) return;
     const name = overview?.find((printer) => printer.printer_id === printerId)?.printer_name ?? '';
     if (!enterMaintenance) {
       maintenanceModeMutation.mutate({ id: printerId, name, isActive: true });
       return;
     }
+    checkingMaintenanceModeRef.current = true;
+    setCheckingMaintenanceMode(true);
+    try {
+      await enterMaintenanceMode(printerId, name);
+    } finally {
+      checkingMaintenanceModeRef.current = false;
+      setCheckingMaintenanceMode(false);
+    }
+  };
+
+  const enterMaintenanceMode = async (printerId: number, name: string) => {
     // Entering mode disconnects MQTT, so confirm first when a job is in flight.
     // If the live status can't be fetched, fall back to the last one we saw rather than skipping the check.
     const queryKey = ['printerStatus', printerId];
@@ -2191,7 +2208,7 @@ export function MaintenancePage() {
             setActiveTab('log');
           }}
           onToggleMaintenanceMode={handleToggleMaintenanceMode}
-          maintenanceModePending={maintenanceModeMutation.isPending}
+          maintenanceModePending={maintenanceModeMutation.isPending || checkingMaintenanceMode}
           hasPermission={hasPermission}
           t={t}
         />
