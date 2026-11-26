@@ -743,3 +743,16 @@ test('Archive actions scroll within a short viewport', async ({ page }) => {
   await menu.getByRole('menuitem', { name: 'Delete', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Delete Archive' })).toBeVisible();
 });
+
+test('archive card shows its 3MF preview in full rather than cropping it', async ({ page }) => {
+  await mockApi(page, []);
+  await page.route(/\/api\/v1\/archives\/(\?.*)?$/, (route) => route.fulfill({ json: [{ ...archive, thumbnail_path: 'thumb.png' }] }));
+  await page.route('**/api/v1/archives/*/thumbnail*', (route) => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="gray"/></svg>',
+  }));
+  await page.goto('/archives');
+
+  const preview = page.getByRole('img', { name: 'Benchy' });
+  await expect(preview).toHaveCSS('object-fit', 'contain');
+});
