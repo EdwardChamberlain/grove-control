@@ -855,7 +855,8 @@ function FileActionsMenu({
           setMenuPosition({ x: rect.left, y: rect.bottom + 4 });
         }}
       >
-        <MoreVertical className="w-4 h-4" />
+        {/* my-0.5 pads the icon to the 20px line height of the Print label so both buttons match */}
+        <MoreVertical className="w-4 h-4 my-0.5" />
       </Button>
       {menuPosition && (
         <ContextMenu
