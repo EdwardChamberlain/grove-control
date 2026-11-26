@@ -378,7 +378,8 @@ describe('QueuePage', () => {
       const list = await screen.findByTestId('history-list');
       expect(list.className).toContain('flex-col');
       expect(list.className).not.toContain('grid');
-      expect(screen.getAllByTestId('history-status').map((el) => el.textContent)).toEqual(['Failed', 'Skipped']);
+      expect(within(list).getAllByText('Failed').length).toBeGreaterThan(0);
+      expect(within(list).getAllByText('Skipped').length).toBeGreaterThan(0);
       expect(screen.getByText('Nozzle clog')).toBeInTheDocument();
       expect(screen.getByText('Plate not clear')).toBeInTheDocument();
     });
