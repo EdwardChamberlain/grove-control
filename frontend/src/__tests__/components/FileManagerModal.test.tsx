@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { render } from '../utils';
 import { FileManagerModal } from '../../components/FileManagerModal';
 import { http, HttpResponse } from 'msw';
@@ -461,18 +461,24 @@ describe('FileManagerModal', () => {
     });
 
     it('hides the plates panel when loading plates fails', async () => {
+      let platesRequested = false;
       server.use(
-        http.get('/api/v1/printers/:id/files/plates', () =>
-          HttpResponse.json({ detail: 'boom' }, { status: 500 })
-        )
+        http.get('/api/v1/printers/:id/files/plates', () => {
+          platesRequested = true;
+          return HttpResponse.json({ detail: 'boom' }, { status: 500 });
+        })
       );
 
       await openViewer();
 
-      await waitFor(() => {
-        expect(screen.getByTestId('model-viewer')).toBeInTheDocument();
+      // Wait for the failing request, then let its rejection handler run.
+      await waitFor(() => expect(platesRequested).toBe(true));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
       });
+
       expect(screen.queryByText('All Plates')).not.toBeInTheDocument();
+      expect(screen.getByTestId('model-viewer')).toBeInTheDocument();
     });
   });
 });
