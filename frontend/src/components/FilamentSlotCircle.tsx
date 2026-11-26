@@ -39,7 +39,7 @@ export function FilamentSlotCircle({ trayColor, trayType, isEmpty, emptyKind, sl
   // Reset slots get a quieter border than physical-empty so they read as
   // "cleared but possibly still has a spool the firmware hasn't confirmed
   // gone" rather than "definitely no spool".
-  const emptyBorderColor = emptyKind === 'reset' ? '#3d3d3d' : '#666';
+  const emptyBorderColor = emptyKind === 'reset' ? '#2a2d33' : '#666';
   return (
     <div
       className="w-3.5 h-3.5 rounded-full mx-auto mb-0.5 border-2 flex items-center justify-center"

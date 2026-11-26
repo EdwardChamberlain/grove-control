@@ -290,7 +290,7 @@ export function FilamentTrends({ archives, currency = '$', dateFrom, dateTo }: F
                   <stop offset="95%" stopColor="#00ae42" stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#3d3d3d" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2d33" />
               <XAxis
                 dataKey="dateLabel"
                 stroke="#9ca3af"
@@ -304,8 +304,8 @@ export function FilamentTrends({ archives, currency = '$', dateFrom, dateTo }: F
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: '#2d2d2d',
-                  border: '1px solid #3d3d3d',
+                  backgroundColor: '#1a1c20',
+                  border: '1px solid #2a2d33',
                   borderRadius: '8px',
                 }}
                 labelStyle={{ color: '#fff' }}
@@ -345,7 +345,7 @@ export function FilamentTrends({ archives, currency = '$', dateFrom, dateTo }: F
                   <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#3d3d3d" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2d33" />
               <XAxis
                 dataKey="dateLabel"
                 stroke="#9ca3af"
@@ -359,8 +359,8 @@ export function FilamentTrends({ archives, currency = '$', dateFrom, dateTo }: F
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: '#2d2d2d',
-                  border: '1px solid #3d3d3d',
+                  backgroundColor: '#1a1c20',
+                  border: '1px solid #2a2d33',
                   borderRadius: '8px',
                 }}
                 labelStyle={{ color: '#fff' }}
@@ -406,8 +406,8 @@ export function FilamentTrends({ archives, currency = '$', dateFrom, dateTo }: F
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: '#2d2d2d',
-                      border: '1px solid #3d3d3d',
+                      backgroundColor: '#1a1c20',
+                      border: '1px solid #2a2d33',
                       borderRadius: '8px',
                     }}
                     formatter={(value) => [
@@ -502,13 +502,13 @@ export function FilamentTrends({ archives, currency = '$', dateFrom, dateTo }: F
                         dataKey="value"
                       >
                         {colorData.map((entry, index) => (
-                          <Cell key={`color-${index}`} fill={entry.hex} stroke="#1a1a1a" strokeWidth={1} />
+                          <Cell key={`color-${index}`} fill={entry.hex} stroke="#121417" strokeWidth={1} />
                         ))}
                       </Pie>
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: '#2d2d2d',
-                          border: '1px solid #3d3d3d',
+                          backgroundColor: '#1a1c20',
+                          border: '1px solid #2a2d33',
                           borderRadius: '8px',
                         }}
                         formatter={(value) => [

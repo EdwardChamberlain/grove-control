@@ -101,14 +101,14 @@ html {
 .dark {
   color-scheme: dark;
 
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #2d2d2d;
-  --bg-tertiary: #3d3d3d;
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
-  --text-muted: #808080;
-  --text-tertiary: #4a4a4a;
-  --border-color: #3d3d3d;
+  --bg-primary: #121417;
+  --bg-secondary: #1a1c20;
+  --bg-tertiary: #2a2d33;
+  --text-primary: #f5f6f8;
+  --text-secondary: #a1a5ad;
+  --text-muted: #80848c;
+  --text-tertiary: #4d5159;
+  --border-color: #2a2d33;
   --card-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
@@ -167,14 +167,14 @@ html {
 }
 
 .dark.bg-cool {
-  --bg-primary: #181c20;
-  --bg-secondary: #262c32;
-  --bg-tertiary: #363e46;
-  --text-primary: #f0f4f8;
-  --text-secondary: #98a8b8;
-  --text-muted: #788898;
-  --text-tertiary: #4a5a6a;
-  --border-color: #363e46;
+  --bg-primary: #121417;
+  --bg-secondary: #1a1c20;
+  --bg-tertiary: #2a2d33;
+  --text-primary: #f5f6f8;
+  --text-secondary: #a1a5ad;
+  --text-muted: #80848c;
+  --text-tertiary: #4d5159;
+  --border-color: #2a2d33;
 }
 
 .dark.bg-oled {
