@@ -37,7 +37,7 @@ import {
   Printer,
   ExternalLink,
   ListChecks,
-  Power,
+  Construction,
 } from 'lucide-react';
 import { api } from '../api/client';
 import type {
@@ -675,9 +675,9 @@ function PrinterView({
               onClick={() => onToggleMaintenanceMode(overview.printer_id, overview.is_active !== false)}
               aria-label={maintenanceModeLabel}
               title={maintenanceModeLabel}
-              className="bg-blue-500/20 px-2.5 text-blue-400 hover:bg-blue-500/30 hover:text-blue-300 focus:ring-blue-400"
+              className="!bg-blue-500/20 px-2.5 !text-blue-400 hover:!bg-blue-500/30 hover:!text-blue-300 focus:ring-blue-400"
             >
-              <Power className="h-4 w-4" />
+              <Construction className="h-4 w-4" />
             </Button>
           )}
           {hasPermission('maintenance:create') && (
