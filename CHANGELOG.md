@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Archives: a card's 3MF preview image is now shown in full instead of being
+  cropped to fill the thumbnail area (#378). The preview keeps its aspect ratio
+  and its transparent background, so the whole print stays visible.
 - Printers: a firmware update is only flagged as available once Bambu Lab has
   published the file (#376). Bambu announces a release a little before the
   download is ready, which previously turned the health marker amber with an

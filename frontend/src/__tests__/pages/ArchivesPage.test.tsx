@@ -322,6 +322,16 @@ describe('ArchivesPage', () => {
       });
     });
 
+    it('fits the preview inside the card instead of cropping it', async () => {
+      render(<ArchivesPage />);
+
+      const previews = await screen.findAllByAltText('Benchy');
+      for (const preview of previews) {
+        expect(preview).toHaveClass('object-contain');
+        expect(preview).not.toHaveClass('object-cover');
+      }
+    });
+
     it('fetches plate data for multi-plate archives on hover', async () => {
       // Setup handler for plates endpoint
       server.use(

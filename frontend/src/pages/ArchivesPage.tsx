@@ -707,7 +707,7 @@ function ArchiveCard({
                 : api.getArchiveThumbnail(archive.id)
             }
             alt={archive.print_name || archive.filename}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
