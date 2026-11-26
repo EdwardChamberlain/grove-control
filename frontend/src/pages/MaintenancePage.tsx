@@ -47,6 +47,7 @@ import type {
   MaintenanceLogEntryType,
   MaintenanceStatus,
   PrinterMaintenanceOverview,
+  PrinterStatus,
   MaintenanceType,
   Permission,
 } from '../api/client';
@@ -675,7 +676,6 @@ function PrinterView({
               onClick={() => onToggleMaintenanceMode(overview.printer_id, overview.is_active !== false)}
               aria-label={maintenanceModeLabel}
               title={maintenanceModeLabel}
-              aria-pressed={overview.is_active === false}
               className={`inline-flex min-h-[44px] items-center justify-center rounded-lg px-2.5 py-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-bambu-gray disabled:cursor-not-allowed disabled:opacity-50 md:min-h-0 ${
                 overview.is_active === false
                   ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
@@ -1961,17 +1961,15 @@ export function MaintenancePage() {
       return;
     }
     // Entering mode disconnects MQTT, so confirm first when a job is in flight.
-    let printing = false;
+    // If the live status can't be fetched, fall back to the last one we saw rather than skipping the check.
+    const queryKey = ['printerStatus', printerId];
+    let status = queryClient.getQueryData<PrinterStatus>(queryKey);
     try {
-      const status = await queryClient.fetchQuery({
-        queryKey: ['printerStatus', printerId],
-        queryFn: () => api.getPrinterStatus(printerId),
-        staleTime: 0,
-      });
-      printing = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+      status = await queryClient.fetchQuery({ queryKey, queryFn: () => api.getPrinterStatus(printerId), staleTime: 0 });
     } catch {
-      printing = false;
+      // keep the cached status, if any
     }
+    const printing = status?.state === 'RUNNING' || status?.state === 'PAUSE';
     if (printing) {
       setConfirmEnterMaintenance({ id: printerId, name });
     } else {

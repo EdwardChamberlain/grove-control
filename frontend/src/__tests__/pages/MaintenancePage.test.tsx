@@ -430,6 +430,23 @@ describe('MaintenancePage', () => {
       await waitFor(() => expect(body).toEqual({ is_active: true }));
     });
 
+    it('still toggles when the status is unavailable and no printing state is known', async () => {
+      let body: unknown = null;
+      server.use(
+        overviewFor(true),
+        http.get('/api/v1/printers/1/status', () => HttpResponse.json({ detail: 'boom' }, { status: 500 })),
+        http.patch('/api/v1/printers/1', async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json({ id: 1 });
+        }),
+      );
+      await openPrinter();
+
+      // No cached status to fall back on and nothing known to say it is printing, so the toggle goes ahead.
+      fireEvent.click(await screen.findByRole('button', { name: 'Enter maintenance mode' }));
+      await waitFor(() => expect(body).toEqual({ is_active: false }));
+    });
+
     it('asks for confirmation before interrupting a running print', async () => {
       let body: unknown = null;
       server.use(
