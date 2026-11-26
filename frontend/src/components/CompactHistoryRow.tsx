@@ -75,7 +75,11 @@ export function CompactHistoryRow({
     <div className={`px-3 py-2 bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary border-l-[3px] ${config.border}`}>
       {/* Top row — status / thumb / name / time / actions */}
       <div className="flex items-center gap-2 sm:gap-3">
-        <StatusIcon className={`w-4 h-4 shrink-0 ${config.color}`} />
+        <StatusIcon
+          className={`w-4 h-4 shrink-0 ${config.color}`}
+          role="img"
+          aria-label={t(`queue.status.${item.status}`)}
+        />
 
         <div className="relative shrink-0 history-thumb-hover">
           <div className="w-8 h-8 bg-bambu-dark rounded overflow-hidden">
@@ -102,8 +106,15 @@ export function CompactHistoryRow({
           )}
         </div>
 
-        <span className="text-sm text-white font-medium truncate min-w-0 flex-1">
+        <span className="text-sm text-white font-medium truncate min-w-0 flex-1" title={displayName}>
           {displayName}
+        </span>
+
+        <span
+          data-testid="history-status"
+          className={`hidden sm:inline-flex shrink-0 w-24 text-xs font-medium ${config.color}`}
+        >
+          {t(`queue.status.${item.status}`)}
         </span>
 
         <span
@@ -183,7 +194,7 @@ export function CompactHistoryRow({
 
       {/* Error message — only rendered on failed/skipped rows. */}
       {showErrorMessage && (
-        <div className="mt-1 ml-[3.25rem] flex items-start gap-1 text-xs text-red-400">
+        <div className={`mt-1 ml-[3.25rem] flex items-start gap-1 text-xs ${item.status === 'failed' ? 'text-red-400' : 'text-orange-400'}`}>
           <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
           <span className="break-words">{item.error_message}</span>
         </div>

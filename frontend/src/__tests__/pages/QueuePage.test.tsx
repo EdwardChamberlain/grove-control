@@ -363,6 +363,26 @@ describe('QueuePage', () => {
       });
     });
 
+    it('lists history as a single column with status and failure reason', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], id: 901, status: 'failed', archive_name: 'Failed Print', error_message: 'Nozzle clog' },
+          { ...mockQueueItems[0], id: 902, status: 'skipped', archive_name: 'Skipped Print', error_message: 'Plate not clear' },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+
+      const list = await screen.findByTestId('history-list');
+      expect(list.className).toContain('flex-col');
+      expect(list.className).not.toContain('grid');
+      expect(screen.getAllByTestId('history-status').map((el) => el.textContent)).toEqual(['Failed', 'Skipped']);
+      expect(screen.getByText('Nozzle clog')).toBeInTheDocument();
+      expect(screen.getByText('Plate not clear')).toBeInTheDocument();
+    });
+
     it('reveals history beyond the first page on demand', async () => {
       const user = userEvent.setup();
       const historyItems = Array.from({ length: 51 }, (_, index) => ({
