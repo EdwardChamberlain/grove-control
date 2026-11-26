@@ -13,7 +13,7 @@ import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { PrintersPage } from '../../pages/PrintersPage';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 
 const mockPrinter = {
@@ -241,5 +241,28 @@ describe('PrintersPage - AMS load/unload (#891)', () => {
     expect(screen.getByText('Unload')).toBeInTheDocument();
     expect(screen.getByText('Re-read RFID')).toBeInTheDocument();
     expect(screen.getByText('Configure')).toBeInTheDocument();
+  });
+
+  it('shows a spinner over the slot in cockpit view while its RFID is re-read', async () => {
+    server.use(
+      http.get('/api/v1/printers/:id/status', () => HttpResponse.json(mockIdleStatusWithAms)),
+      http.get('/api/v1/printers/:id/ams-labels', () => HttpResponse.json({})),
+      http.post('/api/v1/printers/:id/ams/:amsId/slot/:slotId/refresh', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ success: true, message: 'ok' });
+      }),
+    );
+
+    render(<PrintersPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+    const cockpit = await screen.findByTestId('cockpit-filament-pane');
+    const slot = cockpit.querySelector('[data-testid="filament-slot"]');
+    expect(slot).not.toBeNull();
+    expect(cockpit.querySelector('.spinner')).toBeNull();
+
+    await hoverSlot(slot!);
+    fireEvent.click(screen.getByText('Re-read RFID'));
+
+    await waitFor(() => expect(cockpit.querySelector('.spinner')).not.toBeNull());
   });
 });

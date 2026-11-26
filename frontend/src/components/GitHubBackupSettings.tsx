@@ -1415,10 +1415,7 @@ export function GitHubBackupSettings() {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100]">
           <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-xl p-8 max-w-md w-full mx-4 text-center">
             <div className="flex justify-center mb-4">
-              <div className="relative">
-                <div className="w-16 h-16 border-4 border-bambu-dark-tertiary rounded-full"></div>
-                <div className="w-16 h-16 border-4 border-bambu-green border-t-transparent rounded-full absolute inset-0 animate-spin"></div>
-              </div>
+              <Spinner className="w-16 h-16 text-bambu-green" />
             </div>
             <h3 className="text-xl font-semibold text-white mb-2">
               {isExporting ? t('backup.creatingBackup') : t('backup.restoringBackup')}

@@ -655,7 +655,7 @@ export function PrinterSelector({
 
                   {/* Loading indicator */}
                   {mappingResult.isLoading && (
-                    <RefreshCw className="w-3 h-3 text-bambu-gray animate-spin" />
+                    <Spinner className="w-3 h-3 text-bambu-gray" />
                   )}
 
                   {/* Auto-configure button (when override is enabled) */}

@@ -2145,7 +2145,7 @@ function SinglePrinterCockpit({
     />;
     return (
       <div key={trayId} className="relative min-w-0">
-        {isRefreshing && <div className="absolute inset-0 z-20 flex items-center justify-center rounded bg-bambu-dark-tertiary/80"><RefreshCw className="h-4 w-4 animate-spin text-bambu-green" /></div>}
+        {isRefreshing && <div className="absolute inset-0 z-20 flex items-center justify-center rounded bg-bambu-dark-tertiary/80"><Spinner className="h-4 w-4 text-bambu-green" /></div>}
         <AmsSlot
           controller={amsSlotController}
           slot={{
@@ -5094,7 +5094,7 @@ function PrinterCard({
                                     {/* Loading overlay during RFID re-read */}
                                     {isRefreshing && (
                                       <div className="absolute inset-0 bg-bambu-dark-tertiary/80 rounded flex items-center justify-center z-20">
-                                        <RefreshCw className="w-4 h-4 text-bambu-green animate-spin" />
+                                        <Spinner className="w-4 h-4 text-bambu-green" />
                                       </div>
                                     )}
                                     <AmsSlot
@@ -5242,7 +5242,7 @@ function PrinterCard({
                                 {/* Loading overlay during RFID re-read */}
                                 {isHtRefreshing && (
                                   <div className="absolute inset-0 bg-bambu-dark-tertiary/80 rounded flex items-center justify-center z-20">
-                                    <RefreshCw className="w-4 h-4 text-bambu-green animate-spin" />
+                                    <Spinner className="w-4 h-4 text-bambu-green" />
                                   </div>
                                 )}
                                 <AmsSlot

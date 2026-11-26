@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw, AlertTriangle, Camera, Maximize, Minimize, WifiOff, ZoomIn, ZoomOut, Stethoscope } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api, getAuthToken, getStreamToken, withStreamToken } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -718,7 +719,7 @@ export function CameraPage() {
           {(streamLoading || transitioning) && !isReconnecting && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
               <div className="text-center">
-                <RefreshCw className="w-8 h-8 text-bambu-gray animate-spin mx-auto mb-2" />
+                <Spinner className="w-8 h-8 text-bambu-gray mx-auto mb-2" />
                 <p className="text-sm text-bambu-gray">
                   {streamMode === 'stream' ? t('camera.connectingToCamera') : t('camera.capturingSnapshot')}
                 </p>

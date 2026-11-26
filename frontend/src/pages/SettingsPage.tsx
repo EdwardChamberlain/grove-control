@@ -6510,7 +6510,7 @@ export function SettingsPage() {
             <CardContent className="space-y-3">
               {deleteUserLoading ? (
                 <div className="flex items-center justify-center py-4">
-                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-bambu-green border-t-transparent" />
+                  <Spinner className="w-6 h-6 text-bambu-green" />
                 </div>
               ) : deleteUserItemCounts && (deleteUserItemCounts.archives + deleteUserItemCounts.queue_items + deleteUserItemCounts.library_files > 0) ? (
                 <>
