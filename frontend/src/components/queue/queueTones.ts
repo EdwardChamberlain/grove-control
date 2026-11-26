@@ -75,8 +75,13 @@ export const QUEUE_TONES = {
   },
 } satisfies Record<string, QueueTone>;
 
+// History tab: finished jobs follow the rule above loosely, since the point is to
+// spot problems at a glance. Failed is red and skipped reuses the paused orange so
+// both stand out; completed gets a green gutter only (its card stays neutral, so
+// green still reads as "printing" on the live queue); cancelled is neutral. A
+// failure or skip reason is drawn by QueueJobLine's error footer, which is always
+// red, so a skipped card has an orange gutter and a red reason strip.
 const HISTORY_TONES = {
-  // Finished jobs need nothing from anyone, so only the gutter hints at the outcome.
   completed: {
     ...QUEUE_TONES.neutral,
     text: 'text-green-700 dark:text-green-400',

@@ -51,7 +51,6 @@ export function CompactHistoryRow({
         <span
           className="flex-shrink-0 text-xs text-bambu-gray"
           title={completedTime ?? undefined}
-          data-testid="history-time"
         >
           {formatRelativeTime(completedTime, timeFormat, t)}
         </span>

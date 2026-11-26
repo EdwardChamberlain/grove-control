@@ -384,6 +384,86 @@ describe('QueuePage', () => {
       expect(screen.getByText('Plate not clear')).toBeInTheDocument();
     });
 
+    it('only shows a reason on failed and skipped history rows', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], id: 911, status: 'completed', archive_name: 'Done Print', error_message: 'Stale completed message' },
+          { ...mockQueueItems[0], id: 912, status: 'cancelled', archive_name: 'Cancelled Print', error_message: 'Stale cancelled message' },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+
+      const list = await screen.findByTestId('history-list');
+      expect(within(list).getByText('Done Print')).toBeInTheDocument();
+      expect(within(list).getAllByText('Completed').length).toBeGreaterThan(0);
+      expect(within(list).getAllByText('Cancelled').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Stale completed message')).not.toBeInTheDocument();
+      expect(screen.queryByText('Stale cancelled message')).not.toBeInTheDocument();
+    });
+
+    it('opens the requeue dialog from a history row', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], id: 921, status: 'failed', archive_name: 'Retry Print', error_message: 'Nozzle clog' },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      const list = await screen.findByTestId('history-list');
+
+      // The print dialog names the job again, so the name now appears twice.
+      await user.click(within(list).getByRole('button', { name: 'Re-queue' }));
+      await waitFor(() => expect(screen.getAllByText('Retry Print').length).toBeGreaterThan(1));
+    });
+
+    it('asks for confirmation before removing a history row', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], id: 922, status: 'completed', archive_name: 'Old Print' },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      const list = await screen.findByTestId('history-list');
+
+      await user.click(within(list).getByRole('button', { name: 'Remove' }));
+      expect(await screen.findByText('Remove from History')).toBeInTheDocument();
+    });
+
+    it('disables history row actions without queue permissions', async () => {
+      const user = userEvent.setup();
+      setAuthToken('read-only-token');
+      server.use(
+        http.get('*/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({ id: 9, username: 'viewer', is_admin: false, permissions: ['queue:read'] }),
+        ),
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], id: 931, status: 'completed', archive_name: 'Locked Print' },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      const list = await screen.findByTestId('history-list');
+
+      const requeue = within(list).getByRole('button', { name: 'Re-queue' });
+      const remove = within(list).getByRole('button', { name: 'Remove' });
+      expect(requeue).toBeDisabled();
+      expect(requeue).toHaveAttribute('title', 'You do not have permission to re-queue items');
+      expect(remove).toBeDisabled();
+      expect(remove).toHaveAttribute('title', 'You do not have permission to remove this queue item');
+    });
+
     it('reveals history beyond the first page on demand', async () => {
       const user = userEvent.setup();
       const historyItems = Array.from({ length: 51 }, (_, index) => ({
