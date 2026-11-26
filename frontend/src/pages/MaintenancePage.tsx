@@ -667,18 +667,23 @@ function PrinterView({
             </span>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-stretch gap-2">
           {hasPermission('printers:update') && (
-            <Button
-              variant="ghost"
+            <button
+              type="button"
               disabled={maintenanceModePending}
               onClick={() => onToggleMaintenanceMode(overview.printer_id, overview.is_active !== false)}
               aria-label={maintenanceModeLabel}
               title={maintenanceModeLabel}
-              className="!bg-blue-500/20 px-2.5 !text-blue-400 hover:!bg-blue-500/30 hover:!text-blue-300 focus:ring-blue-400"
+              aria-pressed={overview.is_active === false}
+              className={`inline-flex min-h-[44px] items-center justify-center rounded-lg px-2.5 py-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-bambu-gray disabled:cursor-not-allowed disabled:opacity-50 md:min-h-0 ${
+                overview.is_active === false
+                  ? 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                  : 'bg-bambu-dark-tertiary text-bambu-gray-light hover:bg-bambu-gray-dark hover:text-white'
+              }`}
             >
               <Construction className="h-4 w-4" />
-            </Button>
+            </button>
           )}
           {hasPermission('maintenance:create') && (
             <Button variant="secondary" onClick={() => onLogRepair(overview.printer_id)}>
