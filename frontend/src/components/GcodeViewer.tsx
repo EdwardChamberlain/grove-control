@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { WebGLPreview } from 'gcode-preview';
-import { Loader2, Layers, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react';
+import { Layers, ChevronLeft, ChevronRight, FileWarning } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { getAuthToken } from '../api/client';
 
 interface GcodeViewerProps {
@@ -207,7 +208,7 @@ export function GcodeViewer({
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-bambu-dark/80">
             <div className="text-center">
-              <Loader2 className="w-8 h-8 animate-spin text-bambu-green mx-auto mb-2" />
+              <Spinner className="w-8 h-8 text-bambu-green mx-auto mb-2" />
               <p className="text-bambu-gray text-sm">Loading G-code...</p>
             </div>
           </div>

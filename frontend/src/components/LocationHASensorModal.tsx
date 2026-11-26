@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Gauge, Loader2, Plus, Save, Search, X } from 'lucide-react';
+import { Gauge, Plus, Save, Search, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { HADisplayEntity, LocationHASensor, StorageLocation } from '../api/client';
@@ -443,7 +444,7 @@ export function LocationHASensorModal({ sensor, locations, onClose }: Props) {
               {!haConfigured && <div className="p-3 text-sm text-bambu-gray">{t('haSensors.noEntities')}</div>}
               {haConfigured && entitiesLoading && (
                 <div className="flex items-center gap-2 p-3 text-sm text-bambu-gray">
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   {t('common.loading')}
                 </div>
               )}
@@ -581,7 +582,7 @@ export function LocationHASensorModal({ sensor, locations, onClose }: Props) {
                 {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={isPending || (!haConfigured && !isEditing)}>
-                {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isPending ? <Spinner className="w-4 h-4" /> : <Save className="w-4 h-4" />}
                 {t('common.save')}
               </Button>
             </div>

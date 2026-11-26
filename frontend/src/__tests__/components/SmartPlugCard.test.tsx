@@ -10,6 +10,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { delay, http, HttpResponse } from 'msw';
+import { server } from '../mocks/server';
 import { render } from '../utils';
 import { SmartPlugCard } from '../../components/SmartPlugCard';
 import type { SmartPlug } from '../../api/client';
@@ -451,6 +453,30 @@ describe('SmartPlugCard', () => {
       // Should show "Settings" not "Automation Settings"
       expect(screen.getByText('Settings')).toBeInTheDocument();
       expect(screen.queryByText('Automation Settings')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('power control in flight', () => {
+    it.each([
+      ['On', 'Turn On'],
+      ['Off', 'Turn Off'],
+    ])('shows a spinner on the %s button while the plug is switching', async (label, confirm) => {
+      server.use(
+        http.post('/api/v1/smart-plugs/:id/control', async () => {
+          await delay('infinite');
+          return HttpResponse.json({ success: true });
+        }),
+      );
+      const user = userEvent.setup();
+      render(<SmartPlugCard plug={createMockPlug()} onEdit={mockOnEdit} />);
+
+      const button = screen.getByRole('button', { name: label });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      await user.click(await screen.findByRole('button', { name: confirm }));
+
+      await waitFor(() => expect(button.querySelector('.spinner')).not.toBeNull());
+      expect(button).toBeDisabled();
     });
   });
 });

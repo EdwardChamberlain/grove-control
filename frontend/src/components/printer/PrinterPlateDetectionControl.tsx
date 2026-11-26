@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, Loader2, Pencil, ScanSearch, X } from 'lucide-react';
+import { ChevronDown, Pencil, ScanSearch, X } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { useTranslation } from 'react-i18next';
 import { api, type PlateDetectionResult, type PlateDetectionROI, type Printer, type PrinterStatus } from '../../api/client';
 import { Button } from '../Button';
@@ -186,7 +187,7 @@ export function PrinterPlateDetectionControl({
           aria-label={!canUpdate ? noPermissionTitle : (enabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
         >
           {togglePending ? (
-            <Loader2 className={`${iconClassName} animate-spin`} />
+            <Spinner className={iconClassName} />
           ) : (
             <ScanSearch className={iconClassName} />
           )}
@@ -200,7 +201,7 @@ export function PrinterPlateDetectionControl({
           aria-label={!canUpdate ? noPermissionTitle : t('printers.plateDetection.manageCalibration')}
         >
           {isCheckingPlate ? (
-            <Loader2 className={`${iconClassName} animate-spin`} />
+            <Spinner className={iconClassName} />
           ) : (
             <ChevronDown className={iconClassName} />
           )}
@@ -363,7 +364,7 @@ export function PrinterPlateDetectionControl({
                           onClick={handleSaveRoi}
                           disabled={isSavingRoi}
                         >
-                          {isSavingRoi ? <Loader2 className="h-3 w-3 animate-spin" /> : t('common.save')}
+                          {isSavingRoi ? <Spinner className="h-3 w-3" /> : t('common.save')}
                         </Button>
                       </div>
                     )}
@@ -417,7 +418,7 @@ export function PrinterPlateDetectionControl({
                   >
                     {isCalibrating ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        <Spinner className="mr-2 h-4 w-4" />
                         Calibrating...
                       </>
                     ) : (

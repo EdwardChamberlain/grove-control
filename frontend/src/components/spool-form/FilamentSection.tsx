@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, Loader2, ChevronDown, Cloud, CloudOff } from 'lucide-react';
+import { Search, ChevronDown, Cloud, CloudOff } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import { useTranslation } from 'react-i18next';
 import type { FilamentSectionProps, FilamentOption } from './types';
 import { KNOWN_VARIANTS } from './constants';
@@ -127,7 +128,7 @@ export function FilamentSection({
       {!quickAdd && (
         <div className="flex items-center gap-2 text-xs text-bambu-gray">
           {loadingCloudPresets ? (
-            <><Loader2 className="w-3 h-3 animate-spin" /> {t('inventory.loadingPresets')}</>
+            <><Spinner className="w-3 h-3" /> {t('inventory.loadingPresets')}</>
           ) : cloudAuthenticated ? (
             <><Cloud className="w-3 h-3 text-bambu-green" /> {t('inventory.cloudConnected')}</>
           ) : (

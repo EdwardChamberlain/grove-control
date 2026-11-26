@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Shield, ShieldCheck, ShieldOff, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
+import { Shield, ShieldCheck, ShieldOff, AlertTriangle, XCircle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { EncryptionStatus } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
@@ -62,7 +63,7 @@ export function SecurityStatusCard() {
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-2 text-bambu-gray" data-testid="encryption-loading">
-            <Loader2 className="animate-spin" size={16} />
+            <Spinner className="w-4 h-4" />
             <span>{t('common.loading')}</span>
           </div>
         </CardContent>

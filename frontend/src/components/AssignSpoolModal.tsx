@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Loader2, Package, Search } from 'lucide-react';
+import { X, Package, Search } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { InventorySpool, SpoolAssignment } from '../api/client';
 import { Button } from './Button';
@@ -405,7 +406,7 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
           <div className="space-y-3">
             {!spoolmanEnabled && (isLoading ? (
               <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+                <Spinner className="w-6 h-6 text-bambu-green" />
               </div>
             ) : filteredSpools && filteredSpools.length > 0 ? (
               <div className="max-h-96 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -477,7 +478,7 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
               <>
                 {spoolmanLoading ? (
                   <div className="flex justify-center py-4">
-                    <Loader2 className="w-5 h-5 text-bambu-green animate-spin" />
+                    <Spinner className="w-5 h-5 text-bambu-green" />
                   </div>
                 ) : spoolmanSpools && spoolmanSpools.filter(s => !s.archived_at && !assignedSpoolmanSpoolIds.has(s.id)).length > 0 ? (
                   <>
@@ -556,7 +557,7 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
             >
               {(assignMutation.isPending || assignSpoolmanMutation.isPending) ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   {t('inventory.assigning')}
                 </>
               ) : (

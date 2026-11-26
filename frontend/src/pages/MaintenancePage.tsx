@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wrench,
-  Loader2,
   Check,
   AlertTriangle,
   Clock,
@@ -39,6 +38,7 @@ import {
   ListChecks,
   Construction,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import type {
   MaintenanceLogEntry,
@@ -1672,7 +1672,7 @@ function MaintenanceLogSection({
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-bambu-green" /></div>
+        <div className="flex justify-center py-12"><Spinner className="w-7 h-7 text-bambu-green" /></div>
       ) : entries.length === 0 ? (
         <Card>
           <CardContent className="py-14 text-center">
@@ -1762,7 +1762,7 @@ function MaintenanceLogSection({
       {hasMore && (
         <div className="flex justify-center">
           <Button variant="secondary" onClick={onLoadMore} disabled={isFetchingMore}>
-            {isFetchingMore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isFetchingMore && <Spinner className="mr-2 h-4 w-4" />}
             {t('maintenance.loadMore')}
           </Button>
         </div>
@@ -1839,7 +1839,7 @@ function MaintenanceLogSection({
                     {t('common.cancel')}
                   </Button>
                   <Button type="submit" disabled={isSaving}>
-                    {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {isSaving && <Spinner className="mr-2 h-4 w-4" />}
                     {t('maintenance.saveLogEntry')}
                   </Button>
                 </div>
@@ -2127,7 +2127,7 @@ export function MaintenancePage() {
   if (isLoading) {
     return (
       <div className="p-4 md:p-8 flex justify-center">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }

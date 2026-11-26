@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Search, Plus, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, CheckCircle2 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { Button } from './Button';
 import { api } from '../api/client';
 import type { LDAPSearchResult, UserResponse } from '../api/client';
@@ -103,7 +104,7 @@ export function LdapUserPicker({ onSuccess }: LdapUserPickerProps) {
       <div className="min-h-[8rem] max-h-64 overflow-y-auto bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg">
         {isLoading && (
           <div className="flex items-center justify-center py-8 text-bambu-gray">
-            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            <Spinner className="w-4 h-4 mr-2" />
             <span>{t('users.modal.ldapSearching')}</span>
           </div>
         )}
@@ -174,7 +175,7 @@ export function LdapUserPicker({ onSuccess }: LdapUserPickerProps) {
         >
           {provisionMutation.isPending ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               {t('users.modal.ldapProvisioning')}
             </>
           ) : (

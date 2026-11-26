@@ -7,7 +7,6 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  Loader2,
   ExternalLink,
   RefreshCw,
   Download,
@@ -20,6 +19,7 @@ import {
   RotateCcw,
   FolderArchive,
 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type {
   GitHubBackupConfig,
@@ -67,7 +67,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
     success: <CheckCircle className="w-3 h-3" />,
     failed: <XCircle className="w-3 h-3" />,
     skipped: <SkipForward className="w-3 h-3" />,
-    running: <Loader2 className="w-3 h-3 animate-spin" />,
+    running: <Spinner className="w-3 h-3" />,
   };
 
   return (
@@ -582,7 +582,7 @@ export function GitHubBackupSettings() {
   if (configLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -884,7 +884,7 @@ export function GitHubBackupSettings() {
                   <>
                     {(triggerBackupMutation.isPending || status.is_running) ? (
                       <div className="flex items-center gap-2 text-bambu-green">
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Spinner className="w-4 h-4" />
                         <span className="text-sm">{status.progress || t('backup.startingBackup')}</span>
                       </div>
                     ) : (
@@ -904,7 +904,7 @@ export function GitHubBackupSettings() {
                           onClick={handleTestConnection}
                           disabled={testLoading}
                         >
-                          {testLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          {testLoading ? <Spinner className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
                           {t('backup.test')}
                         </Button>
                       </>
@@ -918,7 +918,7 @@ export function GitHubBackupSettings() {
                       onClick={handleInitialSetup}
                       disabled={saveConfigMutation.isPending || !repoUrl || !accessToken}
                     >
-                      {saveConfigMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                      {saveConfigMutation.isPending ? <Spinner className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
                       {t('backup.enableBackup')}
                     </Button>
                     <Button
@@ -927,7 +927,7 @@ export function GitHubBackupSettings() {
                       onClick={handleTestConnection}
                       disabled={testLoading || !repoUrl || !accessToken}
                     >
-                      {testLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                      {testLoading ? <Spinner className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
                       {t('backup.testConnection')}
                     </Button>
                   </>
@@ -1277,7 +1277,7 @@ export function GitHubBackupSettings() {
                     onClick={() => triggerLocalBackupMutation.mutate()}
                   >
                     {localBackupStatus?.is_running || triggerLocalBackupMutation.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                     ) : (
                       <Play className="w-4 h-4" />
                     )}
@@ -1415,10 +1415,7 @@ export function GitHubBackupSettings() {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100]">
           <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-xl p-8 max-w-md w-full mx-4 text-center">
             <div className="flex justify-center mb-4">
-              <div className="relative">
-                <div className="w-16 h-16 border-4 border-bambu-dark-tertiary rounded-full"></div>
-                <div className="w-16 h-16 border-4 border-bambu-green border-t-transparent rounded-full absolute inset-0 animate-spin"></div>
-              </div>
+              <Spinner className="w-16 h-16 text-bambu-green" />
             </div>
             <h3 className="text-xl font-semibold text-white mb-2">
               {isExporting ? t('backup.creatingBackup') : t('backup.restoringBackup')}

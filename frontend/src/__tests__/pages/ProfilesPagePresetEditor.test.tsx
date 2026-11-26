@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { render } from '../utils';
 import { ProfilesPage } from '../../pages/ProfilesPage';
@@ -242,6 +242,24 @@ describe('existing presets', () => {
     expect(writes[0].path).toBe('/cloud/settings/PFUS001');
     expect(writes[0].body.name).toBe('Renamed PLA');
     expect(await screen.findByText('Preset updated')).toBeInTheDocument();
+  });
+
+  it('shows a spinner on Save while the preset is being updated', async () => {
+    server.use(
+      http.put('*/api/v1/cloud/settings/:id', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ setting_id: 'PFUS001' });
+      }),
+    );
+    const user = userEvent.setup();
+    await openDetail(user);
+
+    await user.click(screen.getByRole('button', { name: /^Edit$/ }));
+    const save = await within(modal()).findByRole('button', { name: /^Save$/ });
+    await user.click(save);
+
+    await waitFor(() => expect(save.querySelector('.spinner')).not.toBeNull());
+    expect(save).toBeDisabled();
   });
 
   it('reports a failed update', async () => {

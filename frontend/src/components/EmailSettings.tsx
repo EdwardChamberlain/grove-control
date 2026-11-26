@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Mail, Send, Lock, Unlock, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
+import { Mail, Send, Lock, Unlock, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { SMTPSettings, TestSMTPRequest } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
@@ -165,7 +166,7 @@ export function EmailSettings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-12">
-        <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -379,7 +380,7 @@ export function EmailSettings() {
                 >
                   {saveMutation.isPending ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       {t('settings.email.saving') || 'Saving...'}
                     </>
                   ) : (
@@ -421,7 +422,7 @@ export function EmailSettings() {
               >
                 {testMutation.isPending ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                     {t('settings.email.sending') || 'Sending...'}
                   </>
                 ) : (

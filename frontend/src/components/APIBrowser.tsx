@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Play, Copy, Loader2, ExternalLink, AlertCircle, CheckCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Play, Copy, ExternalLink, AlertCircle, CheckCircle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
 import { ReactSelect } from './ToolbarControls';
@@ -411,7 +412,7 @@ function EndpointItem({ path, method, spec, schema, apiKey }: EndpointItemProps)
           <div className="flex items-center gap-2">
             <Button onClick={executeRequest} disabled={loading}>
               {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Play className="w-4 h-4" />
               )}
@@ -493,7 +494,7 @@ export function APIBrowser({ apiKey = '' }: APIBrowserProps) {
   if (loading) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }

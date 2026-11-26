@@ -41,7 +41,6 @@ import {
   Layers,
   Video,
   Search,
-  Loader2,
   Square,
   Pause,
   Play,
@@ -70,6 +69,7 @@ import {
   ScanEye,
   EyeOff,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 
 import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
@@ -851,7 +851,7 @@ function PrinterListRow({
       title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
       aria-label={t('printers.plateStatus.markCleared')}
     >
-      {clearPlateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
+      {clearPlateMutation.isPending ? <Spinner className="h-4 w-4" /> : <PlateClearedIcon className="h-4 w-4" />}
     </button>
   ) : null;
   const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
@@ -2145,7 +2145,7 @@ function SinglePrinterCockpit({
     />;
     return (
       <div key={trayId} className="relative min-w-0">
-        {isRefreshing && <div className="absolute inset-0 z-20 flex items-center justify-center rounded bg-bambu-dark-tertiary/80"><RefreshCw className="h-4 w-4 animate-spin text-bambu-green" /></div>}
+        {isRefreshing && <div className="absolute inset-0 z-20 flex items-center justify-center rounded bg-bambu-dark-tertiary/80"><Spinner className="h-4 w-4 text-bambu-green" /></div>}
         <AmsSlot
           controller={amsSlotController}
           slot={{
@@ -2295,7 +2295,7 @@ function SinglePrinterCockpit({
       className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-yellow-500/20 px-3 text-sm font-medium text-yellow-400 transition-colors hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-50"
       title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
     >
-      {clearPlateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
+      {clearPlateMutation.isPending ? <Spinner className="h-4 w-4" /> : <PlateClearedIcon className="h-4 w-4" />}
       {t('printers.plateStatus.markCleared')}
     </button>
   ) : isPrintingOrPaused ? (
@@ -4193,7 +4193,7 @@ function PrinterCard({
           <div className="text-center">
             {isDropUploading ? (
               <>
-                <Loader2 className="w-8 h-8 mx-auto mb-2 text-bambu-green animate-spin" />
+                <Spinner className="w-8 h-8 mx-auto mb-2 text-bambu-green" />
                 <p className="text-sm font-medium text-bambu-green">{t('common.uploading', 'Uploading...')}</p>
               </>
             ) : canDrop ? (
@@ -4591,7 +4591,7 @@ function PrinterCard({
                 title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
               >
                 {clearPlateMutation.isPending ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <Spinner className="w-3 h-3" />
                 ) : (
                   <PlateClearedIcon className="w-4 h-4" />
                 )}
@@ -5094,7 +5094,7 @@ function PrinterCard({
                                     {/* Loading overlay during RFID re-read */}
                                     {isRefreshing && (
                                       <div className="absolute inset-0 bg-bambu-dark-tertiary/80 rounded flex items-center justify-center z-20">
-                                        <RefreshCw className="w-4 h-4 text-bambu-green animate-spin" />
+                                        <Spinner className="w-4 h-4 text-bambu-green" />
                                       </div>
                                     )}
                                     <AmsSlot
@@ -5242,7 +5242,7 @@ function PrinterCard({
                                 {/* Loading overlay during RFID re-read */}
                                 {isHtRefreshing && (
                                   <div className="absolute inset-0 bg-bambu-dark-tertiary/80 rounded flex items-center justify-center z-20">
-                                    <RefreshCw className="w-4 h-4 text-bambu-green animate-spin" />
+                                    <Spinner className="w-4 h-4 text-bambu-green" />
                                   </div>
                                 )}
                                 <AmsSlot
@@ -5980,7 +5980,7 @@ export function AddPrinterModal({
             >
               {discovering ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   {(isDocker || useCustomSubnet) && scanProgress.total > 0
                     ? t('printers.discovery.scanProgress', { scanned: scanProgress.scanned, total: scanProgress.total })
                     : t('printers.discovery.scanning')}

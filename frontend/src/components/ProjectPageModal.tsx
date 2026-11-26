@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { Button } from './Button';
 import { RichTextEditor } from './RichTextEditor';
@@ -169,7 +170,7 @@ export function ProjectPageModal({ archiveId, archiveName, onClose }: ProjectPag
         <div className="flex-1 overflow-y-auto p-6">
           {isLoading && (
             <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-8 w-8 border-2 border-bambu-green border-t-transparent" />
+              <Spinner className="w-8 h-8 text-bambu-green" />
             </div>
           )}
 

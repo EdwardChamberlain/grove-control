@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Loader2, Search, Link } from 'lucide-react';
+import { X, Search, Link } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { UnlinkedSpool } from '../api/client';
 import { Button } from './Button';
@@ -110,7 +111,7 @@ export function LinkSpoolModal({ isOpen, onClose, tagUid, trayUuid, printerId, a
         <div className="flex-1 overflow-y-auto p-2 min-h-0">
           {isLoading ? (
             <div className="flex justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+              <Spinner className="w-6 h-6 text-bambu-green" />
             </div>
           ) : filteredSpools.length === 0 ? (
             <p className="text-center text-bambu-gray py-8 text-sm">

@@ -1,4 +1,5 @@
-import { Cloud, CloudOff, Cog, FolderOpen, Loader2, RefreshCw, X } from 'lucide-react';
+import { Cloud, CloudOff, Cog, FolderOpen, RefreshCw, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -162,7 +163,7 @@ function FilamentAnalysisSpinner({
   return (
     <div className="flex flex-col gap-1 text-bambu-gray text-sm py-2">
       <div className="flex items-center gap-2">
-        <Loader2 className="w-4 h-4 animate-spin" />
+        <Spinner className="w-4 h-4" />
         {inlineLabel}
         <span className="text-xs tabular-nums">{elapsed}s</span>
       </div>
@@ -596,7 +597,7 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
               also blocking. */}
           {(platesQuery.isLoading || presetsQuery.isLoading) && (
             <div className="flex items-center gap-2 text-bambu-gray text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               {t('slice.loadingPresets')}
             </div>
           )}
@@ -892,7 +893,7 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
           >
             {isEnqueuing ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
                 {t('slice.enqueuing')}
               </>
             ) : sliceAllPlates ? (

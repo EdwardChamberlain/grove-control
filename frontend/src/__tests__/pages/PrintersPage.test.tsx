@@ -7,7 +7,7 @@ import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { PrintersPage } from '../../pages/PrintersPage';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import type { PrinterStatus } from '../../api/client';
 
@@ -568,6 +568,32 @@ describe('PrintersPage', () => {
       });
 
       expect(screen.queryByText('Plate Clear')).not.toBeInTheDocument();
+    });
+
+    it('shows a spinner on the list row plate-clear button while the request is sent', async () => {
+      // localStorage is a bare mock in tests, so the saved view has to be served by getItem.
+      vi.mocked(localStorage.getItem).mockImplementation((key: string) => (key === 'printerViewMode' ? 'list' : null));
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([mockPrinters[0]])),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({ ...mockPrinterStatus, state: 'FINISH', awaiting_plate_clear: true })),
+        http.post('/api/v1/printers/:id/clear-plate', async () => {
+          await delay('infinite');
+          return HttpResponse.json({ success: true, message: 'Plate cleared' });
+        }),
+      );
+
+      render(<PrintersPage />);
+
+      const button = (await screen.findAllByRole('button', { name: 'Mark plate as cleared' }))[0];
+      fireEvent.click(button);
+
+      try {
+        await waitFor(() => expect(button.querySelector('.spinner')).not.toBeNull());
+        expect(button).toBeDisabled();
+      } finally {
+        vi.mocked(localStorage.getItem).mockReset();
+      }
     });
 
     it('opens status details from the list health indicator without opening the expanded card', async () => {

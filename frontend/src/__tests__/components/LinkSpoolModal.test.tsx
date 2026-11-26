@@ -98,7 +98,7 @@ describe('LinkSpoolModal', () => {
       render(<LinkSpoolModal {...defaultProps} />);
 
       await waitFor(() => {
-        expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+        expect(document.querySelector('.spinner')).toBeInTheDocument();
       });
     });
 

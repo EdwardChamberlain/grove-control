@@ -3,7 +3,8 @@ import DOMPurify from 'dompurify';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, ArrowRight, Check, ChevronLeft, ChevronRight, Download, ExternalLink, FolderOpen, Globe, Images, Loader2, Trash2, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, Check, ChevronLeft, ChevronRight, Download, ExternalLink, FolderOpen, Globe, Images, Trash2, X } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 
 import {
   api,
@@ -479,7 +480,7 @@ export function MakerworldPage() {
               disabled={!urlInput.trim() || resolveMutation.isPending}
             >
               {resolveMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <ArrowRight className="w-4 h-4" />
               )}
@@ -588,7 +589,7 @@ export function MakerworldPage() {
                 >
                   {bulkProgress !== null ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                       <span className="ml-2">
                         {t('makerworld.importAllProgress', { current: bulkProgress.current, total: bulkProgress.total })}
                         {importElapsed > 0 && ` · ${importPhaseLabel} · ${importElapsed}s`}
@@ -704,7 +705,7 @@ export function MakerworldPage() {
                         >
                           {isImporting ? (
                             <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <Spinner className="w-4 h-4" />
                               <span className="ml-2">
                                 {importPhaseLabel}
                                 {importElapsed > 0 && ` · ${importElapsed}s`}
@@ -726,7 +727,7 @@ export function MakerworldPage() {
                         >
                           {isPrinting ? (
                             <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <Spinner className="w-4 h-4" />
                               <span className="ml-2">
                                 {importPhaseLabel}
                                 {importElapsed > 0 && ` · ${importElapsed}s`}
@@ -817,7 +818,7 @@ export function MakerworldPage() {
                           >
                             {deleteImportMutation.isPending &&
                             deleteImportMutation.variables?.profileId === profileId ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <Spinner className="w-3.5 h-3.5" />
                             ) : (
                               <Trash2 className="w-3.5 h-3.5 text-red-500" />
                             )}

@@ -3,7 +3,8 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, AlertTriangle, AlertCircle, Info, ExternalLink, Loader2, Trash2 } from 'lucide-react';
+import { X, AlertTriangle, AlertCircle, Info, ExternalLink, Trash2 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import type { HMSError, Permission } from '../api/client';
 import { api } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
@@ -1071,7 +1072,7 @@ export function HMSErrorModal({ printerName, errors, onClose, printerId, hasPerm
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             >
               {clearMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Trash2 className="w-4 h-4" />
               )}

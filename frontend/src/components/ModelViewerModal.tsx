@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { X, ExternalLink, Box, Code2, Cog, Loader2, Layers, Check, Maximize2, Minimize2 } from 'lucide-react';
+import { X, ExternalLink, Box, Code2, Cog, Layers, Check, Maximize2, Minimize2 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { ModelViewer } from './ModelViewer';
 import { GcodeViewer } from './GcodeViewer';
 import { Button } from './Button';
@@ -408,7 +409,7 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
         <div className="flex-1 overflow-hidden p-4">
           {loading ? (
             <div className="w-full h-full flex items-center justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+              <Spinner className="w-8 h-8 text-bambu-green" />
             </div>
           ) : activeTab === '3d' && capabilities ? (
             <div
@@ -424,7 +425,7 @@ export function ModelViewerModal({ archiveId, libraryFileId, title, fileType, on
                   <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
                     <Layers className="w-4 h-4" />
                     {t('modelViewer.plates')}
-                    {platesLoading && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {platesLoading && <Spinner className="w-3 h-3" />}
                   </div>
                   <div className={splitFullscreen ? 'flex flex-col min-h-0 flex-1' : undefined}>
                       <div

@@ -1,4 +1,5 @@
-import { AlertCircle, CheckCircle, Info, Loader2, X, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, Info, X, XCircle } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 
 type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading';
@@ -45,7 +46,7 @@ const icons = {
   error: <XCircle className="w-5 h-5 text-red-400" />,
   warning: <AlertCircle className="w-5 h-5 text-yellow-400" />,
   info: <Info className="w-5 h-5 text-blue-400" />,
-  loading: <Loader2 className="w-5 h-5 text-bambu-green animate-spin" />,
+  loading: <Spinner className="w-5 h-5 text-bambu-green" />,
 };
 
 const bgColors = {

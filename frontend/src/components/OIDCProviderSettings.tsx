@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Edit2, Trash2, Globe, Check, X, RefreshCw, ExternalLink, ImageOff } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { Group, OIDCProvider, OIDCProviderCreate } from '../api/client';
@@ -314,7 +315,7 @@ export function OIDCProviderSettings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <RefreshCw className="w-6 h-6 animate-spin text-bambu-green" />
+        <Spinner className="w-6 h-6 text-bambu-green" />
       </div>
     );
   }

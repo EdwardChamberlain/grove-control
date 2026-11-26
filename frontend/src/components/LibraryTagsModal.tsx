@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Tag, Plus, Loader2, Pencil, Trash2, X } from 'lucide-react';
+import { Tag, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 
 import { api, type LibraryTag } from '../api/client';
 import { Button } from './Button';
@@ -165,7 +166,7 @@ export function LibraryTagsModal({ open, onClose, onPickTag }: LibraryTagsModalP
         <div className="overflow-y-auto">
           {isLoading ? (
             <div className="flex items-center justify-center py-16 text-bambu-gray">
-              <Loader2 className="w-6 h-6 animate-spin mr-2" />
+              <Spinner className="w-6 h-6 mr-2" />
               {t('common.loading')}
             </div>
           ) : tags.length === 0 ? (
@@ -254,7 +255,7 @@ export function LibraryTagsModal({ open, onClose, onPickTag }: LibraryTagsModalP
                   {t('common.cancel')}
                 </Button>
                 <Button type="submit" disabled={saveMutation.isPending || !name.trim()}>
-                  {saveMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {saveMutation.isPending && <Spinner className="w-4 h-4" />}
                   {t('common.save')}
                 </Button>
               </div>

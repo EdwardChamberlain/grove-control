@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Loader2, Printer, CheckSquare, Square, Search } from 'lucide-react';
+import { X, Printer, CheckSquare, Square, Search } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, type SpoolLabelTemplate, type InventorySpool } from '../api/client';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
@@ -559,7 +560,7 @@ export function LabelTemplatePickerModal({
                   <div className="font-medium text-white text-sm truncate">{label}</div>
                   <div className="text-xs text-bambu-gray mt-0.5 truncate">{hint}</div>
                 </div>
-                {isPending && <Loader2 className="w-4 h-4 animate-spin text-bambu-green shrink-0" />}
+                {isPending && <Spinner className="w-4 h-4 text-bambu-green shrink-0" />}
               </button>
             );
           })}

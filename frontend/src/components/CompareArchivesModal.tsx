@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X, Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { X, Check, AlertTriangle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { ArchiveComparison } from '../api/client';
 import { Button } from './Button';
@@ -45,7 +46,7 @@ export function CompareArchivesModal({ archiveIds, onClose }: CompareArchivesMod
         <div className="flex-1 overflow-auto p-4 bg-bambu-dark-secondary">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+              <Spinner className="w-8 h-8 text-bambu-green" />
             </div>
           ) : error ? (
             <div className="text-center py-12 text-red-400">

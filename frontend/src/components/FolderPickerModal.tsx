@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { FolderOpen, Loader2 } from 'lucide-react';
+import { FolderOpen } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, type LibraryFolderTree } from '../api/client';
 import { Button } from './Button';
 
@@ -99,7 +100,7 @@ export function FolderPickerModal({
               {t('common.cancel')}
             </Button>
             <Button type="button" onClick={() => onConfirm(target)} disabled={isLoading}>
-              {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : confirmLabel}
+              {isLoading ? <Spinner className="w-4 h-4" /> : confirmLabel}
             </Button>
           </div>
         </div>

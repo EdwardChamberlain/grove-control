@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Loader2, Save, Beaker, Palette, Zap, Tag, Unlink } from 'lucide-react';
+import { X, Save, Beaker, Palette, Zap, Tag, Unlink } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, ApiError } from '../api/client';
 import type { InventorySpool, SlicerSetting, SpoolCatalogEntry, LocalPreset, BuiltinFilament, SpoolmanBulkCreateResult, SpoolFilamentPresetInput, SpoolKProfileInput, SpoolmanFilamentEntry } from '../api/client';
 import { Button } from './Button';
@@ -1132,7 +1133,7 @@ export function SpoolFormModal({
           >
             {isPending ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
                 {t('common.saving')}
               </>
             ) : (

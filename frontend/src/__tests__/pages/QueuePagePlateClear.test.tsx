@@ -192,7 +192,7 @@ describe('QueuePage plate clear', () => {
     await user.click(button);
 
     await waitFor(() => expect(button).toBeDisabled());
-    expect(button.querySelector('.animate-spin')).not.toBeNull();
+    expect(button.querySelector('.spinner')).not.toBeNull();
     release();
   });
 });

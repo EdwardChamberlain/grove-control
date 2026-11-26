@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { X, Save, Loader2, Wifi, WifiOff, CheckCircle, Bell, Clock, LayoutGrid, Search, Plug, Power, Home, Radio, Eye, Globe } from 'lucide-react';
+import { X, Save, Wifi, WifiOff, CheckCircle, Bell, Clock, LayoutGrid, Search, Plug, Power, Home, Radio, Eye, Globe } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { SmartPlug, SmartPlugCreate, SmartPlugUpdate, DiscoveredTasmotaDevice } from '../api/client';
@@ -615,7 +616,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                 <>
                   {haEntitiesLoading && (
                     <div className="flex items-center justify-center py-4 text-bambu-gray">
-                      <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                      <Spinner className="w-5 h-5 mr-2" />
                       {t('smartPlugs.loadingEntities')}
                     </div>
                   )}
@@ -667,7 +668,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                             </button>
                           )}
                           {haEntitiesLoading && (
-                            <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray animate-spin" />
+                            <Spinner className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
                           )}
                         </div>
 
@@ -676,7 +677,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                           <div className="absolute z-50 w-full mt-1 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg shadow-lg max-h-60 overflow-y-auto">
                             {haEntitiesLoading && (
                               <div className="px-3 py-2 text-sm text-bambu-gray flex items-center gap-2">
-                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <Spinner className="w-4 h-4" />
                                 {t('smartPlugs.loading')}
                               </div>
                             )}
@@ -1411,7 +1412,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                   disabled={!ipAddress.trim() || testMutation.isPending}
                 >
                   {testMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                   ) : (
                     <Wifi className="w-4 h-4" />
                   )}
@@ -1695,7 +1696,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
               className="flex-1"
             >
               {isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Save className="w-4 h-4" />
               )}

@@ -149,8 +149,8 @@ describe('SpoolmanFilamentPicker', () => {
         onSelect={vi.fn()}
       />
     );
-    // Trigger button shows spinner (Loader2 icon with animate-spin)
-    const spinners = document.querySelectorAll('.animate-spin');
+    // Trigger button shows spinner (Spinner)
+    const spinners = document.querySelectorAll('.spinner');
     expect(spinners.length).toBeGreaterThan(0);
   });
 

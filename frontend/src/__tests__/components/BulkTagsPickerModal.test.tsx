@@ -104,4 +104,33 @@ describe('BulkTagsPickerModal', () => {
     await screen.findByText('toy');
     expect(screen.getByRole('button', { name: /Add tags/i })).toBeDisabled();
   });
+
+  it('shows the spinner on Create while a new tag is being saved', async () => {
+    (api.createLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText('toy');
+
+    await user.type(screen.getByPlaceholderText(/toys, kid-safe/i), 'fresh');
+    const create = screen.getByRole('button', { name: /^Create$/i });
+    await user.click(create);
+
+    await waitFor(() => expect(create.querySelector('.spinner')).not.toBeNull());
+  });
+
+  it('shows the spinner on Add tags while the change is applied', async () => {
+    (api.bulkAssignLibraryTags as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText('toy');
+
+    const toyCheckbox = screen
+      .getAllByRole('checkbox')
+      .find((el) => el.parentElement?.textContent?.includes('toy'));
+    await user.click(toyCheckbox!);
+    const apply = screen.getByRole('button', { name: /Add tags/i });
+    await user.click(apply);
+
+    await waitFor(() => expect(apply.querySelector('.spinner')).not.toBeNull());
+  });
 });

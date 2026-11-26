@@ -7,7 +7,7 @@
  * have not connected Home Assistant yet".
  */
 
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HASensorModal } from '../../components/HASensorModal';
@@ -18,12 +18,13 @@ vi.mock('../../api/client', async () => {
   const actual = await vi.importActual<typeof import('../../api/client')>('../../api/client');
   return {
     ...actual,
-    api: { ...actual.api, getSettings: vi.fn(), getBindableHAEntities: vi.fn() },
+    api: { ...actual.api, getSettings: vi.fn(), getBindableHAEntities: vi.fn(), updateHASensor: vi.fn() },
   };
 });
 
 const getSettings = vi.mocked(api.getSettings);
 const getEntities = vi.mocked(api.getBindableHAEntities);
+const updateSensor = vi.mocked(api.updateHASensor);
 
 const PRINTERS = [{ id: 4, name: 'X1C-1' }] as never;
 
@@ -87,5 +88,34 @@ describe('HASensorModal', () => {
 
     await waitFor(() => expect(getEntities).toHaveBeenCalled());
     expect(screen.queryByText(/Home Assistant is not configured/)).not.toBeInTheDocument();
+  });
+
+  it('shows a spinner on Save while an edited sensor is being saved', async () => {
+    getSettings.mockResolvedValue(settings());
+    updateSensor.mockReturnValue(new Promise(() => {}));
+    const sensor = {
+      id: 9,
+      printer_id: 4,
+      name: 'Enclosure door',
+      entity_id: 'binary_sensor.door',
+      kind: 'binary',
+      device_class: 'door',
+      unit: null,
+      alert_state: null,
+      alert_above: null,
+      alert_below: null,
+      block_print: false,
+      notify_on_alert: false,
+      show_on_printer_card: true,
+    } as never;
+
+    render(<HASensorModal sensor={sensor} printers={PRINTERS} onClose={() => {}} />);
+    await waitFor(() => expect(getEntities).toHaveBeenCalled());
+
+    const save = screen.getByRole('button', { name: /save/i });
+    fireEvent.click(save);
+
+    await waitFor(() => expect(save.querySelector('.spinner')).not.toBeNull());
+    expect(save).toBeDisabled();
   });
 });

@@ -3,10 +3,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { SystemInfoPage } from '../../pages/SystemInfoPage';
-import { api } from '../../api/client';
+import { api, supportApi } from '../../api/client';
 
 // Mock the API client
 vi.mock('../../api/client', () => ({
@@ -107,7 +107,7 @@ describe('SystemInfoPage', () => {
     render(<SystemInfoPage />);
 
     // Should show loading spinner
-    expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(document.querySelector('.spinner')).toBeInTheDocument();
   });
 
   it('renders system info when data loads', async () => {
@@ -325,5 +325,37 @@ describe('SystemInfoPage', () => {
     // The progress bar should have red color for >90% usage
     const progressBars = document.querySelectorAll('[class*="bg-red"]');
     expect(progressBars.length).toBeGreaterThan(0);
+  });
+
+  it('shows a spinner on the debug logging button while it is being switched', async () => {
+    (api.getSystemInfo as ReturnType<typeof vi.fn>).mockResolvedValue(mockSystemInfo);
+    (supportApi.setDebugLogging as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise(() => {}));
+
+    render(<SystemInfoPage />);
+
+    const toggle = await screen.findByRole('button', { name: /^Enable/ });
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle.querySelector('.spinner')).not.toBeNull());
+    expect(toggle).toBeDisabled();
+  });
+
+  it('shows a spinner on the download button while the support bundle is generated', async () => {
+    (api.getSystemInfo as ReturnType<typeof vi.fn>).mockResolvedValue(mockSystemInfo);
+    (supportApi.getDebugLoggingState as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      enabled: true,
+      enabled_at: '2026-01-01T00:00:00Z',
+      duration_seconds: 0,
+    });
+    (supportApi.downloadSupportBundle as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise(() => {}));
+
+    render(<SystemInfoPage />);
+
+    const download = await screen.findByRole('button', { name: /^Download$/ });
+    await waitFor(() => expect(download).toBeEnabled());
+    fireEvent.click(download);
+
+    await waitFor(() => expect(document.querySelectorAll('.spinner').length).toBeGreaterThan(0));
+    expect(download).toBeDisabled();
   });
 });

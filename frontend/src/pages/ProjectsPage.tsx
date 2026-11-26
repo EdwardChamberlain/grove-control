@@ -5,7 +5,6 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FolderKanban,
-  Loader2,
   Plus,
   Trash2,
   Edit3,
@@ -24,6 +23,7 @@ import {
   Image as ImageIcon,
   X,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import type { ProjectListItem, ProjectCreate, ProjectUpdate, ProjectImport, Permission } from '../api/client';
 import { Button } from '../components/Button';
@@ -226,7 +226,7 @@ export function ProjectModal({ project, onClose, onSave, isLoading, currencySymb
                     disabled={coverUploading}
                   >
                     {coverUploading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Spinner className="w-4 h-4" />
                     ) : (
                       <Upload className="w-4 h-4 mr-1" />
                     )}
@@ -390,7 +390,7 @@ export function ProjectModal({ project, onClose, onSave, isLoading, currencySymb
             </Button>
             <Button type="submit" disabled={!name.trim() || isLoading}>
               {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : project ? (
                 t('common.save')
               ) : (
@@ -1109,7 +1109,7 @@ export function ProjectsPage() {
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
           <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+            <Spinner className="w-8 h-8 text-bambu-green" />
             <p className="text-sm text-bambu-gray">{t('projects.loading')}</p>
           </div>
         </div>

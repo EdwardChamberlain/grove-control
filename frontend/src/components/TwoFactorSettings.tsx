@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ShieldCheck, ShieldOff, Mail, Smartphone, Key, RefreshCw, Trash2, X, Eye, EyeOff, Copy } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
@@ -98,7 +99,7 @@ function TOTPSetupWizard({ onDone }: { onDone: () => void }) {
   if (isLoading || !setupData) {
     return (
       <div className="flex items-center justify-center py-8">
-        <RefreshCw className="w-6 h-6 animate-spin text-bambu-green" />
+        <Spinner className="w-6 h-6 text-bambu-green" />
       </div>
     );
   }
@@ -276,7 +277,7 @@ export function TwoFactorSettings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <RefreshCw className="w-6 h-6 animate-spin text-bambu-green" />
+        <Spinner className="w-6 h-6 text-bambu-green" />
       </div>
     );
   }

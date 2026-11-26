@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Save, Loader2, RotateCcw, Plus, Eye } from 'lucide-react';
+import { X, Save, RotateCcw, Plus, Eye } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { NotificationTemplate, NotificationTemplateUpdate } from '../api/client';
 import { Button } from './Button';
@@ -214,7 +215,7 @@ export function NotificationTemplateEditor({ template, onClose }: NotificationTe
               <div className="bg-bambu-dark border border-bambu-dark-tertiary rounded p-3 space-y-2">
                 {previewLoading ? (
                   <div className="flex items-center gap-2 text-bambu-gray text-sm">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                     {t('notifications.loadingPreview')}
                   </div>
                 ) : preview ? (
@@ -248,7 +249,7 @@ export function NotificationTemplateEditor({ template, onClose }: NotificationTe
             className="text-orange-400 hover:text-orange-300"
           >
             {resetMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              <Spinner className="w-4 h-4 mr-2" />
             ) : (
               <RotateCcw className="w-4 h-4 mr-2" />
             )}
@@ -264,7 +265,7 @@ export function NotificationTemplateEditor({ template, onClose }: NotificationTe
               disabled={updateMutation.isPending || !hasChanges}
             >
               {updateMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                <Spinner className="w-4 h-4 mr-2" />
               ) : (
                 <Save className="w-4 h-4 mr-2" />
               )}

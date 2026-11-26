@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Pencil, Printer, Star, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, ExternalLink, Pencil, Printer, Star, Trash2, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { Archive, PrintLogEntry } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -50,7 +51,7 @@ export function HistoryLogTable({
     <Card>
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+          <Spinner className="w-6 h-6 text-bambu-green" />
         </div>
       ) : !rows.length ? (
         <div className="text-center py-12 text-bambu-gray">

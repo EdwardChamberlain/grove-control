@@ -3,7 +3,6 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
   Gauge,
-  Loader2,
   RefreshCw,
   Printer,
   Plus,
@@ -19,6 +18,7 @@ import {
   Square,
   StickyNote,
 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { KProfile, KProfileCreate, KProfileDelete, Permission } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -384,7 +384,7 @@ function KProfileModal({
         {/* Syncing overlay */}
         {isSyncing && (
           <div className="absolute inset-0 bg-bambu-dark-secondary/90 flex flex-col items-center justify-center z-10 rounded-lg">
-            <Loader2 className="w-8 h-8 text-bambu-green animate-spin mb-3" />
+            <Spinner className="w-8 h-8 text-bambu-green mb-3" />
             <p className="text-white font-medium">
               {savingProgress.total > 1
                 ? t('kProfiles.modal.savingExtruder', { current: savingProgress.current, total: savingProgress.total })
@@ -608,7 +608,7 @@ function KProfileModal({
                   className="text-red-500 hover:bg-red-500/10"
                 >
                   {deleteMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                   ) : (
                     <Trash2 className="w-4 h-4" />
                   )}
@@ -630,7 +630,7 @@ function KProfileModal({
                 className="flex-1"
               >
                 {saveMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                 ) : (
                   <Gauge className="w-4 h-4" />
                 )}
@@ -675,7 +675,7 @@ function KProfileModal({
                   className="flex-1 bg-red-500 hover:bg-red-600 text-white"
                 >
                   {deleteMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                   ) : (
                     <Trash2 className="w-4 h-4" />
                   )}
@@ -1125,7 +1125,7 @@ export function KProfilesView() {
   if (printersLoading) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -1163,7 +1163,7 @@ export function KProfilesView() {
       {/* Loading overlay when refetching profiles (not initial load) */}
       {isFetching && !kprofilesLoading && (
         <div className="fixed inset-0 bg-black/50 flex flex-col items-center justify-center z-40">
-          <Loader2 className="w-10 h-10 text-bambu-green animate-spin mb-3" />
+          <Spinner className="w-10 h-10 text-bambu-green mb-3" />
           <p className="text-white font-medium">{t('kProfiles.loadingProfiles')}</p>
         </div>
       )}
@@ -1340,7 +1340,7 @@ export function KProfilesView() {
       {/* K-Profiles Grid */}
       {kprofilesLoading ? (
         <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+          <Spinner className="w-8 h-8 text-bambu-green" />
         </div>
       ) : isOfflineError ? (
         <Card>
@@ -1552,7 +1552,7 @@ export function KProfilesView() {
                   className="flex-1 bg-red-500 hover:bg-red-600 text-white"
                 >
                   {bulkDeleteInProgress ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                   ) : (
                     <Trash2 className="w-4 h-4" />
                   )}

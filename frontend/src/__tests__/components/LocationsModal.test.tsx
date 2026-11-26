@@ -240,4 +240,17 @@ describe('LocationsModal', () => {
       );
     });
   });
+
+  it('shows the spinner on Save while the location is being created', async () => {
+    vi.mocked(api.createLocation).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText('Shelf A');
+    await user.click(screen.getByRole('button', { name: /add location|locations\.add/i }));
+    await user.type(screen.getByLabelText(/name|locations\.name/i), 'Garage');
+    const save = screen.getByRole('button', { name: /save|common\.save/i });
+    await user.click(save);
+
+    await waitFor(() => expect(save.querySelector('.spinner')).not.toBeNull());
+  });
 });

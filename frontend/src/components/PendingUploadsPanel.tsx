@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Archive, Trash2, FileBox, Clock, Upload, ChevronDown, ChevronUp } from 'lucide-react';
+import { Archive, Trash2, FileBox, Clock, Upload, ChevronDown, ChevronUp } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { pendingUploadsApi } from '../api/client';
 import type { PendingUpload, ProjectListItem } from '../api/client';
 import { api } from '../api/client';
@@ -86,7 +87,7 @@ function PendingUploadItem({
               disabled={isArchiving}
             >
               {isArchiving ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <>
                   <Archive className="w-4 h-4" />
@@ -101,7 +102,7 @@ function PendingUploadItem({
               disabled={isDiscarding}
             >
               {isDiscarding ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Trash2 className="w-4 h-4 text-red-400" />
               )}
@@ -266,7 +267,7 @@ export function PendingUploadsPanel() {
     return (
       <Card>
         <CardContent className="py-8 flex justify-center">
-          <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+          <Spinner className="w-6 h-6 text-bambu-green" />
         </CardContent>
       </Card>
     );
@@ -295,7 +296,7 @@ export function PendingUploadsPanel() {
                 disabled={archiveAllMutation.isPending}
               >
                 {archiveAllMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                 ) : (
                   <>
                     <Archive className="w-4 h-4" />
@@ -310,7 +311,7 @@ export function PendingUploadsPanel() {
                 disabled={discardAllMutation.isPending}
               >
                 {discardAllMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />

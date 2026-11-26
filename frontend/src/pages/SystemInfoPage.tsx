@@ -12,7 +12,6 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  Loader2,
   RefreshCw,
   Plug,
   FolderKanban,
@@ -24,6 +23,7 @@ import {
   Stethoscope,
   HeartPulse,
 } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api, supportApi, type Printer as PrinterModel } from '../api/client';
 import { Card } from '../components/Card';
 import { LogViewer } from '../components/LogViewer';
@@ -172,7 +172,7 @@ export function SystemInfoPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -276,7 +276,7 @@ export function SystemInfoPage() {
                   : 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
               } disabled:opacity-50`}
             >
-              {debugToggling && <Loader2 className="w-4 h-4 animate-spin" />}
+              {debugToggling && <Spinner className="w-4 h-4" />}
               {debugLoggingState?.enabled
                 ? t('support.disableDebug', 'Disable')
                 : t('support.enableDebug', 'Enable')}
@@ -302,7 +302,7 @@ export function SystemInfoPage() {
               className="px-4 py-2 rounded-lg font-medium bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               title={!debugLoggingState?.enabled ? t('support.enableDebugFirst', 'Enable debug logging first') : undefined}
             >
-              {bundleDownloading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {bundleDownloading && <Spinner className="w-4 h-4" />}
               {bundleDownloading
                 ? t('support.bundleGenerating', 'Generating...')
                 : t('common.download', 'Download')}
@@ -316,7 +316,7 @@ export function SystemInfoPage() {
           {bundleDownloading && (
             <div className="p-3 bg-bambu-dark-tertiary/40 rounded-lg space-y-1">
               <p className="text-sm font-medium text-white flex items-center gap-2">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-bambu-green" />
+                <Spinner className="w-3.5 h-3.5 text-bambu-green" />
                 {t('support.bundleGenerating', 'Generating...')}
               </p>
               <ul className="text-xs text-bambu-gray list-disc list-inside space-y-0.5 pl-1">
@@ -483,7 +483,7 @@ export function SystemInfoPage() {
             color="text-red-500"
           />
           <StatCard
-            icon={Loader2}
+            icon={Printer}
             label={t('system.printing', 'Printing')}
             value={systemInfo.database.archives_printing}
             color="text-yellow-500"

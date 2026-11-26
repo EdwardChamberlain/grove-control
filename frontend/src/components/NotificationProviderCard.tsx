@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Bell, Trash2, Settings2, Edit2, Send, Loader2, CheckCircle, XCircle, Moon, Clock, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+import { Bell, Trash2, Settings2, Edit2, Send, CheckCircle, XCircle, Moon, Clock, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { formatDateOnly, parseUTCDate } from '../utils/date';
 import type { NotificationProvider, NotificationProviderUpdate } from '../api/client';
@@ -207,7 +208,7 @@ export function NotificationProviderCard({ provider, onEdit }: NotificationProvi
               className="w-full"
             >
               {testMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
               ) : (
                 <Send className="w-4 h-4" />
               )}

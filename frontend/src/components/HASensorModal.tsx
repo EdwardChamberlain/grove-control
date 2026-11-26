@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Gauge, Loader2, Save, Search, X } from 'lucide-react';
+import { Gauge, Save, Search, X } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { HADisplayEntity, Printer, PrinterHASensor } from '../api/client';
@@ -261,7 +262,7 @@ export function HASensorModal({ sensor, printers, onClose }: Props) {
               )}
               {haConfigured && entitiesLoading && (
                 <div className="flex items-center gap-2 p-3 text-sm text-bambu-gray">
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   {t('common.loading')}
                 </div>
               )}
@@ -401,7 +402,7 @@ export function HASensorModal({ sensor, printers, onClose }: Props) {
                   card visibility are Bambuddy's own settings and do not need
                   Home Assistant to be reachable to change. */}
               <Button type="submit" disabled={isPending || (!haConfigured && !isEditing)}>
-                {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isPending ? <Spinner className="w-4 h-4" /> : <Save className="w-4 h-4" />}
                 {t('common.save')}
               </Button>
             </div>

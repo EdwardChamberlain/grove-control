@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Printer, AlertTriangle, Info, FileText, ShieldCheck, Copy, Check, Download } from 'lucide-react';
+import { Plus, Printer, AlertTriangle, Info, FileText, ShieldCheck, Copy, Check, Download } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { multiVirtualPrinterApi, virtualPrinterApi } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -72,7 +73,7 @@ export function VirtualPrinterList() {
     return (
       <Card>
         <CardContent className="py-8 flex justify-center">
-          <Loader2 className="w-6 h-6 animate-spin text-bambu-green" />
+          <Spinner className="w-6 h-6 text-bambu-green" />
         </CardContent>
       </Card>
     );

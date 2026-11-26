@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { PrintersPage } from '../../pages/PrintersPage';
 import { server } from '../mocks/server';
@@ -296,5 +296,29 @@ describe('Cockpit print controls', () => {
 
     expect(await screen.findByText('Printer is busy homing')).toBeInTheDocument();
     expect(within(screen.getByTestId('cockpit-jog-content')).getByRole('button', { name: 'Move X right' })).toBeInTheDocument();
+  });
+});
+
+describe('Cockpit plate clear', () => {
+  it('shows a spinner on the Mark plate as cleared button while the request is sent', async () => {
+    setup({ state: 'FINISH', awaiting_plate_clear: true });
+    server.use(
+      http.get('/api/v1/settings/ui-preferences', () => HttpResponse.json({ require_plate_clear: true })),
+      http.post('/api/v1/printers/:id/clear-plate', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ success: true, message: 'Plate cleared' });
+      }),
+    );
+    await openCockpit();
+    const user = userEvent.setup();
+
+    // The cockpit's state panel carries the label as visible text.
+    const panelButton = (await screen.findAllByRole('button', { name: 'Mark plate as cleared' })).find(
+      (b) => b.textContent?.includes('Mark plate as cleared'),
+    )!;
+    await user.click(panelButton);
+
+    await waitFor(() => expect(panelButton.querySelector('.spinner')).not.toBeNull());
+    expect(panelButton).toBeDisabled();
   });
 });

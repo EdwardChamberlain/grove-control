@@ -1,6 +1,7 @@
 import { useState, useRef, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Upload, X, FileText, Loader2, CheckCircle, XCircle, MinusCircle, Wand2, AlertTriangle, Copy } from 'lucide-react';
+import { Upload, X, FileText, CheckCircle, XCircle, MinusCircle, Wand2, AlertTriangle, Copy } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, type CsvImportPreview, type CsvImportRow } from '../api/client';
 import { getSwatchStyle } from '../utils/colors';
 import { Button } from './Button';
@@ -119,7 +120,7 @@ export function SpoolCsvImportModal({ onClose, onImported }: SpoolCsvImportModal
 
           {loading && (
             <div className="flex items-center justify-center gap-2 text-bambu-gray py-4">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               {t('inventory.csv.parsing', 'Reading file…')}
             </div>
           )}
@@ -226,7 +227,7 @@ export function SpoolCsvImportModal({ onClose, onImported }: SpoolCsvImportModal
           <Button onClick={handleImport} disabled={!preview || validCount === 0 || importing}>
             {importing ? (
               <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <Spinner className="w-4 h-4 mr-2" />
                 {t('inventory.csv.importing', 'Importing…')}
               </>
             ) : validCount > 0 ? (

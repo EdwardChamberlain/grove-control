@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Database, Plus, Trash2, RotateCcw, Loader2, Pencil, Check, X, Search, Download, Upload } from 'lucide-react';
+import { Database, Plus, Trash2, RotateCcw, Pencil, Check, X, Search, Download, Upload } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { SpoolCatalogEntry } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
@@ -323,7 +324,7 @@ export function SpoolCatalogSettings() {
                 disabled={adding}
                 className="px-3 py-2 bg-bambu-green text-white rounded-lg hover:bg-bambu-green/80 flex items-center gap-1 shrink-0"
               >
-                {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {adding ? <Spinner className="w-4 h-4" /> : <Check className="w-4 h-4" />}
                 {t('common.add')}
               </button>
               <button
@@ -338,7 +339,7 @@ export function SpoolCatalogSettings() {
 
         {loading ? (
           <div className="flex items-center justify-center py-8 text-bambu-gray">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            <Spinner className="w-5 h-5 mr-2" />
             {t('common.loading')}
           </div>
         ) : (
@@ -406,7 +407,7 @@ export function SpoolCatalogSettings() {
                                 disabled={saving}
                                 className="p-1.5 rounded hover:bg-green-500/20 text-green-500"
                               >
-                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                {saving ? <Spinner className="w-4 h-4" /> : <Check className="w-4 h-4" />}
                               </button>
                               <button onClick={cancelEdit} className="p-1.5 rounded hover:bg-bambu-dark-tertiary text-bambu-gray">
                                 <X className="w-4 h-4" />

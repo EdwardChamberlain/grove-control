@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Plus, Loader2, Users as UsersIcon } from 'lucide-react';
+import { X, Plus, Users as UsersIcon } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { Card, CardContent, CardHeader } from './Card';
 import { Button } from './Button';
 import { LdapUserPicker } from './LdapUserPicker';
@@ -219,7 +220,7 @@ export function CreateUserAdvancedAuthModal({
               >
                 {isCreating ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Spinner className="w-4 h-4" />
                     {t('users.modal.creating')}
                   </>
                 ) : (

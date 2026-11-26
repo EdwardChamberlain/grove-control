@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Cloud, ExternalLink, LogOut, Loader2, AlertCircle, AlertTriangle, Check, Mail, ArrowLeft } from 'lucide-react';
+import { Cloud, ExternalLink, LogOut, AlertCircle, AlertTriangle, Check, Mail, ArrowLeft } from 'lucide-react';
+import { Spinner } from './Spinner';
 
 import { api } from '../api/client';
 import type { OrcaOAuthProvider } from '../api/client';
@@ -179,7 +180,7 @@ export function OrcaCloudView() {
   if (statusLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -236,7 +237,7 @@ export function OrcaCloudView() {
         />
       ) : profilesLoading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-8 h-8 text-bambu-green animate-spin" />
+          <Spinner className="w-8 h-8 text-bambu-green" />
         </div>
       ) : profilesError ? (
         <div className="text-center py-16">
@@ -325,7 +326,7 @@ function PickerCard({
             disabled={isStarting || !canManage}
             title={!canManage ? t('profiles.orcaCloud.noConnectPermission') : undefined}
           >
-            {isStarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+            {isStarting ? <Spinner className="w-4 h-4" /> : <ExternalLink className="w-4 h-4" />}
             {t('profiles.orcaCloud.providers.google')}
           </Button>
           <Button
@@ -433,7 +434,7 @@ function PasteCard({
           )}
           <div className="mt-4 flex items-center gap-3">
             <Button type="submit" disabled={isFinishing || !pastedUrl.trim()}>
-              {isFinishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              {isFinishing ? <Spinner className="w-4 h-4" /> : <Check className="w-4 h-4" />}
               {t('profiles.orcaCloud.paste.submit')}
             </Button>
           </div>
@@ -505,7 +506,7 @@ function PasswordCard({
             </p>
           )}
           <Button type="submit" disabled={isPasswordLoading || !passwordEmail.trim() || !passwordValue}>
-            {isPasswordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            {isPasswordLoading ? <Spinner className="w-4 h-4" /> : <Check className="w-4 h-4" />}
             {t('profiles.orcaCloud.password.submit')}
           </Button>
         </form>

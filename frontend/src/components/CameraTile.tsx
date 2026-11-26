@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Maximize2, Pause } from 'lucide-react';
+import { Maximize2, Pause } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { getAuthToken, withStreamToken } from '../api/client';
 import { PlateClearedIcon } from './icons/PlateClearedIcon';
 import { CameraPlaceholder } from './CameraPlaceholder';
@@ -215,7 +216,7 @@ export function CameraTile({
           title={clearPlateDisabled ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
           aria-label={t('printers.plateStatus.markCleared')}
         >
-          {clearPlatePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
+          {clearPlatePending ? <Spinner className="h-4 w-4" /> : <PlateClearedIcon className="h-4 w-4" />}
         </button>
       )}
 

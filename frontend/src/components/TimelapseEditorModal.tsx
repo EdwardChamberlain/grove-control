@@ -13,8 +13,8 @@ import {
   Trash2,
   Volume2,
   VolumeX,
-  Loader2,
-} from 'lucide-react';
+  } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { Button } from './Button';
 import { api } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
@@ -236,7 +236,7 @@ export function TimelapseEditorModal({
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
         <div className="flex items-center gap-3 text-white">
-          <Loader2 className="w-6 h-6 animate-spin" />
+          <Spinner className="w-6 h-6" />
           Loading video info...
         </div>
       </div>
@@ -261,7 +261,7 @@ export function TimelapseEditorModal({
             >
               {processMutation.isPending ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   Processing...
                 </>
               ) : (
@@ -530,7 +530,7 @@ export function TimelapseEditorModal({
         {/* Processing overlay */}
         {processMutation.isPending && (
           <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4">
-            <Loader2 className="w-12 h-12 text-bambu-green animate-spin" />
+            <Spinner className="w-12 h-12 text-bambu-green" />
             <p className="text-white text-lg">Processing timelapse...</p>
             <p className="text-bambu-gray text-sm">This may take a few moments</p>
           </div>

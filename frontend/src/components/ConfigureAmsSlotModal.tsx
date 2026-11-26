@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { X, Loader2, Settings2, ChevronDown, CheckCircle2, RotateCcw } from 'lucide-react';
+import { X, Settings2, ChevronDown, CheckCircle2, RotateCcw } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { KProfile } from '../api/client';
 import { matchesPrinterModelSuffix, presetCompatibility, buildCompatibilityIndex, extractPresetModel } from '../utils/slicerPrinterMatch';
@@ -1140,7 +1141,7 @@ export function ConfigureAmsSlotModal({
 
           {isLoading ? (
             <div className="flex justify-center py-8">
-              <Loader2 className="w-6 h-6 text-bambu-green animate-spin" />
+              <Spinner className="w-6 h-6 text-bambu-green" />
             </div>
           ) : fullScreen ? (
             /* Two-column layout for kiosk display */
@@ -1642,7 +1643,7 @@ export function ConfigureAmsSlotModal({
           >
             {resetMutation.isPending ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Spinner className="w-4 h-4" />
                 {t('configureAmsSlot.resetting')}
               </>
             ) : (
@@ -1663,7 +1664,7 @@ export function ConfigureAmsSlotModal({
             >
               {configureMutation.isPending ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   {t('configureAmsSlot.configuring')}
                 </>
               ) : (

@@ -7,7 +7,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { MaintenancePage } from '../../pages/MaintenancePage';
 import { setAuthToken } from '../../api/client';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 
 const mockPrinters = [
@@ -368,6 +368,44 @@ describe('MaintenancePage', () => {
       const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
       fireEvent.click(deleteButtons[deleteButtons.length - 1]);
       await waitFor(() => expect(deletedId).toBe('2'));
+    });
+
+    it('shows a spinner on Save log entry while the entry is being saved', async () => {
+      server.use(
+        http.post('/api/v1/maintenance/logs', async () => {
+          await delay('infinite');
+          return HttpResponse.json(mockManualLogEntry, { status: 201 });
+        }),
+      );
+
+      render(<MaintenancePage />);
+      fireEvent.click(await screen.findByText('Log'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add log entry' }));
+      fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Bearing replaced' } });
+      const save = screen.getByRole('button', { name: 'Save log entry' });
+      fireEvent.click(save);
+
+      await waitFor(() => expect(save.querySelector('.spinner')).not.toBeNull());
+      expect(save).toBeDisabled();
+    });
+
+    it('shows a spinner on Load more while the next page is fetched', async () => {
+      server.use(
+        http.get('/api/v1/maintenance/logs', async ({ request }) => {
+          if (new URL(request.url).searchParams.get('cursor')) {
+            await delay('infinite');
+          }
+          return HttpResponse.json({ items: [mockScheduledLogEntry], next_cursor: 'page-2' });
+        }),
+      );
+
+      render(<MaintenancePage />);
+      fireEvent.click(await screen.findByText('Log'));
+      const loadMore = await screen.findByRole('button', { name: 'Load more' });
+      fireEvent.click(loadMore);
+
+      await waitFor(() => expect(loadMore.querySelector('.spinner')).not.toBeNull());
+      expect(loadMore).toBeDisabled();
     });
   });
 

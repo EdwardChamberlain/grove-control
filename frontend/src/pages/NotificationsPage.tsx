@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Bell, CheckCircle2, Loader2, Mail, Save } from 'lucide-react';
+import { Bell, CheckCircle2, Mail, Save } from 'lucide-react';
+import { Spinner } from '../components/Spinner';
 import { api } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -89,7 +90,7 @@ export function NotificationsPage() {
   if (isLoading || isAdvancedAuthLoading || isSettingsLoading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -252,7 +253,7 @@ export function NotificationsPage() {
         >
           {saveMutation.isPending ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Spinner className="w-4 h-4" />
               {t('common.saving')}
             </>
           ) : (

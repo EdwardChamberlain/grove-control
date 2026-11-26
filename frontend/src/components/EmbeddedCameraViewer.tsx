@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { X, RefreshCw, AlertTriangle, Maximize2, Minimize2, GripVertical, WifiOff, ZoomIn, ZoomOut, Fullscreen, Minimize, Stethoscope } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, getAuthToken, withStreamToken } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -664,7 +665,7 @@ export function EmbeddedCameraViewer({ printerId, printerName, viewerIndex = 0, 
         >
           {streamLoading && !isReconnecting && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-              <RefreshCw className="w-6 h-6 text-bambu-gray animate-spin" />
+              <Spinner className="w-6 h-6 text-bambu-gray" />
             </div>
           )}
           {isReconnecting && (

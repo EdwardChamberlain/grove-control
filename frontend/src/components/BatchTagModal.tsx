@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Tag, Plus, Loader2 } from 'lucide-react';
+import { X, Tag, Plus } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -213,7 +214,7 @@ export function BatchTagModal({ selectedIds, existingTags, onClose }: BatchTagMo
             >
               {batchTagMutation.isPending ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                   Processing...
                 </>
               ) : (

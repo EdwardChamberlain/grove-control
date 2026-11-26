@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, FolderKanban, Loader2, XCircle, Search } from 'lucide-react';
+import { X, FolderKanban, XCircle, Search } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -118,7 +119,7 @@ export function BatchProjectModal({ selectedIds, onClose }: BatchProjectModalPro
 
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-bambu-gray" />
+                <Spinner className="w-6 h-6 text-bambu-gray" />
               </div>
             ) : (
               <div className="space-y-2">
@@ -136,7 +137,7 @@ export function BatchProjectModal({ selectedIds, onClose }: BatchProjectModalPro
                     <p className="text-sm text-bambu-gray truncate">Clear project assignment</p>
                   </div>
                   {removeMutation.isPending && (
-                    <Loader2 className="w-4 h-4 animate-spin text-bambu-gray shrink-0" />
+                    <Spinner className="w-4 h-4 text-bambu-gray shrink-0" />
                   )}
                 </button>
 
@@ -188,7 +189,7 @@ export function BatchProjectModal({ selectedIds, onClose }: BatchProjectModalPro
                       </p>
                     </div>
                     {assignMutation.isPending && assignMutation.variables === project.id && (
-                      <Loader2 className="w-4 h-4 animate-spin text-bambu-gray shrink-0" />
+                      <Spinner className="w-4 h-4 text-bambu-gray shrink-0" />
                     )}
                   </button>
                 ))}

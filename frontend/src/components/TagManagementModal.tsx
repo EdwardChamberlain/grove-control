@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Tag, Pencil, Trash2, Loader2, Search, Check, AlertTriangle } from 'lucide-react';
+import { X, Tag, Pencil, Trash2, Search, Check, AlertTriangle } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { TagInfo } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -175,7 +176,7 @@ export function TagManagementModal({ onClose }: TagManagementModalProps) {
           <div className="flex-1 overflow-y-auto min-h-0 p-4">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-bambu-gray" />
+                <Spinner className="w-6 h-6 text-bambu-gray" />
               </div>
             ) : !filteredTags?.length ? (
               <div className="text-center py-8 text-bambu-gray">
@@ -207,7 +208,7 @@ export function TagManagementModal({ onClose }: TagManagementModalProps) {
                           className="p-1.5"
                         >
                           {renameMutation.isPending ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <Spinner className="w-4 h-4" />
                           ) : (
                             <Check className="w-4 h-4" />
                           )}
@@ -236,7 +237,7 @@ export function TagManagementModal({ onClose }: TagManagementModalProps) {
                           className="p-1.5"
                         >
                           {deleteMutation.isPending ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <Spinner className="w-4 h-4" />
                           ) : (
                             <Trash2 className="w-4 h-4" />
                           )}

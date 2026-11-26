@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Shield, Lock, Unlock, AlertTriangle, CheckCircle, Loader2, Send } from 'lucide-react';
+import { Shield, Lock, Unlock, AlertTriangle, CheckCircle, Send } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { AppSettings } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
@@ -165,7 +166,7 @@ export function LDAPSettings() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-12">
-        <Loader2 className="w-8 h-8 animate-spin text-bambu-green" />
+        <Spinner className="w-8 h-8 text-bambu-green" />
       </div>
     );
   }
@@ -427,7 +428,7 @@ export function LDAPSettings() {
                 disabled={saveMutation.isPending}
               >
                 {saveMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                 ) : (
                   <CheckCircle className="w-4 h-4" />
                 )}
@@ -439,7 +440,7 @@ export function LDAPSettings() {
                 disabled={testMutation.isPending}
               >
                 {testMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Spinner className="w-4 h-4" />
                 ) : (
                   <Send className="w-4 h-4" />
                 )}

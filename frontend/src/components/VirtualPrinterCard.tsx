@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import {
-  Loader2, Check, AlertTriangle, Eye, EyeOff, Info,
+  Check, AlertTriangle, Eye, EyeOff, Info,
   ChevronDown, ChevronRight, ArrowRightLeft, Trash2, ShieldCheck, Copy, Stethoscope,
 } from 'lucide-react';
+import { Spinner } from './Spinner';
 import { api, multiVirtualPrinterApi } from '../api/client';
 import type { VirtualPrinterConfig } from '../api/client';
 import { Card, CardContent } from './Card';
@@ -599,7 +600,7 @@ export function VirtualPrinterCard({ printer, models }: VirtualPrinterCardProps)
                         disabled={!localAccessCode || pendingAction === 'accessCode'}
                         variant="primary"
                       >
-                        {pendingAction === 'accessCode' ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.save')}
+                        {pendingAction === 'accessCode' ? <Spinner className="w-4 h-4" /> : t('common.save')}
                       </Button>
                     </div>
                     {localAccessCode && (

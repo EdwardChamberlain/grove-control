@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 
 import { server } from '../mocks/server';
 import { render } from '../utils';
@@ -207,5 +207,24 @@ describe('OrcaCloudView', () => {
     await waitFor(() => {
       expect(screen.getByText(/Connect to Orca Cloud/i)).toBeInTheDocument();
     });
+  });
+
+  it('shows a spinner on the chosen provider button while the sign-in starts', async () => {
+    server.use(
+      http.get('/api/v1/orca-cloud/status', () =>
+        HttpResponse.json({ connected: false, email: null, user_id: null }),
+      ),
+      http.post('/api/v1/orca-cloud/auth/start', async () => {
+        await delay('infinite');
+        return HttpResponse.json({ auth_url: 'https://auth.orcaslicer.com/auth/v1/authorize?test=1' });
+      }),
+    );
+    render(<OrcaCloudView />);
+
+    const google = await screen.findByRole('button', { name: /Sign in with Google/i });
+    fireEvent.click(google);
+
+    await waitFor(() => expect(google.querySelector('.spinner')).not.toBeNull());
+    expect(google).toBeDisabled();
   });
 });

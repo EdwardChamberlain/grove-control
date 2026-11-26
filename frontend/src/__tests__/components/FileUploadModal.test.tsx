@@ -361,7 +361,7 @@ describe('FileUploadModal', () => {
       // Should show uploading state
       await waitFor(() => {
         expect(screen.getByText('Uploading...')).toBeInTheDocument();
-        expect(document.querySelector('.animate-spin')).toBeInTheDocument();
+        expect(document.querySelector('.spinner')).toBeInTheDocument();
       });
     });
 

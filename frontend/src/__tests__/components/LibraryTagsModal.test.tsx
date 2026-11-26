@@ -94,4 +94,17 @@ describe('LibraryTagsModal', () => {
     // In-use message — substring match keeps the test robust to whitespace.
     expect(await screen.findByText(/{{count}}|on 4|4 file/i)).toBeInTheDocument();
   });
+
+  it('shows the spinner on Save while the tag is being created', async () => {
+    (api.createLibraryTag as ReturnType<typeof vi.fn>).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText('toy');
+    await user.click(screen.getByRole('button', { name: /New tag/i }));
+    await user.type(await screen.findByLabelText(/Name/i), 'new');
+    const save = screen.getByRole('button', { name: /Save/i });
+    await user.click(save);
+
+    await waitFor(() => expect(save.querySelector('.spinner')).not.toBeNull());
+  });
 });
