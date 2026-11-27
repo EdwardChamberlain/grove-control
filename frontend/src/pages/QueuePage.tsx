@@ -1024,14 +1024,21 @@ export function QueuePage() {
     onError: () => showToast(t('queue.toast.clearHistoryFailed'), 'error'),
   });
 
+  // After a bulk action: drop the jobs acted on, and any that have since left the pending
+  // list, but keep selections a filter hides. Leave select mode when nothing is left.
+  const finishBulkAction = (actedIds: number[]) => {
+    const pendingIds = new Set((queue ?? []).filter((i) => i.status === 'pending').map((i) => i.id));
+    const remaining = selectedIds.filter((id) => !actedIds.includes(id) && pendingIds.has(id));
+    if (remaining.length === 0) selection.exit();
+    else selection.set(remaining);
+  };
+
   const bulkUpdateMutation = useMutation({
     mutationFn: (data: PrintQueueBulkUpdate) => api.bulkUpdateQueue(data),
     onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      // Only the jobs acted on; selections a filter hides are kept.
-      if (selectedIds.every((id) => variables.item_ids.includes(id))) selection.exit();
-      else selection.remove(variables.item_ids);
+      finishBulkAction(variables.item_ids);
       setShowBulkEditModal(false);
       showToast(result.message);
     },
@@ -1048,9 +1055,7 @@ export function QueuePage() {
     onSuccess: (count, ids) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      // Only the jobs cancelled; selections a filter hides are kept.
-      if (selectedIds.every((id) => ids.includes(id))) selection.exit();
-      else selection.remove(ids);
+      finishBulkAction(ids);
       showToast(t('queue.toast.bulkCancelled', { count }));
     },
     onError: () => showToast(t('queue.toast.bulkCancelFailed'), 'error'),
@@ -2179,7 +2184,6 @@ export function QueuePage() {
         />
       )}
 
-      {/* Bulk Edit Modal */}
       {selectionActive && activeTab === 'queue' && (
         <SelectionBar count={selectedItems.length} onClose={selection.exit}>
           <Button variant="secondary" size="sm" onClick={handleSelectAll}>
@@ -2216,6 +2220,7 @@ export function QueuePage() {
         </SelectionBar>
       )}
 
+      {/* Bulk Edit Modal */}
       {showBulkEditModal && (
         <BulkEditModal
           selectedCount={selectedItems.length}

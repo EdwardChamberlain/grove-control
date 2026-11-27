@@ -756,6 +756,34 @@ describe('QueuePage', () => {
       expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument();
     });
 
+    it('leaves select mode after a bulk cancel even if another selected job has left the pending list', async () => {
+      let started = false;
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json(
+            started ? [{ ...searchItems[0], status: 'printing' }, searchItems[1]] : searchItems.slice(0, 2),
+          ),
+        ),
+        http.post('/api/v1/queue/:id/cancel', () => HttpResponse.json({ success: true })),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+      // One selected job starts printing elsewhere; a refetch (here, from cancelling a card) shows it.
+      started = true;
+      await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+      await user.click(await screen.findByRole('button', { name: 'Cancel Print' }));
+      await waitFor(() => expect(screen.getByText('1 selected')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: 'Cancel Selected' }));
+      await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
+    });
+
     it('does not count a selected job that has left the pending list as hidden', async () => {
       let started = false;
       server.use(
