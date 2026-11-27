@@ -877,9 +877,12 @@ export function QueuePage() {
     refetchInterval: 5000,
   });
 
-  const { data: printers } = useQuery({
+  const { data: printers, isError: printersError } = useQuery({
     queryKey: ['printers'],
     queryFn: () => api.getPrinters(),
+    // The dispatcher re-checks which printers are eligible every 30s, so the
+    // Timeline's forecast re-reads the printer list at the same pace.
+    refetchInterval: 30000,
   });
 
   const cancelMutation = useMutation({
@@ -1808,6 +1811,8 @@ export function QueuePage() {
         <QueueTimelineView
           queueItems={queue || []}
           printers={printers || []}
+          printersLoaded={printers !== undefined}
+          printersError={printersError}
           printerStatuses={printerStatusMap}
           onItemClick={(item) => {
             if (['completed', 'failed', 'skipped', 'cancelled'].includes(item.status)) {

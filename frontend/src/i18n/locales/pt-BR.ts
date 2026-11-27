@@ -1346,7 +1346,7 @@ export default {
       timelineView: 'Linha do tempo',
       unassigned: 'Não atribuído',
       noData: 'Nenhuma impressão agendada para este dia',
-      nothingCommitted: 'Sem programações confirmadas nesta janela. Itens preparados, itens em espera e trabalhos ASAP em impressoras ociosas não são mostrados — defina um horário agendado ou libere um item preparado para vê-lo aqui.',
+      nothingCommitted: 'Sem programações confirmadas nesta janela. Itens preparados e trabalhos ASAP em impressoras ociosas não são mostrados — defina um horário agendado ou libere um item preparado para vê-lo aqui.',
       allDoneBy: 'Todas as impressões concluídas até {{time}}',
       staged: 'Preparado',
       filterAll: 'Mostrar tudo',
@@ -1364,11 +1364,24 @@ export default {
         today: 'Hoje',
       },
       window: {
-        back12h: 'Voltar 12 horas',
-        forward12h: 'Avançar 12 horas',
+        zoom: 'Intervalo',
+        hours: '{{count}} h',
+        earlier: 'Antes',
+        later: 'Depois',
         now: 'Agora',
       },
-      printerColumnHeader: 'Impressora',
+      nowLabel: 'Agora {{time}}',
+      legend: {
+        scheduledQueued: 'Agendado ou na fila',
+        blocked: 'Bloqueado, requer ação',
+      },
+      lane: {
+        printingFree: 'Imprimindo · livre às {{time}}',
+        idleNext: 'Ociosa · próximo trabalho {{time}}',
+        idleEmpty: 'Ociosa · nada na fila',
+        noEligible: 'Nenhuma máquina elegível',
+        deactivated: 'Desativada',
+      },
     },
     // Permissions
     permissions: {

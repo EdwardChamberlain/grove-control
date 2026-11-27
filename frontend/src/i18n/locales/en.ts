@@ -1366,7 +1366,7 @@ export default {
       timelineView: 'Timeline',
       unassigned: 'Unassigned',
       noData: 'No scheduled prints for this day',
-      nothingCommitted: 'No committed schedules in this window. Staged items, waiting items, and ASAP jobs on idle printers are not shown — set a scheduled time or release a staged item to see it here.',
+      nothingCommitted: 'No committed schedules in this window. Staged items and ASAP jobs on idle printers are not shown — set a scheduled time or release a staged item to see it here.',
       allDoneBy: 'All prints estimated done by {{time}}',
       staged: 'Staged',
       filterAll: 'Show All',
@@ -1383,13 +1383,26 @@ export default {
         next: 'Next day',
         today: 'Today',
       },
-      // Rolling-24h Gantt window
+      // Gantt window
       window: {
-        back12h: 'Back 12 hours',
-        forward12h: 'Forward 12 hours',
+        zoom: 'Zoom',
+        hours: '{{count}}h',
+        earlier: 'Earlier',
+        later: 'Later',
         now: 'Now',
       },
-      printerColumnHeader: 'Printer',
+      nowLabel: 'Now {{time}}',
+      legend: {
+        scheduledQueued: 'Scheduled or queued',
+        blocked: 'Blocked, needs you',
+      },
+      lane: {
+        printingFree: 'Printing · free {{time}}',
+        idleNext: 'Idle · next job {{time}}',
+        idleEmpty: 'Idle · nothing queued',
+        noEligible: 'No eligible machine',
+        deactivated: 'Deactivated',
+      },
     },
     // Permissions
     permissions: {

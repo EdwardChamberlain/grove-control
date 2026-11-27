@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Queue: the Timeline now shows a job that targets a printer model on the
+  printer it would be dispatched to (#383). Three one-hour jobs for "Any P1S"
+  with two idle P1S printers show two running side by side and one after, and
+  "All prints estimated done by" uses the latest projected finish. Jobs fit
+  into the idle time around scheduled jobs on each printer. A job that cannot
+  be printed yet, such as one waiting on a missing material, is drawn on the
+  printer it could go onto, at the earliest it could start, as a dashed purple
+  bar with the reason. Bars use the same colours as the Queue tab: green for
+  printing, purple for blocked and neutral for scheduled and queued jobs.
+  A job no printer can take (every printer of its model deactivated, or none in
+  its target location) is shown on a "No eligible machine" line, and a job
+  blocked on a specific printer is drawn on that printer. Short jobs stack in
+  rows instead of overlapping at wide zoom levels.
+  The Timeline also has a new look: a 6h, 12h, 24h and 48h zoom (12h by
+  default), bars titled with the job name rather than the printer, a status
+  line on each printer lane (printing until, next job, or idle), outlined grey
+  jobs, a legend and a labelled Now marker. A deactivated printer's line is
+  muted and marked Deactivated instead of looking like idle capacity.
 - Queue: the alert icon beside a job's waiting reason (such as "Busy: P1S - 2")
   or filament-short message is now vertically centred on its text instead of
   sitting slightly low (#397).
