@@ -238,6 +238,8 @@ export function QueueJobLine({
   const footerPad = k ? 'px-[18px] py-1.5 text-base' : 'px-4 py-1.5 text-xs';
   const progressPad = k ? 'px-[18px] py-2 text-base' : 'px-4 py-2 text-xs';
   const footerIcon = k ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  // Matches the footer text's line height (text-base / text-xs), so a top-aligned icon centres on the first line.
+  const footerLineHeight = k ? 'h-6' : 'h-4';
 
   return (
     <div
@@ -391,7 +393,7 @@ export function QueueJobLine({
               <span className="flex min-w-0 flex-1 flex-col gap-1">
                 {showWaitingReason && (
                   <span className="flex items-start gap-2">
-                    <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
+                    <span className={`flex flex-shrink-0 items-center ${footerLineHeight}`}><AlertCircle className={footerIcon} /></span>
                     <span>{item.waiting_reason}</span>
                   </span>
                 )}
@@ -400,7 +402,7 @@ export function QueueJobLine({
                     className="flex items-start gap-2"
                     title={showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined}
                   >
-                    <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
+                    <span className={`flex flex-shrink-0 items-center ${footerLineHeight}`}><AlertCircle className={footerIcon} /></span>
                     <span>{t('queue.filamentShort.rowBadge')}</span>
                   </span>
                 )}
@@ -425,7 +427,7 @@ export function QueueJobLine({
             className={`flex items-start gap-2 border-t ${QUEUE_TONES.waiting.footer} ${footerPad}`}
             title={t('queue.filamentShort.rowTooltip')}
           >
-            <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
+            <span className={`flex flex-shrink-0 items-center ${footerLineHeight}`}><AlertCircle className={footerIcon} /></span>
             <span>{t('queue.filamentShort.rowBadge')}</span>
           </div>
         )}
