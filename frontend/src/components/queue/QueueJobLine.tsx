@@ -239,7 +239,8 @@ export function QueueJobLine({
   const progressPad = k ? 'px-[18px] py-2 text-base' : 'px-4 py-2 text-xs';
   const footerIcon = k ? 'h-4 w-4' : 'h-3.5 w-3.5';
   // Matches the footer text's line height (text-base / text-xs), so a top-aligned icon centres on the first line;
-  // the -0.1em lift in the markup lines it up with the glyphs, which sit slightly above the middle of their line box.
+  // the -0.1em lift in the markup lines it up with the glyphs, which sit slightly above the middle of their line box,
+  // and the 1px drop on each line centres the pair in the strip.
   const footerLineHeight = k ? 'h-6' : 'h-4';
 
   return (
@@ -393,14 +394,14 @@ export function QueueJobLine({
             {showWaitingReason || showFilamentShort ? (
               <span className="flex min-w-0 flex-1 flex-col gap-1">
                 {showWaitingReason && (
-                  <span className="flex items-start gap-2">
+                  <span className="flex translate-y-px items-start gap-2">
                     <span className={`flex flex-shrink-0 -translate-y-[0.1em] items-center ${footerLineHeight}`}><AlertCircle className={footerIcon} /></span>
                     <span>{item.waiting_reason}</span>
                   </span>
                 )}
                 {showFilamentShort && (
                   <span
-                    className="flex items-start gap-2"
+                    className="flex translate-y-px items-start gap-2"
                     title={showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined}
                   >
                     <span className={`flex flex-shrink-0 -translate-y-[0.1em] items-center ${footerLineHeight}`}><AlertCircle className={footerIcon} /></span>
@@ -425,11 +426,13 @@ export function QueueJobLine({
         {/* Filament-short flag on its own strip when no staged footer can carry it. */}
         {showFilamentShort && !showStagedFooter && (
           <div
-            className={`flex items-start gap-2 border-t ${QUEUE_TONES.waiting.footer} ${footerPad}`}
+            className={`border-t ${QUEUE_TONES.waiting.footer} ${footerPad}`}
             title={t('queue.filamentShort.rowTooltip')}
           >
-            <span className={`flex flex-shrink-0 -translate-y-[0.1em] items-center ${footerLineHeight}`}><AlertCircle className={footerIcon} /></span>
-            <span>{t('queue.filamentShort.rowBadge')}</span>
+            <span className="flex translate-y-px items-start gap-2">
+              <span className={`flex flex-shrink-0 -translate-y-[0.1em] items-center ${footerLineHeight}`}><AlertCircle className={footerIcon} /></span>
+              <span>{t('queue.filamentShort.rowBadge')}</span>
+            </span>
           </div>
         )}
 
