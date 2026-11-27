@@ -25,6 +25,7 @@ import {
   Trash2,
   Play,
   X,
+  Search,
   AlertCircle,
   Calendar,
   Printer,
@@ -773,6 +774,8 @@ export function QueuePage() {
   const [filterPrinter, setFilterPrinter] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
+  const [search, setSearch] = useState('');
+  const searchTerm = search.trim().toLowerCase();
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [requeueItem, setRequeueItem] = useState<PrintQueueItem | null>(null);
@@ -841,7 +844,7 @@ export function QueuePage() {
 
   useEffect(() => {
     setHistoryVisibleCount(HISTORY_PAGE_SIZE);
-  }, [historySortBy, historySortAsc, filterLocation]);
+  }, [historySortBy, historySortAsc, filterLocation, searchTerm]);
 
   useEffect(() => {
     localStorage.setItem('queue.pendingSortBy', pendingSortBy);
@@ -1085,12 +1088,22 @@ export function QueuePage() {
     return false;
   }, [filterLocation, printers]);
 
+  // Text search over what the rows show: job name, printer and the user who queued it.
+  const matchesSearch = useCallback((item: PrintQueueItem): boolean => {
+    if (!searchTerm) return true;
+    return [item.archive_name, item.library_file_name, item.printer_name, item.created_by_username]
+      .some((field) => field?.toLowerCase().includes(searchTerm));
+  }, [searchTerm]);
+
   const pendingItems = useMemo(() => {
     let items = queue?.filter(i => i.status === 'pending') || [];
 
     // Apply location filter
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
+    }
+    if (searchTerm) {
+      items = items.filter(matchesSearch);
     }
 
     // Helper to get scheduled time as timestamp (ASAP = 0 for earliest)
@@ -1115,14 +1128,17 @@ export function QueuePage() {
       }
       return pendingSortAsc ? cmp : -cmp;
     });
-  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation]);
+  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation, searchTerm, matchesSearch]);
 
+  const allVisibleSelected = pendingItems.length > 0 && pendingItems.every(i => selectedItems.includes(i.id));
   const handleSelectAll = () => {
-    const allPendingIds = pendingItems.map(i => i.id);
-    if (selectedItems.length === allPendingIds.length) {
-      setSelectedItems([]);
+    // Acts on the visible (filtered) jobs only; selections already made outside
+    // the current search are left alone.
+    const visibleIds = pendingItems.map(i => i.id);
+    if (allVisibleSelected) {
+      setSelectedItems(prev => prev.filter(id => !visibleIds.includes(id)));
     } else {
-      setSelectedItems(allPendingIds);
+      setSelectedItems(prev => [...prev, ...visibleIds.filter(id => !prev.includes(id))]);
     }
   };
 
@@ -1131,8 +1147,11 @@ export function QueuePage() {
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
     }
+    if (searchTerm) {
+      items = items.filter(matchesSearch);
+    }
     return items;
-  }, [queue, filterLocation, matchesLocationFilter]);
+  }, [queue, filterLocation, matchesLocationFilter, searchTerm, matchesSearch]);
   const dispatchingItems = useMemo(
     () => activeItems.filter((item) => item.status === 'dispatching'),
     [activeItems],
@@ -1181,6 +1200,7 @@ export function QueuePage() {
       if (!status || !needsPlateClear(printer, status)) return;
       if (filterStatus || (filterPrinter && filterPrinter !== printer.id)) return;
       if (filterLocation && printer.location !== filterLocation) return;
+      if (searchTerm && !printer.name.toLowerCase().includes(searchTerm)) return;
       const next = (queue ?? [])
         .filter((item) => item.status === 'pending' && item.printer_id === printer.id)
         .sort((a, b) => a.position - b.position)[0];
@@ -1191,7 +1211,7 @@ export function QueuePage() {
       });
     });
     return rows.sort((a, b) => a.printer.name.localeCompare(b.printer.name));
-  }, [plateCandidates, plateStatusQueries, queue, filterPrinter, filterStatus, filterLocation, t]);
+  }, [plateCandidates, plateStatusQueries, queue, filterPrinter, filterStatus, filterLocation, searchTerm, t]);
 
   // Build a map of printer_id -> state for quick lookup
   const printerStateMap = useMemo(() => {
@@ -1226,6 +1246,9 @@ export function QueuePage() {
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
     }
+    if (searchTerm) {
+      items = items.filter(matchesSearch);
+    }
     return [...items].sort((a, b) => {
       let cmp: number;
       if (historySortBy === 'name') {
@@ -1240,7 +1263,7 @@ export function QueuePage() {
       }
       return historySortAsc ? -cmp : cmp;
     });
-  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation]);
+  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation, searchTerm, matchesSearch]);
 
   // Calculate total queue time
   const totalQueueTime = useMemo(() => {
@@ -1631,6 +1654,35 @@ export function QueuePage() {
       {/* Single toolbar line. Filters apply to every tab; the layout, sort
           and selection controls only apply to the Queue tab. */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
+        {/* Search — same input as the Printers page. Timeline lists the raw queue, so it has no search. */}
+        {activeTab !== 'timeline' && (
+          <div className="relative min-w-48 flex-1 sm:max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray/50" />
+            <input
+              type="search"
+              name="queue-search"
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('queue.search')}
+              aria-label={t('queue.search')}
+              className="w-full h-8 pl-9 pr-8 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm placeholder:text-bambu-gray/50 focus:outline-none focus:border-bambu-green"
+            />
+            {search && (
+              <button
+                type="button"
+                aria-label={t('common.clear')}
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-bambu-gray hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
         <ToolbarDropdown
           value={filterPrinter === -1 ? 'unassigned' : filterPrinter ? String(filterPrinter) : 'all'}
           onChange={(val) => {
@@ -1772,12 +1824,12 @@ export function QueuePage() {
               onClick={handleSelectAll}
               className={`${toolbarControlClass} flex items-center gap-2`}
             >
-              {selectedItems.length === pendingItems.length ? (
+              {allVisibleSelected ? (
                 <CheckSquare className="w-4 h-4 text-bambu-green" />
               ) : (
                 <Square className="w-4 h-4 text-bambu-gray" />
               )}
-              {selectedItems.length === pendingItems.length ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
+              {allVisibleSelected ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
             </button>
           </div>
         )}
@@ -1806,6 +1858,17 @@ export function QueuePage() {
           <p className="text-bambu-gray max-w-md mx-auto">
             {t('queue.empty.description')}
           </p>
+        </div>
+      ) : searchTerm && (
+        (activeTab === 'queue' && pendingItems.length + activeItems.length === 0 && plateClearRows.length === 0) ||
+        (activeTab === 'history' && historyItems.length === 0)
+      ) ? (
+        <div className="py-16 text-center" data-testid="queue-no-search-results">
+          <Search className="w-14 h-14 text-bambu-gray mx-auto mb-4 opacity-40" />
+          <h3 className="text-lg font-medium text-white mb-2">{t('queue.noSearchResults')}</h3>
+          <Button variant="secondary" size="sm" onClick={() => setSearch('')}>
+            {t('queue.resetSearch')}
+          </Button>
         </div>
       ) : activeTab === 'timeline' ? (
         <QueueTimelineView

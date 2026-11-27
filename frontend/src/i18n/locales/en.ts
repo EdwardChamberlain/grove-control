@@ -1137,6 +1137,9 @@ export default {
 
   // Queue page
   queue: {
+    search: 'Search jobs, printers or users...',
+    noSearchResults: 'No jobs match your search',
+    resetSearch: 'Reset search',
     title: 'Print Queue',
     subtitle: 'Schedule and manage your print jobs',
     filamentShort: {

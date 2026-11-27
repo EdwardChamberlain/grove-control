@@ -1123,6 +1123,9 @@ export default {
 
   // Queue page
   queue: {
+    search: 'Aufträge, Drucker oder Benutzer suchen...',
+    noSearchResults: 'Keine Aufträge entsprechen deiner Suche',
+    resetSearch: 'Suche zurücksetzen',
     filamentShort: {
       rowBadge: 'Filament fuer die zugewiesene Spule reicht nicht',
       rowTooltip: 'Der Dispatcher hat diese Position markiert. Klicke auf Play, um den Pro-Slot-Fehlbestand zu sehen und zu entscheiden, ob trotzdem gedruckt werden soll.',

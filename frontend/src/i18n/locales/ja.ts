@@ -1122,6 +1122,9 @@ export default {
 
   // Queue page
   queue: {
+    search: 'ジョブ、プリンター、ユーザーを検索...',
+    noSearchResults: '検索に一致するジョブはありません',
+    resetSearch: '検索をリセット',
     filamentShort: {
       rowBadge: '割り当てられたスプールのフィラメントが不足しています',
       rowTooltip: 'スケジューラーがこのアイテムをフラグしました。再生ボタンをクリックしてスロットごとの不足量を確認し、それでも印刷するか判断してください。',

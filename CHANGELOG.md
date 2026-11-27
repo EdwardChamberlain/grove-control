@@ -23,6 +23,10 @@
 - Queue: the alert icon beside a job's waiting reason (such as "Busy: P1S - 2")
   or filament-short message is now vertically centred on its text instead of
   sitting slightly low (#397).
+- Queue: the Queue and History tabs now have a search bar, in the same place and
+  style as the Printers page. It matches the job name, printer and the user who
+  queued it, works together with the printer, status and location filters, and
+  shows a "no jobs match" message with a **Reset search** button (#401).
 - Queue: a staged job that is short on filament now shows the "Insufficient
   filament" message and the Start button on one footer line instead of two
   stacked strips (#395).

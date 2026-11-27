@@ -1123,6 +1123,9 @@ export default {
 
   // Kuyruk sayfası
   queue: {
+    search: 'İşleri, yazıcıları veya kullanıcıları ara...',
+    noSearchResults: 'Aramanızla eşleşen iş yok',
+    resetSearch: 'Aramayı sıfırla',
     title: 'Baskı Kuyruğu',
     subtitle: 'Baskı işlerinizi zamanlayın ve yönetin',
     filamentShort: {

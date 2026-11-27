@@ -637,6 +637,106 @@ describe('QueuePage', () => {
     });
   });
 
+  describe('search', () => {
+    const searchItems = [
+      { ...mockQueueItems[0], id: 11, archive_name: 'Benchy', printer_name: 'Alpha', created_by_username: 'alice' },
+      { ...mockQueueItems[0], id: 12, position: 2, archive_name: 'Gear', printer_name: 'Beta', created_by_username: 'bob' },
+      { ...mockQueueItems[2], id: 13, archive_name: 'Old Vase', printer_name: 'Beta', created_by_username: 'alice' },
+    ];
+
+    beforeEach(() => {
+      server.use(
+        http.get('/api/v1/queue/', ({ request }) => {
+          const status = new URL(request.url).searchParams.get('status');
+          return HttpResponse.json(status ? searchItems.filter((i) => i.status === status) : searchItems);
+        }),
+      );
+    });
+
+    const type = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+      await user.type(await screen.findByRole('searchbox', { name: 'Search jobs, printers or users...' }), text);
+    };
+
+    it('matches on job name', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'gear');
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryByText('Benchy')).not.toBeInTheDocument();
+    });
+
+    it('matches on printer name', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'alpha');
+      expect(screen.getByText('Benchy')).toBeInTheDocument();
+      expect(screen.queryByText('Gear')).not.toBeInTheDocument();
+    });
+
+    it('matches on the user who queued the job', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'bob');
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryByText('Benchy')).not.toBeInTheDocument();
+    });
+
+    it('combines with the status filter', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'beta');
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryByText('Benchy')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'All Status' }));
+      await user.click(screen.getByRole('button', { name: 'Completed' }));
+
+      // Only the completed job matches the status; it is a History job, so the
+      // Queue tab has nothing left for "beta".
+      expect(await screen.findByText('No jobs match your search')).toBeInTheDocument();
+      expect(screen.queryByText('Gear')).not.toBeInTheDocument();
+    });
+
+    it('searches the History tab too', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await user.click(screen.getByRole('button', { name: /History/ }));
+      await screen.findByText('Old Vase');
+      await type(user, 'nothing-like-this');
+      expect(screen.getByText('No jobs match your search')).toBeInTheDocument();
+    });
+
+    it('shows an empty state that resets the search', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'zzz');
+
+      expect(screen.getByText('No jobs match your search')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Reset search' }));
+
+      expect(await screen.findByText('Benchy')).toBeInTheDocument();
+      expect(screen.getByRole('searchbox')).toHaveValue('');
+    });
+
+    it('does not change the selection while typing, and Select All only takes visible jobs', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'alpha');
+      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+      await user.clear(screen.getByRole('searchbox'));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+    });
+  });
+
   describe('queue actions', () => {
     it('has no separate edit button: the job name is the edit link for pending items', async () => {
       render(<QueuePage />);
