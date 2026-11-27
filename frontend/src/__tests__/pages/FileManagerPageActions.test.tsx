@@ -298,6 +298,20 @@ describe('select mode', () => {
     await waitFor(() => expect(screen.getByText('0 selected')).toBeInTheDocument());
   });
 
+  it('disables Move, Tag and Delete until a file is selected', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('select-mode-toggle'));
+
+    const bar = within(screen.getByTestId('selection-bar'));
+    for (const name of ['Move', 'Tag', 'Delete']) {
+      expect(bar.getByRole('button', { name })).toBeDisabled();
+    }
+
+    await user.click(screen.getByRole('checkbox', { name: 'Select hook.stl' }));
+    expect(bar.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  });
+
   it('deletes a single selected file from the bar', async () => {
     const user = userEvent.setup();
     await ready();

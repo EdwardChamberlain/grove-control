@@ -4081,6 +4081,7 @@ export default {
     unknownSpoolSlot: '插槽',
     bulk: {
       selectAllVisible: '選擇所有可見項',
+      deselectVisible: '取消選取可見項目',
       selectRow: '選擇列',
       selectGroup: '選擇群組',
       edit: '編輯',

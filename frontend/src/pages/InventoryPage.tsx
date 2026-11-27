@@ -1269,6 +1269,9 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
   const pagedItems = showAll
     ? displayItems
     : displayItems.slice(safePageIndex * effectivePageSize, (safePageIndex + 1) * effectivePageSize);
+  const pageSpoolIds = pagedItems.flatMap((item) => (item.type === 'group' ? item.spools.map((s) => s.id) : [item.spool.id]));
+  const allPageSelected = pageSpoolIds.length > 0 && pageSpoolIds.every((id) => selectedIds.has(id));
+  const noneSelected = selectedIds.size === 0;
   const toggleGroupSimilar = () => {
     const next = !groupSimilar;
     setGroupSimilar(next);
@@ -1816,41 +1819,40 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             size="sm"
             variant="secondary"
             onClick={() => {
-              const pageIds = pagedItems.flatMap((item) => (item.type === 'group' ? item.spools.map((s) => s.id) : [item.spool.id]));
-              if (pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id))) selection.remove(pageIds);
-              else selection.add(pageIds);
+              if (allPageSelected) selection.remove(pageSpoolIds);
+              else selection.add(pageSpoolIds);
             }}
           >
-            {t('inventory.bulk.selectAllVisible')}
+            {allPageSelected ? t('inventory.bulk.deselectVisible') : t('inventory.bulk.selectAllVisible')}
           </Button>
           <SelectionBarDivider />
-        <Button size="sm" variant="secondary" onClick={() => setBulkEditOpen(true)}>
-          <Edit2 className="w-3.5 h-3.5 mr-1.5" />
-          {t('inventory.bulk.edit')}
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => setLabelPickerSpoolIds([...selectedIds])}>
-          <Printer className="w-3.5 h-3.5 mr-1.5" />
-          {t('inventory.bulk.printLabels')}
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => setBulkConfirmAction('reset-consumed-counter')}>
-          <Eraser className="w-3.5 h-3.5 mr-1.5" />
-          {t('inventory.bulk.resetUsage')}
-        </Button>
-        {archiveFilter === 'archived' ? (
-          <Button size="sm" variant="secondary" onClick={() => setBulkConfirmAction('restore')}>
-            <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-            {t('inventory.bulk.restore')}
+          <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkEditOpen(true)}>
+            <Edit2 className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.edit')}
           </Button>
-        ) : (
-          <Button size="sm" variant="secondary" onClick={() => setBulkConfirmAction('archive')}>
-            <Archive className="w-3.5 h-3.5 mr-1.5" />
-            {t('inventory.bulk.archive')}
+          <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setLabelPickerSpoolIds([...selectedIds])}>
+            <Printer className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.printLabels')}
           </Button>
-        )}
-        <Button size="sm" variant="danger" onClick={() => setBulkConfirmAction('delete')}>
-          <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-          {t('inventory.bulk.delete')}
-        </Button>
+          <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkConfirmAction('reset-consumed-counter')}>
+            <Eraser className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.resetUsage')}
+          </Button>
+          {archiveFilter === 'archived' ? (
+            <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkConfirmAction('restore')}>
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+              {t('inventory.bulk.restore')}
+            </Button>
+          ) : (
+            <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkConfirmAction('archive')}>
+              <Archive className="w-3.5 h-3.5 mr-1.5" />
+              {t('inventory.bulk.archive')}
+            </Button>
+          )}
+          <Button size="sm" variant="danger" disabled={noneSelected} onClick={() => setBulkConfirmAction('delete')}>
+            <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.delete')}
+          </Button>
         </SelectionBar>
       )}
 

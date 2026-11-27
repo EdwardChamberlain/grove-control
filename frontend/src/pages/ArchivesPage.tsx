@@ -1910,7 +1910,7 @@ export function ArchivesPage() {
             variant="secondary"
             size="sm"
             onClick={() => setShowBatchTag(true)}
-            disabled={!hasAnyPermission('archives:update_own', 'archives:update_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:update_own', 'archives:update_all')}
             title={!hasAnyPermission('archives:update_own', 'archives:update_all') ? t('archives.permission.noUpdateArchives') : undefined}
           >
             <Tag className="w-4 h-4" />
@@ -1920,7 +1920,7 @@ export function ArchivesPage() {
             variant="secondary"
             size="sm"
             onClick={() => setShowBatchProject(true)}
-            disabled={!hasAnyPermission('archives:update_own', 'archives:update_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:update_own', 'archives:update_all')}
             title={!hasAnyPermission('archives:update_own', 'archives:update_all') ? t('archives.permission.noUpdateArchives') : undefined}
           >
             <FolderKanban className="w-4 h-4" />
@@ -1929,7 +1929,7 @@ export function ArchivesPage() {
           <Button
             variant="secondary"
             size="sm"
-            disabled={!hasAnyPermission('archives:update_own', 'archives:update_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:update_own', 'archives:update_all')}
             title={!hasAnyPermission('archives:update_own', 'archives:update_all') ? t('archives.permission.noUpdateArchives') : undefined}
             onClick={() => {
               const ids = Array.from(selectedIds);
@@ -1950,7 +1950,7 @@ export function ArchivesPage() {
             size="sm"
             className="bg-red-500 hover:bg-red-600"
             onClick={() => setShowBulkDeleteConfirm(true)}
-            disabled={!hasAnyPermission('archives:delete_own', 'archives:delete_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:delete_own', 'archives:delete_all')}
             title={!hasAnyPermission('archives:delete_own', 'archives:delete_all') ? t('archives.permission.noDelete') : undefined}
           >
             <Trash2 className="w-4 h-4" />

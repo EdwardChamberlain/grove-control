@@ -4082,6 +4082,7 @@ export default {
     unknownSpoolSlot: 'Slot',
     bulk: {
       selectAllVisible: 'Selecionar todos os visíveis',
+      deselectVisible: 'Desmarcar visíveis',
       selectRow: 'Selecionar linha',
       selectGroup: 'Selecionar grupo',
       edit: 'Editar',

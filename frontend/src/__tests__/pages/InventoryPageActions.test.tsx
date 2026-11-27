@@ -246,6 +246,34 @@ describe('bulk actions', () => {
     expect(await screen.findByText('2 spools updated')).toBeInTheDocument();
   });
 
+  it('disables the bulk actions until something is selected', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await enterSelectMode(user);
+
+    const bar = within(screen.getByTestId('selection-bar'));
+    for (const name of [/^Edit$/, /Print labels/, /Reset usage/, /^Archive$/, /^Delete$/]) {
+      expect(bar.getByRole('button', { name })).toBeDisabled();
+    }
+
+    await user.click(within(rowOf(1)).getByLabelText('Select row'));
+    expect(bar.getByRole('button', { name: /^Delete$/ })).toBeEnabled();
+  });
+
+  it('flips Select all visible to Deselect visible once the whole page is selected', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await enterSelectMode(user);
+
+    await user.click(screen.getByRole('button', { name: 'Select all visible' }));
+    expect(screen.getByRole('button', { name: 'Deselect visible' })).toBeInTheDocument();
+    expect(screen.getByText('4 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Deselect visible' }));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select all visible' })).toBeInTheDocument();
+  });
+
   it('opens the label picker for the selection from the bar', async () => {
     const user = userEvent.setup();
     await ready();

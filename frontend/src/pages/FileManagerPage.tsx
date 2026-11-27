@@ -2406,7 +2406,7 @@ export function FileManagerPage() {
                 variant="secondary"
                 size="sm"
                 onClick={() => setShowMoveModal(true)}
-                disabled={!hasAnyPermission('library:update_own', 'library:update_all')}
+                disabled={selectedFiles.length === 0 || !hasAnyPermission('library:update_own', 'library:update_all')}
                 title={!hasAnyPermission('library:update_own', 'library:update_all') ? t('fileManager.noPermissionMoveFiles') : undefined}
               >
                 <MoveRight className="w-4 h-4 sm:mr-1" />
@@ -2416,7 +2416,7 @@ export function FileManagerPage() {
                 variant="secondary"
                 size="sm"
                 onClick={() => setShowBulkTagsModal(true)}
-                disabled={!hasAnyPermission('library:update_own', 'library:update_all')}
+                disabled={selectedFiles.length === 0 || !hasAnyPermission('library:update_own', 'library:update_all')}
                 title={!hasAnyPermission('library:update_own', 'library:update_all') ? t('fileManager.tags.noPermission') : t('fileManager.tags.bulkTooltip')}
               >
                 <TagIcon className="w-4 h-4 sm:mr-1" />
@@ -2432,7 +2432,7 @@ export function FileManagerPage() {
                     setDeleteConfirm({ type: 'bulk', id: 0, count: selectedFiles.length });
                   }
                 }}
-                disabled={!hasAnyPermission('library:delete_own', 'library:delete_all')}
+                disabled={selectedFiles.length === 0 || !hasAnyPermission('library:delete_own', 'library:delete_all')}
                 title={!hasAnyPermission('library:delete_own', 'library:delete_all') ? t('fileManager.noPermissionDeleteFiles') : undefined}
               >
                 <Trash2 className="w-4 h-4 sm:mr-1" />

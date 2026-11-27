@@ -3888,6 +3888,7 @@ export default {
     unknownSpoolSlot: '슬롯',
     bulk: {
       selectAllVisible: '표시된 항목 모두 선택',
+      deselectVisible: '표시된 항목 선택 해제',
       selectRow: '행 선택',
       selectGroup: '그룹 선택',
       edit: '편집',

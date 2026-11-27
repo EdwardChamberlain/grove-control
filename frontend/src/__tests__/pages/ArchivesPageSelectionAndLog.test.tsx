@@ -128,6 +128,23 @@ describe('ArchivesPage bulk selection', () => {
     expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
   });
 
+  it('disables the bulk actions until an archive is selected', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    const bar = within(screen.getByTestId('selection-bar'));
+    for (const name of [/^Tags$/, /^Project$/, /^Favorite$/, /^Delete$/]) {
+      expect(bar.getByRole('button', { name })).toBeDisabled();
+    }
+
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    expect(bar.getByRole('button', { name: /^Favorite$/ })).toBeEnabled();
+  });
+
   it('Escape and Close leave selection mode', async () => {
     setView('grid');
     useArchives();

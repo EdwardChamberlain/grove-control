@@ -4094,6 +4094,7 @@ export default {
     unknownSpoolSlot: 'スロット',
     bulk: {
       selectAllVisible: '表示中をすべて選択',
+      deselectVisible: '表示中を選択解除',
       selectRow: '行を選択',
       selectGroup: 'グループを選択',
       edit: '編集',

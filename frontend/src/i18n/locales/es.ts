@@ -4096,6 +4096,7 @@ export default {
     unknownSpoolSlot: 'Ranura',
     bulk: {
       selectAllVisible: 'Seleccionar todo lo visible',
+      deselectVisible: 'Deseleccionar visibles',
       selectRow: 'Seleccionar fila',
       selectGroup: 'Seleccionar grupo',
       edit: 'Editar',

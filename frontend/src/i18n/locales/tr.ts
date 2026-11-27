@@ -4083,6 +4083,7 @@ export default {
     unknownSpoolSlot: 'Yuva',
     bulk: {
       selectAllVisible: 'Görünenleri seç',
+      deselectVisible: 'Görünenlerin seçimini kaldır',
       selectRow: 'Satırı seç',
       selectGroup: 'Grubu seç',
       edit: 'Düzenle',
