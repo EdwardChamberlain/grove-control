@@ -332,6 +332,16 @@ describe('FileManagerModal', () => {
       });
     });
 
+    it('hides the selection bar while the delete confirmation is open', async () => {
+      await open();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'benchy.3mf' }));
+      fireEvent.click(within(screen.getByTestId('selection-bar')).getByRole('button', { name: /Delete/ }));
+
+      await screen.findAllByRole('button', { name: /Delete/ });
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+    });
+
     it('downloads a single selected file directly and clears the selection', async () => {
       const requested: string[] = [];
       Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:file'), revokeObjectURL: vi.fn() });

@@ -644,8 +644,8 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
       </div>
 
       {/* Multi-select bar: sits above the dialog backdrop */}
-      {selectionMode && (
-        <SelectionBar count={selectedFiles.size} onClose={selection.exit} className="!z-[60]">
+      {selectionMode && filesToDelete.length === 0 && !viewerFile && (
+        <SelectionBar count={selectedFiles.size} onClose={selection.exit} className="!z-[60]" reserveSpace={false}>
           {data?.files?.some(f => !f.is_directory) && (
             selectedFiles.size > 0 ? (
               <Button variant="secondary" size="sm" onClick={deselectAllFiles}>

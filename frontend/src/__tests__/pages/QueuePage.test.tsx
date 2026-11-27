@@ -1747,6 +1747,20 @@ describe('QueuePage', () => {
     });
   });
 
+  describe('buttons in select mode', () => {
+    it('keeps a card button from also toggling the job selection', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      await user.click(await screen.findByTestId('select-mode-toggle'));
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+
+      await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+    });
+  });
+
   describe('permissions', () => {
     it('does not make the card or name editable without update permission', async () => {
       setAuthToken('read-only-token');

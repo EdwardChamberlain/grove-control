@@ -78,6 +78,47 @@ describe('useSelection', () => {
   });
 });
 
+describe('useSelection Escape handling', () => {
+  const press = (target: EventTarget = window, init: KeyboardEventInit = {}) => {
+    act(() => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init }));
+    });
+  };
+
+  it('leaves the selection alone when Escape is pressed in a text field', () => {
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    const { result } = renderHook(() => useSelection<number>());
+    act(() => result.current.add([1]));
+    press(input);
+    expect(result.current.active).toBe(true);
+    input.remove();
+  });
+
+  it('leaves the selection alone while a dialog is open', () => {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0';
+    document.body.appendChild(overlay);
+    const { result } = renderHook(() => useSelection<number>());
+    act(() => result.current.add([1]));
+    press();
+    expect(result.current.active).toBe(true);
+    overlay.remove();
+    press();
+    expect(result.current.active).toBe(false);
+  });
+
+  it('ignores an Escape another handler already used', () => {
+    const { result } = renderHook(() => useSelection<number>());
+    act(() => result.current.add([1]));
+    const handled = (e: Event) => e.preventDefault();
+    document.addEventListener('keydown', handled);
+    press(document.body);
+    document.removeEventListener('keydown', handled);
+    expect(result.current.active).toBe(true);
+  });
+});
+
 describe('SelectModeToggle', () => {
   it('reports its pressed state and calls onToggle', async () => {
     const onToggle = vi.fn();
@@ -143,6 +184,25 @@ describe('SelectionBar', () => {
     expect(screen.getByRole('button', { name: 'Do it' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Exit selection' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reserves bottom space on the page scroll container while shown and restores it', () => {
+    const { unmount } = render(
+      <main data-testid="page">
+        <SelectionBar count={1} onClose={() => {}} />
+      </main>,
+    );
+    expect(screen.getByTestId('page').style.paddingBottom).toBe('7rem');
+    unmount();
+  });
+
+  it('does not reserve space when told not to', () => {
+    render(
+      <main data-testid="page">
+        <SelectionBar count={1} onClose={() => {}} reserveSpace={false} />
+      </main>,
+    );
+    expect(screen.getByTestId('page').style.paddingBottom).toBe('');
   });
 
   it('accepts a custom count label and renders without actions', () => {

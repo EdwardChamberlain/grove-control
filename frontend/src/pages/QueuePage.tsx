@@ -420,13 +420,13 @@ function SortableQueueItem({
   const progress = isPrinting && status ? jobProgressFromStatus(status) : null;
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Links, buttons, inputs and the drag handle keep their own behaviour, in select mode too.
+    if ((e.target as HTMLElement).closest('a, button, input, label, [data-no-card-click]')) return;
     if (showCheckbox) {
       onToggleSelect?.();
       return;
     }
     if (!canEditItem) return;
-    // Links, buttons, inputs and the drag handle keep their own behaviour.
-    if ((e.target as HTMLElement).closest('a, button, input, label, [data-no-card-click]')) return;
     onEdit();
   };
 
@@ -519,7 +519,7 @@ function SortableQueueItem({
       title={canEditItem ? (
         <button
           type="button"
-          onClick={showCheckbox ? undefined : onEdit}
+          onClick={showCheckbox ? () => onToggleSelect?.() : onEdit}
           title={t('common.edit')}
           className="min-w-0 truncate text-left text-sm font-semibold text-white hover:underline hover:decoration-bambu-gray-light hover:underline-offset-[3px] focus-visible:underline sm:text-[15px]"
         >

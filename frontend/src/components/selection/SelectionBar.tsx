@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../Button';
@@ -11,6 +11,11 @@ interface SelectionBarProps {
   /** Overrides the default "{{count}} selected" text. */
   countLabel?: string;
   className?: string;
+  /**
+   * Add bottom padding to the page's scroll container while the bar is shown, so the last
+   * rows and pagination stay reachable. Turn off for a bar shown over a dialog.
+   */
+  reserveSpace?: boolean;
 }
 
 /** Vertical divider used between groups of controls in the bar. */
@@ -23,10 +28,24 @@ export function SelectionBarDivider() {
  * mode is on. It shows the count and a close button, and hosts each page's
  * own actions as children.
  */
-export function SelectionBar({ count, onClose, children, countLabel, className = '' }: SelectionBarProps) {
+export function SelectionBar({ count, onClose, children, countLabel, className = '', reserveSpace = true }: SelectionBarProps) {
   const { t } = useTranslation();
+  const barRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!reserveSpace) return;
+    const main = barRef.current?.closest('main');
+    if (!main) return;
+    const previous = main.style.paddingBottom;
+    main.style.paddingBottom = '7rem';
+    return () => {
+      main.style.paddingBottom = previous;
+    };
+  }, [reserveSpace]);
+
   return (
     <div
+      ref={barRef}
       role="toolbar"
       aria-label={t('selection.barLabel')}
       data-testid="selection-bar"

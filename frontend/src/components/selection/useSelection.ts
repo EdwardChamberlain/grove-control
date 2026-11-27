@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 export type SelectionId = string | number;
 
 export interface UseSelectionOptions {
-  /** Exit select mode when Escape is pressed. Defaults to true. */
+  /**
+   * Exit select mode when Escape is pressed outside a text field or dialog.
+   * Defaults to true.
+   */
   exitOnEscape?: boolean;
 }
 
@@ -89,7 +92,13 @@ export function useSelection<T extends SelectionId = number>(
   useEffect(() => {
     if (!exitOnEscape || !active) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') exit();
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // Escape in a text field only leaves the field, and Escape in an open
+      // dialog only closes the dialog; neither should throw the selection away.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      if (document.querySelector('[role="dialog"], [aria-modal="true"], .fixed.inset-0')) return;
+      exit();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
