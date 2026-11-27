@@ -775,7 +775,6 @@ export function QueuePage() {
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
   const [search, setSearch] = useState('');
-  const searchTerm = search.trim().toLowerCase();
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [requeueItem, setRequeueItem] = useState<PrintQueueItem | null>(null);
@@ -785,7 +784,10 @@ export function QueuePage() {
     type: 'cancel' | 'remove' | 'stop';
     item: PrintQueueItem;
   } | null>(null);
-  const [selectedItems, setSelectedItems] = useState<number[]>([]);
+  // Everything the user has ticked, including jobs a filter or search currently
+  // hides. Typing in the search never changes it; `selectedItems` below is the
+  // visible part, which is all that bulk actions and drags ever act on.
+  const [selectedIds, setSelectedItems] = useState<number[]>([]);
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   // #1818: per-printer Resume-after-failure confirm modal. Tracks which
   // printer's gate the user is about to clear; null when no modal is open.
@@ -827,6 +829,9 @@ export function QueuePage() {
   });
   // Active-tab layout toggle. "position" = today's flat list; "printer"
   // groups items under per-printer section headers with aggregate stats.
+  // The Timeline tab shows the raw queue and has no search box, so a search typed
+  // on another tab must not keep changing its counts.
+  const searchTerm = activeTab === 'timeline' ? '' : search.trim().toLowerCase();
   const [activeLayout, setActiveLayout] = useState<'position' | 'printer'>(() => {
     const saved = localStorage.getItem('queue.activeLayout');
     return saved === 'printer' ? 'printer' : 'position';
@@ -995,14 +1000,13 @@ export function QueuePage() {
   });
 
   const clearHistoryMutation = useMutation({
-    mutationFn: async () => {
-      const historyItems = queue?.filter(i =>
-        ['completed', 'failed', 'skipped', 'cancelled'].includes(i.status)
-      ) || [];
-      for (const item of historyItems) {
-        await api.removeFromQueue(item.id);
+    // Only the jobs currently listed, so a search or location filter never
+    // deletes finished jobs the user cannot see.
+    mutationFn: async (ids: number[]) => {
+      for (const id of ids) {
+        await api.removeFromQueue(id);
       }
-      return historyItems.length;
+      return ids.length;
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
@@ -1088,10 +1092,11 @@ export function QueuePage() {
     return false;
   }, [filterLocation, printers]);
 
-  // Text search over what the rows show: job name, printer and the user who queued it.
+  // Text search over what the rows show: job name, printer (or the target model and
+  // location for model-based jobs) and the user who queued it.
   const matchesSearch = useCallback((item: PrintQueueItem): boolean => {
     if (!searchTerm) return true;
-    return [item.archive_name, item.library_file_name, item.printer_name, item.created_by_username]
+    return [item.archive_name, item.library_file_name, item.printer_name, item.target_model, item.target_location, item.created_by_username]
       .some((field) => field?.toLowerCase().includes(searchTerm));
   }, [searchTerm]);
 
@@ -1130,6 +1135,11 @@ export function QueuePage() {
     });
   }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation, searchTerm, matchesSearch]);
 
+  const selectedItems = useMemo(() => {
+    const visible = new Set(pendingItems.map((i) => i.id));
+    return selectedIds.filter((id) => visible.has(id));
+  }, [selectedIds, pendingItems]);
+  const hiddenSelectedCount = selectedIds.length - selectedItems.length;
   const allVisibleSelected = pendingItems.length > 0 && pendingItems.every(i => selectedItems.includes(i.id));
   const handleSelectAll = () => {
     // Acts on the visible (filtered) jobs only; selections already made outside
@@ -1788,6 +1798,11 @@ export function QueuePage() {
 
         {activeTab === 'queue' && pendingItems.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 ml-auto">
+            {hiddenSelectedCount > 0 && (
+              <span className="text-xs sm:text-sm text-bambu-gray" data-testid="queue-hidden-selected">
+                {t('queue.bulkEdit.hiddenSelected', { count: hiddenSelectedCount })}
+              </span>
+            )}
             {selectedItems.length > 0 && (
               <>
                 <span className="text-xs sm:text-sm text-bambu-gray">
@@ -2184,7 +2199,7 @@ export function QueuePage() {
           confirmText={t('queue.clearHistory')}
           variant="danger"
           onConfirm={() => {
-            clearHistoryMutation.mutate();
+            clearHistoryMutation.mutate(historyItems.map((item) => item.id));
             setShowClearHistoryConfirm(false);
           }}
           onCancel={() => setShowClearHistoryConfirm(false)}

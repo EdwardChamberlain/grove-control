@@ -27,6 +27,9 @@
   style as the Printers page. It matches the job name, printer and the user who
   queued it, works together with the printer, status and location filters, and
   shows a "no jobs match" message with a **Reset search** button (#401).
+  Bulk actions, drags and **Clear History** act only on the jobs you can see, so
+  a search or filter never cancels or deletes hidden jobs; hidden selections are
+  kept and counted as "hidden by filters".
 - Queue: a staged job that is short on filament now shows the "Insufficient
   filament" message and the Start button on one footer line instead of two
   stacked strips (#395).

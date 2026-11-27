@@ -1234,6 +1234,7 @@ export default {
       selectAll: '전체 선택',
       deselectAll: '전체 해제',
       selected: '{{count}}개 선택됨',
+      hiddenSelected: '{{count}}개가 필터로 숨겨짐',
       editSelected: '선택 항목 편집',
       cancelSelected: '선택 항목 취소'
     },

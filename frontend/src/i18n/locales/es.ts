@@ -1299,6 +1299,7 @@ export default {
       selectAll: 'Seleccionar todo',
       deselectAll: 'Deseleccionar todo',
       selected: '{{count}} seleccionados',
+      hiddenSelected: '{{count}} ocultos por los filtros',
       editSelected: 'Editar seleccionados',
       cancelSelected: 'Cancelar seleccionados',
     },

@@ -1299,6 +1299,7 @@ export default {
       selectAll: 'Tümünü Seç',
       deselectAll: 'Seçimi Kaldır',
       selected: '{{count}} seçildi',
+      hiddenSelected: '{{count}} filtreyle gizlendi',
       editSelected: 'Seçilenleri Düzenle',
       cancelSelected: 'Seçilenleri İptal Et',
     },

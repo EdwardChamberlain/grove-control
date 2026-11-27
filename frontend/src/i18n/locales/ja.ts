@@ -1298,6 +1298,7 @@ export default {
       selectAll: 'すべて選択',
       deselectAll: 'すべて選択解除',
       selected: '{{count}}件選択中',
+      hiddenSelected: '{{count}} 件がフィルターで非表示',
       editSelected: '選択を編集',
       cancelSelected: '選択をキャンセル',
     },

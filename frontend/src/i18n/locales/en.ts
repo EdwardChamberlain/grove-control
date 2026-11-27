@@ -1319,6 +1319,7 @@ export default {
       selectAll: 'Select All',
       deselectAll: 'Deselect All',
       selected: '{{count}} selected',
+      hiddenSelected: '{{count}} hidden by filters',
       editSelected: 'Edit Selected',
       cancelSelected: 'Cancel Selected',
     },

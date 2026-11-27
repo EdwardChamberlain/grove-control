@@ -1299,6 +1299,7 @@ export default {
       selectAll: '全选',
       deselectAll: '取消全选',
       selected: '已选择 {{count}} 个',
+      hiddenSelected: '{{count}} 项被筛选隐藏',
       editSelected: '编辑所选',
       cancelSelected: '取消所选',
     },
