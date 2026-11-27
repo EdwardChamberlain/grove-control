@@ -1656,7 +1656,7 @@ export function QueuePage() {
       <div className="flex flex-wrap items-center gap-2 mb-6">
         {/* Search — same input as the Printers page. Timeline lists the raw queue, so it has no search. */}
         {activeTab !== 'timeline' && (
-          <div className="relative min-w-48 flex-1 sm:max-w-xs">
+          <div className="relative min-w-48 flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray/50" />
             <input
               type="search"
