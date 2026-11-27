@@ -2245,7 +2245,7 @@ export function FileManagerPage() {
           )}
           {/* Search, Filter, Sort toolbar - sticky on mobile for easier access */}
           {files && files.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 p-2 sm:p-3 bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary sticky top-0 z-10 lg:static">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 py-2 sticky top-0 z-10 bg-bambu-dark lg:static lg:bg-transparent">
               {/* Search */}
               <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-xs">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
@@ -2342,14 +2342,14 @@ export function FileManagerPage() {
                 </button>
               </div>
 
-              <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />
-
               {/* Results count */}
               {(searchQuery || filterType !== 'all' || filterUsername) && (
                 <span className="text-sm text-bambu-gray hidden sm:inline">
                   {t('fileManager.resultsCount', { showing: filteredAndSortedFiles.length, total: files.length })}
                 </span>
               )}
+
+              <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="ml-auto" />
             </div>
           )}
 

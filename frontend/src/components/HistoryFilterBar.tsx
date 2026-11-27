@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertCircle, CalendarDays, ClipboardList, Copy, LayoutGrid, Search, Settings, SlidersHorizontal, Star, Trash2, X,
@@ -33,6 +33,8 @@ interface HistoryFilterBarProps {
   /** Log view only: opens the clear-log confirmation. The icon button is hidden without it. */
   onClearLog?: () => void;
   clearLogDisabled?: boolean;
+  /** Extra control shown at the end of the toolbar, after the view switch (the multi-select toggle). */
+  trailing?: ReactNode;
 }
 
 const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-wide text-bambu-gray';
@@ -44,7 +46,7 @@ const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-w
  */
 export function HistoryFilterBar({
   filters, viewMode, onViewModeChange, chips, printers, users, showUserFilter = true, uniqueMaterials, uniqueColors, uniqueTags,
-  shownCount, searchInputRef, onManageTags, onClearLog, clearLogDisabled,
+  shownCount, searchInputRef, onManageTags, onClearLog, clearLogDisabled, trailing,
 }: HistoryFilterBarProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -441,6 +443,7 @@ export function HistoryFilterBar({
             <ClipboardList className="w-4 h-4" />
           </button>
         </div>
+        {trailing}
       </div>
 
       {/* Active filters, shown only when something is filtered */}

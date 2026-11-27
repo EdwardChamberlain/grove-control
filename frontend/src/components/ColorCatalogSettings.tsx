@@ -331,7 +331,6 @@ export function ColorCatalogSettings() {
           <span className="text-sm text-bambu-gray">({catalog.length})</span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="!h-auto !px-3 !py-1.5" />
           <button
             onClick={handleExport}
             className="px-3 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-bambu-gray hover:text-white transition-colors flex items-center gap-1.5"
@@ -369,6 +368,7 @@ export function ColorCatalogSettings() {
             <RotateCcw className="w-4 h-4" />
             <span className="hidden sm:inline">{t('common.reset')}</span>
           </button>
+          <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="!h-auto !px-3 !py-1.5" />
           <button
             onClick={() => setShowAddForm(true)}
             className="px-3 py-1.5 text-sm bg-bambu-green text-white rounded-lg hover:bg-bambu-green/80 transition-colors flex items-center gap-1.5"

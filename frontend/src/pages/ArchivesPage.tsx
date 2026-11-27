@@ -2042,7 +2042,6 @@ export function ArchivesPage() {
               {t('archives.filters.compare')} ({selectedIds.size})
             </Button>
           )}
-          <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="!h-10 !px-3" />
           {hasPermission('archives:purge') && (
             <Button
               variant="secondary"
@@ -2072,6 +2071,7 @@ export function ArchivesPage() {
         onManageTags={() => setShowTagManagement(true)}
         onClearLog={() => setShowClearLogConfirm(true)}
         clearLogDisabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
+        trailing={<SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />}
       />
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}

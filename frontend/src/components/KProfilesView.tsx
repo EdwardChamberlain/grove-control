@@ -1246,6 +1246,12 @@ export function KProfilesView() {
             ]}
           />
         </div>
+        <SelectModeToggle
+          active={selectionMode}
+          onToggle={selection.toggleMode}
+          disabled={(!selectionMode && !filteredProfiles.length) || !hasPermission('kprofiles:delete')}
+          title={!hasPermission('kprofiles:delete') ? t('kProfiles.permission.noDelete') : undefined}
+        />
       </div>
 
       {/* Toolbar Row */}
@@ -1268,14 +1274,6 @@ export function KProfilesView() {
           <Upload className="w-4 h-4" />
           {t('kProfiles.import')}
         </Button>
-        <div className="flex-1" />
-        <SelectModeToggle
-          active={selectionMode}
-          onToggle={selection.toggleMode}
-          disabled={(!selectionMode && !filteredProfiles.length) || !hasPermission('kprofiles:delete')}
-          title={!hasPermission('kprofiles:delete') ? t('kProfiles.permission.noDelete') : undefined}
-          className="!h-10 !px-3"
-        />
       </div>
 
       {selectionMode && (
