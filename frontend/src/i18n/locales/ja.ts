@@ -1122,6 +1122,9 @@ export default {
 
   // Queue page
   queue: {
+    search: 'ジョブ、プリンター、ユーザーを検索...',
+    noSearchResults: '検索に一致するジョブはありません',
+    resetSearch: '検索をリセット',
     filamentShort: {
       rowBadge: '割り当てられたスプールのフィラメントが不足しています',
       rowTooltip: 'スケジューラーがこのアイテムをフラグしました。再生ボタンをクリックしてスロットごとの不足量を確認し、それでも印刷するか判断してください。',
@@ -1295,6 +1298,7 @@ export default {
       selectAll: 'すべて選択',
       deselectAll: 'すべて選択解除',
       selected: '{{count}}件選択中',
+      hiddenSelected: '{{count}} 件がフィルターで非表示',
       editSelected: '選択を編集',
       cancelSelected: '選択をキャンセル',
     },

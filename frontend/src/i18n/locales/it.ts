@@ -1123,6 +1123,9 @@ export default {
 
   // Queue page
   queue: {
+    search: 'Cerca lavori, stampanti o utenti...',
+    noSearchResults: 'Nessun lavoro corrisponde alla ricerca',
+    resetSearch: 'Reimposta ricerca',
     filamentShort: {
       rowBadge: 'Filamento insufficiente per la bobina assegnata',
       rowTooltip: 'Lo scheduler ha segnalato questo elemento. Premi Play per vedere il deficit per slot e decidere se stampare comunque.',
@@ -1296,6 +1299,7 @@ export default {
       selectAll: 'Seleziona tutto',
       deselectAll: 'Deseleziona tutto',
       selected: '{{count}} selezionati',
+      hiddenSelected: '{{count}} nascosti dai filtri',
       editSelected: 'Modifica selezionati',
       cancelSelected: 'Annulla selezionati',
     },

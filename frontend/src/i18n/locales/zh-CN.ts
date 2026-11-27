@@ -1123,6 +1123,9 @@ export default {
 
   // Queue page
   queue: {
+    search: '搜索作业、打印机或用户...',
+    noSearchResults: '没有与搜索匹配的作业',
+    resetSearch: '重置搜索',
     filamentShort: {
       rowBadge: '所分配料盘的耀丝不足',
       rowTooltip: '调度程序已标记该项。点击播放查看各插槽的赤字并决定是否仍要打印。',
@@ -1296,6 +1299,7 @@ export default {
       selectAll: '全选',
       deselectAll: '取消全选',
       selected: '已选择 {{count}} 个',
+      hiddenSelected: '{{count}} 项被筛选隐藏',
       editSelected: '编辑所选',
       cancelSelected: '取消所选',
     },

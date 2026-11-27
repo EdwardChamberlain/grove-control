@@ -25,6 +25,7 @@ import {
   Trash2,
   Play,
   X,
+  Search,
   AlertCircle,
   Calendar,
   Printer,
@@ -328,6 +329,7 @@ function SortableQueueItem({
   printerState,
   onMoveUp,
   onMoveDown,
+  reorderLocked = false,
   t,
 }: {
   item: PrintQueueItem;
@@ -347,6 +349,8 @@ function SortableQueueItem({
   printerState?: string | null;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  /** True while a search shows only some jobs: no drag handle, as a drop would be ignored. */
+  reorderLocked?: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   // Fetch printer status every 30 seconds while printing to monitor progress
@@ -380,6 +384,7 @@ function SortableQueueItem({
   const plates = platesData?.plates ?? [];
 
   const canReorder =
+    !reorderLocked &&
     hasPermission('queue:reorder') &&
     canModify('queue', 'update', item.created_by_id);
   const {
@@ -616,6 +621,7 @@ interface QueueRowRenderProps {
   t: (key: string, options?: Record<string, unknown>) => string;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  reorderLocked?: boolean;
 }
 
 function QueueRowRender({
@@ -631,6 +637,7 @@ function QueueRowRender({
   t,
   onMoveUp,
   onMoveDown,
+  reorderLocked,
 }: QueueRowRenderProps) {
   return (
     <SortableQueueItem
@@ -647,6 +654,7 @@ function QueueRowRender({
       canModify={canModify}
       onMoveUp={onMoveUp}
       onMoveDown={onMoveDown}
+      reorderLocked={reorderLocked}
       t={t}
     />
   );
@@ -773,6 +781,7 @@ export function QueuePage() {
   const [filterPrinter, setFilterPrinter] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
+  const [search, setSearch] = useState('');
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [requeueItem, setRequeueItem] = useState<PrintQueueItem | null>(null);
@@ -782,7 +791,10 @@ export function QueuePage() {
     type: 'cancel' | 'remove' | 'stop';
     item: PrintQueueItem;
   } | null>(null);
-  const [selectedItems, setSelectedItems] = useState<number[]>([]);
+  // Everything the user has ticked, including jobs a filter or search currently
+  // hides. Typing in the search never changes it; `selectedItems` below is the
+  // visible part, which is all that bulk actions and drags ever act on.
+  const [selectedIds, setSelectedItems] = useState<number[]>([]);
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   // #1818: per-printer Resume-after-failure confirm modal. Tracks which
   // printer's gate the user is about to clear; null when no modal is open.
@@ -824,6 +836,9 @@ export function QueuePage() {
   });
   // Active-tab layout toggle. "position" = today's flat list; "printer"
   // groups items under per-printer section headers with aggregate stats.
+  // The Timeline tab shows the raw queue and has no search box, so a search typed
+  // on another tab must not keep changing its counts.
+  const searchTerm = activeTab === 'timeline' ? '' : search.trim().toLowerCase();
   const [activeLayout, setActiveLayout] = useState<'position' | 'printer'>(() => {
     const saved = localStorage.getItem('queue.activeLayout');
     return saved === 'printer' ? 'printer' : 'position';
@@ -841,7 +856,7 @@ export function QueuePage() {
 
   useEffect(() => {
     setHistoryVisibleCount(HISTORY_PAGE_SIZE);
-  }, [historySortBy, historySortAsc, filterLocation]);
+  }, [historySortBy, historySortAsc, filterLocation, searchTerm]);
 
   useEffect(() => {
     localStorage.setItem('queue.pendingSortBy', pendingSortBy);
@@ -992,14 +1007,13 @@ export function QueuePage() {
   });
 
   const clearHistoryMutation = useMutation({
-    mutationFn: async () => {
-      const historyItems = queue?.filter(i =>
-        ['completed', 'failed', 'skipped', 'cancelled'].includes(i.status)
-      ) || [];
-      for (const item of historyItems) {
-        await api.removeFromQueue(item.id);
+    // Only the jobs currently listed, so a search or location filter never
+    // deletes finished jobs the user cannot see.
+    mutationFn: async (ids: number[]) => {
+      for (const id of ids) {
+        await api.removeFromQueue(id);
       }
-      return historyItems.length;
+      return ids.length;
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
@@ -1011,10 +1025,11 @@ export function QueuePage() {
 
   const bulkUpdateMutation = useMutation({
     mutationFn: (data: PrintQueueBulkUpdate) => api.bulkUpdateQueue(data),
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      setSelectedItems([]);
+      // Only the jobs acted on; selections a filter hides are kept.
+      setSelectedItems((prev) => prev.filter((id) => !variables.item_ids.includes(id)));
       setShowBulkEditModal(false);
       showToast(result.message);
     },
@@ -1028,10 +1043,11 @@ export function QueuePage() {
       }
       return ids.length;
     },
-    onSuccess: (count) => {
+    onSuccess: (count, ids) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      setSelectedItems([]);
+      // Only the jobs cancelled; selections a filter hides are kept.
+      setSelectedItems((prev) => prev.filter((id) => !ids.includes(id)));
       showToast(t('queue.toast.bulkCancelled', { count }));
     },
     onError: () => showToast(t('queue.toast.bulkCancelFailed'), 'error'),
@@ -1085,12 +1101,23 @@ export function QueuePage() {
     return false;
   }, [filterLocation, printers]);
 
+  // Text search over what the rows show: job name, printer (or the target model and
+  // location for model-based jobs) and the user who queued it.
+  const matchesSearch = useCallback((item: PrintQueueItem): boolean => {
+    if (!searchTerm) return true;
+    return [item.archive_name, item.library_file_name, item.printer_name, item.target_model, item.target_location, item.created_by_username]
+      .some((field) => field?.toLowerCase().includes(searchTerm));
+  }, [searchTerm]);
+
   const pendingItems = useMemo(() => {
     let items = queue?.filter(i => i.status === 'pending') || [];
 
     // Apply location filter
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
+    }
+    if (searchTerm) {
+      items = items.filter(matchesSearch);
     }
 
     // Helper to get scheduled time as timestamp (ASAP = 0 for earliest)
@@ -1115,14 +1142,27 @@ export function QueuePage() {
       }
       return pendingSortAsc ? cmp : -cmp;
     });
-  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation]);
+  }, [queue, pendingSortBy, pendingSortAsc, matchesLocationFilter, filterLocation, searchTerm, matchesSearch]);
 
+  const selectedItems = useMemo(() => {
+    const visible = new Set(pendingItems.map((i) => i.id));
+    return selectedIds.filter((id) => visible.has(id));
+  }, [selectedIds, pendingItems]);
+  // Selected jobs a filter or search hides. Ids of jobs that have since left the
+  // pending list (started, cancelled, removed) are not hidden, just stale.
+  const hiddenSelectedCount = useMemo(() => {
+    const pendingIds = new Set((queue ?? []).filter((i) => i.status === 'pending').map((i) => i.id));
+    return selectedIds.filter((id) => pendingIds.has(id)).length - selectedItems.length;
+  }, [selectedIds, selectedItems, queue]);
+  const allVisibleSelected = pendingItems.length > 0 && pendingItems.every(i => selectedItems.includes(i.id));
   const handleSelectAll = () => {
-    const allPendingIds = pendingItems.map(i => i.id);
-    if (selectedItems.length === allPendingIds.length) {
-      setSelectedItems([]);
+    // Acts on the visible (filtered) jobs only; selections already made outside
+    // the current search are left alone.
+    const visibleIds = pendingItems.map(i => i.id);
+    if (allVisibleSelected) {
+      setSelectedItems(prev => prev.filter(id => !visibleIds.includes(id)));
     } else {
-      setSelectedItems(allPendingIds);
+      setSelectedItems(prev => [...prev, ...visibleIds.filter(id => !prev.includes(id))]);
     }
   };
 
@@ -1131,8 +1171,11 @@ export function QueuePage() {
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
     }
+    if (searchTerm) {
+      items = items.filter(matchesSearch);
+    }
     return items;
-  }, [queue, filterLocation, matchesLocationFilter]);
+  }, [queue, filterLocation, matchesLocationFilter, searchTerm, matchesSearch]);
   const dispatchingItems = useMemo(
     () => activeItems.filter((item) => item.status === 'dispatching'),
     [activeItems],
@@ -1181,6 +1224,7 @@ export function QueuePage() {
       if (!status || !needsPlateClear(printer, status)) return;
       if (filterStatus || (filterPrinter && filterPrinter !== printer.id)) return;
       if (filterLocation && printer.location !== filterLocation) return;
+      if (searchTerm && !printer.name.toLowerCase().includes(searchTerm)) return;
       const next = (queue ?? [])
         .filter((item) => item.status === 'pending' && item.printer_id === printer.id)
         .sort((a, b) => a.position - b.position)[0];
@@ -1191,7 +1235,7 @@ export function QueuePage() {
       });
     });
     return rows.sort((a, b) => a.printer.name.localeCompare(b.printer.name));
-  }, [plateCandidates, plateStatusQueries, queue, filterPrinter, filterStatus, filterLocation, t]);
+  }, [plateCandidates, plateStatusQueries, queue, filterPrinter, filterStatus, filterLocation, searchTerm, t]);
 
   // Build a map of printer_id -> state for quick lookup
   const printerStateMap = useMemo(() => {
@@ -1226,6 +1270,9 @@ export function QueuePage() {
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
     }
+    if (searchTerm) {
+      items = items.filter(matchesSearch);
+    }
     return [...items].sort((a, b) => {
       let cmp: number;
       if (historySortBy === 'name') {
@@ -1240,7 +1287,7 @@ export function QueuePage() {
       }
       return historySortAsc ? -cmp : cmp;
     });
-  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation]);
+  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation, searchTerm, matchesSearch]);
 
   // Calculate total queue time
   const totalQueueTime = useMemo(() => {
@@ -1316,7 +1363,10 @@ export function QueuePage() {
   const canReorderManually =
     hasPermission('queue:reorder') &&
     hasAnyPermission('queue:update_own', 'queue:update_all') &&
-    pendingSortBy === 'position';
+    pendingSortBy === 'position' &&
+    // A search shows only some of the pending jobs, and a reorder renumbers the
+    // list it is given, which would push the hidden jobs out of order.
+    !searchTerm;
 
   const rowCanMove = (row: QueueRow | undefined): row is QueueRow =>
     !!row &&
@@ -1631,6 +1681,35 @@ export function QueuePage() {
       {/* Single toolbar line. Filters apply to every tab; the layout, sort
           and selection controls only apply to the Queue tab. */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
+        {/* Search — same input as the Printers page. Timeline lists the raw queue, so it has no search. */}
+        {activeTab !== 'timeline' && (
+          <div className="relative min-w-48 flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray/50" />
+            <input
+              type="search"
+              name="queue-search"
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('queue.search')}
+              aria-label={t('queue.search')}
+              className="w-full h-8 pl-9 pr-8 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm placeholder:text-bambu-gray/50 focus:outline-none focus:border-bambu-green"
+            />
+            {search && (
+              <button
+                type="button"
+                aria-label={t('common.clear')}
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-bambu-gray hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
         <ToolbarDropdown
           value={filterPrinter === -1 ? 'unassigned' : filterPrinter ? String(filterPrinter) : 'all'}
           onChange={(val) => {
@@ -1736,6 +1815,11 @@ export function QueuePage() {
 
         {activeTab === 'queue' && pendingItems.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 ml-auto">
+            {hiddenSelectedCount > 0 && (
+              <span className="text-xs sm:text-sm text-bambu-gray" data-testid="queue-hidden-selected">
+                {t('queue.bulkEdit.hiddenSelected', { count: hiddenSelectedCount })}
+              </span>
+            )}
             {selectedItems.length > 0 && (
               <>
                 <span className="text-xs sm:text-sm text-bambu-gray">
@@ -1772,12 +1856,12 @@ export function QueuePage() {
               onClick={handleSelectAll}
               className={`${toolbarControlClass} flex items-center gap-2`}
             >
-              {selectedItems.length === pendingItems.length ? (
+              {allVisibleSelected ? (
                 <CheckSquare className="w-4 h-4 text-bambu-green" />
               ) : (
                 <Square className="w-4 h-4 text-bambu-gray" />
               )}
-              {selectedItems.length === pendingItems.length ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
+              {allVisibleSelected ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
             </button>
           </div>
         )}
@@ -1806,6 +1890,17 @@ export function QueuePage() {
           <p className="text-bambu-gray max-w-md mx-auto">
             {t('queue.empty.description')}
           </p>
+        </div>
+      ) : searchTerm && (
+        (activeTab === 'queue' && pendingItems.length + activeItems.length === 0 && plateClearRows.length === 0) ||
+        (activeTab === 'history' && historyItems.length === 0)
+      ) ? (
+        <div className="py-16 text-center" data-testid="queue-no-search-results">
+          <Search className="w-14 h-14 text-bambu-gray mx-auto mb-4 opacity-40" />
+          <h3 className="text-lg font-medium text-white mb-2">{t('queue.noSearchResults')}</h3>
+          <Button variant="secondary" size="sm" onClick={() => setSearch('')}>
+            {t('queue.resetSearch')}
+          </Button>
         </div>
       ) : activeTab === 'timeline' ? (
         <QueueTimelineView
@@ -1926,6 +2021,7 @@ export function QueuePage() {
                           hasPermission={hasPermission}
                           canModify={canModify}
                           t={t}
+                          reorderLocked={!!searchTerm}
                           {...rowMovers(groupedRows, index)}
                         />
                       ))}
@@ -1959,6 +2055,7 @@ export function QueuePage() {
                                   hasPermission={hasPermission}
                                   canModify={canModify}
                                   t={t}
+                                  reorderLocked={!!searchTerm}
                                   {...rowMovers(bucket.rows, index)}
                                 />
                               ))}
@@ -2121,7 +2218,7 @@ export function QueuePage() {
           confirmText={t('queue.clearHistory')}
           variant="danger"
           onConfirm={() => {
-            clearHistoryMutation.mutate();
+            clearHistoryMutation.mutate(historyItems.map((item) => item.id));
             setShowClearHistoryConfirm(false);
           }}
           onCancel={() => setShowClearHistoryConfirm(false)}

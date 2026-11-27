@@ -1123,6 +1123,9 @@ export default {
 
   // Queue page
   queue: {
+    search: '搜尋工作、印表機或使用者...',
+    noSearchResults: '沒有符合搜尋的工作',
+    resetSearch: '重設搜尋',
     filamentShort: {
       rowBadge: '所分配料盤的線材不足',
       rowTooltip: '調度程式已標記此項目。點擊播放查看各槽位的不足量，並決定是否仍要列印。',
@@ -1296,6 +1299,7 @@ export default {
       selectAll: '全選',
       deselectAll: '取消全選',
       selected: '已選擇 {{count}} 個',
+      hiddenSelected: '{{count}} 項被篩選隱藏',
       editSelected: '編輯所選',
       cancelSelected: '取消所選',
     },

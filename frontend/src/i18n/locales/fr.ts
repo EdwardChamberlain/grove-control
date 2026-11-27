@@ -1123,6 +1123,9 @@ export default {
 
   // Queue page
   queue: {
+    search: 'Rechercher des travaux, imprimantes ou utilisateurs...',
+    noSearchResults: 'Aucun travail ne correspond à votre recherche',
+    resetSearch: 'Réinitialiser la recherche',
     filamentShort: {
       rowBadge: 'Filament insuffisant pour la bobine assignee',
       rowTooltip: "Le planificateur a signale cet element. Cliquez sur Lecture pour voir le deficit par emplacement et decider de lancer quand meme l'impression.",
@@ -1296,6 +1299,7 @@ export default {
       selectAll: 'Tout sélectionner',
       deselectAll: 'Tout désélectionner',
       selected: '{{count}} sélectionnés',
+      hiddenSelected: '{{count}} masqués par les filtres',
       editSelected: 'Modifier la sélection',
       cancelSelected: 'Annuler la sélection',
     },

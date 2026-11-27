@@ -1137,6 +1137,9 @@ export default {
 
   // Queue page
   queue: {
+    search: 'Search jobs, printers or users...',
+    noSearchResults: 'No jobs match your search',
+    resetSearch: 'Reset search',
     title: 'Print Queue',
     subtitle: 'Schedule and manage your print jobs',
     filamentShort: {
@@ -1316,6 +1319,7 @@ export default {
       selectAll: 'Select All',
       deselectAll: 'Deselect All',
       selected: '{{count}} selected',
+      hiddenSelected: '{{count}} hidden by filters',
       editSelected: 'Edit Selected',
       cancelSelected: 'Cancel Selected',
     },

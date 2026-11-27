@@ -637,6 +637,276 @@ describe('QueuePage', () => {
     });
   });
 
+  describe('search', () => {
+    const searchItems = [
+      { ...mockQueueItems[0], id: 11, archive_name: 'Benchy', printer_name: 'Alpha', created_by_username: 'alice' },
+      { ...mockQueueItems[0], id: 12, position: 2, archive_name: 'Gear', printer_name: 'Beta', created_by_username: 'bob' },
+      { ...mockQueueItems[2], id: 13, archive_name: 'Old Vase', printer_name: 'Beta', created_by_username: 'alice' },
+    ];
+
+    beforeEach(() => {
+      server.use(
+        http.get('/api/v1/queue/', ({ request }) => {
+          const status = new URL(request.url).searchParams.get('status');
+          return HttpResponse.json(status ? searchItems.filter((i) => i.status === status) : searchItems);
+        }),
+      );
+    });
+
+    const type = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
+      await user.type(await screen.findByRole('searchbox', { name: 'Search jobs, printers or users...' }), text);
+    };
+
+    it('matches on job name', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'gear');
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryByText('Benchy')).not.toBeInTheDocument();
+    });
+
+    it('matches on printer name', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'alpha');
+      expect(screen.getByText('Benchy')).toBeInTheDocument();
+      expect(screen.queryByText('Gear')).not.toBeInTheDocument();
+    });
+
+    it('matches on the user who queued the job', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'bob');
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryByText('Benchy')).not.toBeInTheDocument();
+    });
+
+    it('combines with the status filter', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'beta');
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryByText('Benchy')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'All Status' }));
+      await user.click(screen.getByRole('button', { name: 'Completed' }));
+
+      // Only the completed job matches the status; it is a History job, so the
+      // Queue tab has nothing left for "beta".
+      expect(await screen.findByText('No jobs match your search')).toBeInTheDocument();
+      expect(screen.queryByText('Gear')).not.toBeInTheDocument();
+    });
+
+    it('searches the History tab too', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await user.click(screen.getByRole('button', { name: /History/ }));
+      await screen.findByText('Old Vase');
+      await type(user, 'nothing-like-this');
+      expect(screen.getByText('No jobs match your search')).toBeInTheDocument();
+    });
+
+    it('shows an empty state that resets the search', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'zzz');
+
+      expect(screen.getByText('No jobs match your search')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Reset search' }));
+
+      expect(await screen.findByText('Benchy')).toBeInTheDocument();
+      expect(screen.getByRole('searchbox')).toHaveValue('');
+    });
+
+    it('keeps selections made outside the search, but never acts on hidden ones', async () => {
+      const cancelled: number[] = [];
+      server.use(
+        http.post('/api/v1/queue/:id/cancel', ({ params }) => {
+          cancelled.push(Number(params.id));
+          return HttpResponse.json({ success: true });
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+
+      // Select both pending jobs, then narrow the search to one of them.
+      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+      await type(user, 'alpha');
+
+      // Typing leaves the selection alone, and says what is hidden.
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+      expect(screen.getByTestId('queue-hidden-selected')).toHaveTextContent('1 hidden by filters');
+
+      await user.click(screen.getByRole('button', { name: 'Cancel Selected' }));
+      await waitFor(() => expect(cancelled).toEqual([11]));
+
+      // Only the cancelled job leaves the selection; the hidden one is kept and
+      // comes back when the search is cleared.
+      await user.clear(screen.getByRole('searchbox'));
+      expect(await screen.findByText('1 selected')).toBeInTheDocument();
+      expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument();
+    });
+
+    it('does not count a selected job that has left the pending list as hidden', async () => {
+      let started = false;
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json(
+            started ? [{ ...searchItems[0], status: 'printing' }, searchItems[1]] : searchItems.slice(0, 2),
+          ),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+      // Benchy starts printing elsewhere; the page picks that up on refocus.
+      started = true;
+      act(() => {
+        window.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('focus'));
+      });
+      await waitFor(() => expect(screen.getByText('1 selected')).toBeInTheDocument());
+      expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument();
+    });
+
+    it('turns off manual reordering while a search is active', async () => {
+      const reorders: unknown[] = [];
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            ...searchItems.slice(0, 2),
+            { ...searchItems[0], id: 15, position: 3, archive_name: 'Plain', printer_name: 'Gamma', created_by_username: 'carol' },
+          ]),
+        ),
+      );
+      server.use(http.post('/api/v1/queue/reorder', async ({ request }) => {
+        reorders.push(await request.json());
+        return HttpResponse.json({ success: true });
+      }));
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      expect(screen.getAllByTitle(/Drag to reorder/).length).toBeGreaterThan(0);
+      await type(user, 'e');
+      await waitFor(() => expect(screen.queryByText('Plain')).not.toBeInTheDocument());
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryAllByTitle(/Drag to reorder/)).toHaveLength(0);
+      act(() => dnd.onDragEnd?.({ active: { id: 12 }, over: { id: 11 } }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(reorders).toEqual([]);
+    });
+
+    it('Select All and Deselect All only touch the jobs that are visible', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      await type(user, 'alpha');
+
+      await user.click(screen.getByRole('button', { name: 'Deselect All' }));
+      expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+      expect(screen.getByTestId('queue-hidden-selected')).toHaveTextContent('1 hidden by filters');
+
+      await user.clear(screen.getByRole('searchbox'));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+    });
+
+    it('matches the target model of a job with no assigned printer', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            { ...searchItems[0], id: 21, archive_name: 'Anywhere', printer_id: null, printer_name: null, target_model: 'P1S' },
+            searchItems[1],
+          ]),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Anywhere');
+      await type(user, 'p1s');
+      expect(screen.getByText('Anywhere')).toBeInTheDocument();
+      expect(screen.queryByText('Gear')).not.toBeInTheDocument();
+    });
+
+    it('combines with the location filter', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([searchItems[0], { ...searchItems[1], printer_id: 2 }]),
+        ),
+        http.get('/api/v1/printers/', () =>
+          HttpResponse.json([
+            { ...mockPrinters[0], id: 1, name: 'Alpha', location: 'Shed' },
+            { ...mockPrinters[0], id: 2, name: 'Beta', location: 'House' },
+          ]),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await user.click(await screen.findByRole('button', { name: 'All Locations' }));
+      await user.click(screen.getByRole('button', { name: 'Shed' }));
+      await waitFor(() => expect(screen.queryByText('Gear')).not.toBeInTheDocument());
+
+      await type(user, 'gear');
+      // Gear matches the search but is in the other location, so nothing is left.
+      expect(await screen.findByText('No jobs match your search')).toBeInTheDocument();
+    });
+
+    it('does not filter the Timeline counts with a hidden search', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'gear');
+      expect(screen.queryByRole('searchbox')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /Timeline/ }));
+      expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+      expect(screen.queryByText('No jobs match your search')).not.toBeInTheDocument();
+    });
+
+    it('Clear History only removes the history jobs that are listed', async () => {
+      const removed: number[] = [];
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            ...searchItems,
+            { ...searchItems[2], id: 14, archive_name: 'Second Vase', printer_name: 'Alpha' },
+          ]),
+        ),
+        http.delete('/api/v1/queue/:id', ({ params }) => {
+          removed.push(Number(params.id));
+          return HttpResponse.json({ success: true });
+        }),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      await screen.findByText('Old Vase');
+      await type(user, 'second');
+      expect(screen.queryByText('Old Vase')).not.toBeInTheDocument();
+
+      const buttons = screen.getAllByRole('button', { name: /clear history/i });
+      await user.click(buttons[0]);
+      const confirm = await screen.findByText(/Are you sure you want to remove all 1 item/i);
+      expect(confirm).toBeInTheDocument();
+      const all = screen.getAllByRole('button', { name: /clear history/i });
+      await user.click(all[all.length - 1]);
+
+      await waitFor(() => expect(removed).toEqual([14]));
+    });
+  });
+
   describe('queue actions', () => {
     it('has no separate edit button: the job name is the edit link for pending items', async () => {
       render(<QueuePage />);
