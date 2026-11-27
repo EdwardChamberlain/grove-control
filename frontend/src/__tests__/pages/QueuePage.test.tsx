@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { QueuePage } from '../../pages/QueuePage';
@@ -1748,6 +1748,27 @@ describe('QueuePage', () => {
   });
 
   describe('buttons in select mode', () => {
+    it('keeps the select toggle while select mode is on after the last pending job goes', async () => {
+      const user = userEvent.setup();
+      let items: unknown[] = [mockQueueItems[0]];
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(items)),
+        http.post('/api/v1/queue/:id/cancel', () => {
+          items = [];
+          return HttpResponse.json({ message: 'cancelled' });
+        }),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByTestId('select-mode-toggle'));
+      // Cancel the only pending job from its card; the queue empties while select mode is on.
+      await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+      await user.click(await screen.findByRole('button', { name: 'Cancel Print' }));
+      await waitFor(() => expect(screen.queryByText('Test Print 1')).not.toBeInTheDocument());
+
+      expect(screen.getByTestId('select-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    });
+
     it('keeps a card button from also toggling the job selection', async () => {
       const user = userEvent.setup();
       render(<QueuePage />);
