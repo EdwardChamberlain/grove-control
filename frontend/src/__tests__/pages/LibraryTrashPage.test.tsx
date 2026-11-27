@@ -220,6 +220,24 @@ describe('LibraryTrashPage', () => {
       await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
     });
 
+    it('keeps a row action button from also toggling that row', async () => {
+      const restored: number[] = [];
+      useTwoItems([
+        http.post('*/library/trash/:id/restore', ({ params }) => {
+          restored.push(Number(params.id));
+          return HttpResponse.json({ status: 'success', id: Number(params.id) });
+        }),
+      ]);
+      render(<LibraryTrashPage />);
+
+      await screen.findByText('old_benchy.3mf');
+      await userEvent.click(screen.getByTestId('select-mode-toggle'));
+      await userEvent.click(screen.getAllByRole('button', { name: 'Restore' })[1]);
+
+      await waitFor(() => expect(restored).toEqual([2]));
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+    });
+
     it('selects a row by clicking it and confirms before deleting the selection', async () => {
       useTwoItems();
       render(<LibraryTrashPage />);

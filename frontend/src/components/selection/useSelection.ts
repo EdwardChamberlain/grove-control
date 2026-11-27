@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 
 export type SelectionId = string | number;
 
@@ -8,6 +8,21 @@ export interface UseSelectionOptions {
    * Defaults to true.
    */
   exitOnEscape?: boolean;
+  /**
+   * Selections that share a group name are mutually exclusive: turning one on
+   * turns the others off. For several selectable cards on one screen, which
+   * would otherwise each show their own bar in the same place.
+   */
+  exclusiveGroup?: string;
+}
+
+const EXCLUSIVE_EVENT = 'selection-exclusive';
+
+/** True when a dialog or full-screen overlay is showing (hidden ones, like the compact drawer backdrop, don't count). */
+function isOverlayOpen(): boolean {
+  return Array.from(
+    document.querySelectorAll('[role="dialog"], [aria-modal="true"], .fixed.inset-0'),
+  ).some((el) => el.getAttribute('aria-hidden') !== 'true' && !el.classList.contains('pointer-events-none'));
 }
 
 export interface SelectionState<T extends SelectionId> {
@@ -43,7 +58,8 @@ export interface SelectionState<T extends SelectionId> {
 export function useSelection<T extends SelectionId = number>(
   options: UseSelectionOptions = {},
 ): SelectionState<T> {
-  const { exitOnEscape = true } = options;
+  const { exitOnEscape = true, exclusiveGroup } = options;
+  const instanceId = useId();
   const [mode, setMode] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<T>>(() => new Set<T>());
 
@@ -97,12 +113,27 @@ export function useSelection<T extends SelectionId = number>(
       // dialog only closes the dialog; neither should throw the selection away.
       const target = e.target as HTMLElement | null;
       if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
-      if (document.querySelector('[role="dialog"], [aria-modal="true"], .fixed.inset-0')) return;
+      if (isOverlayOpen()) return;
       exit();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [exitOnEscape, active, exit]);
+
+  useEffect(() => {
+    if (!exclusiveGroup) return;
+    const onOtherActive = (e: Event) => {
+      const detail = (e as CustomEvent<{ group: string; id: string }>).detail;
+      if (detail.group === exclusiveGroup && detail.id !== instanceId) exit();
+    };
+    window.addEventListener(EXCLUSIVE_EVENT, onOtherActive);
+    return () => window.removeEventListener(EXCLUSIVE_EVENT, onOtherActive);
+  }, [exclusiveGroup, instanceId, exit]);
+
+  useEffect(() => {
+    if (!exclusiveGroup || !active) return;
+    window.dispatchEvent(new CustomEvent(EXCLUSIVE_EVENT, { detail: { group: exclusiveGroup, id: instanceId } }));
+  }, [exclusiveGroup, active, instanceId]);
 
   return useMemo(
     () => ({

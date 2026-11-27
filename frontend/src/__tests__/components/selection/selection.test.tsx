@@ -108,6 +108,18 @@ describe('useSelection Escape handling', () => {
     expect(result.current.active).toBe(false);
   });
 
+  it('still exits when the only overlay is a hidden one, like the compact drawer backdrop', () => {
+    const hidden = document.createElement('div');
+    hidden.className = 'fixed inset-0 pointer-events-none opacity-0';
+    hidden.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(hidden);
+    const { result } = renderHook(() => useSelection<number>());
+    act(() => result.current.add([1]));
+    press();
+    expect(result.current.active).toBe(false);
+    hidden.remove();
+  });
+
   it('ignores an Escape another handler already used', () => {
     const { result } = renderHook(() => useSelection<number>());
     act(() => result.current.add([1]));
@@ -196,6 +208,26 @@ describe('SelectionBar', () => {
     unmount();
   });
 
+  it('keeps the padding until the last of several bars is gone', () => {
+    const view = render(
+      <main data-testid="page" style={{ paddingBottom: '1rem' }}>
+        <SelectionBar count={1} onClose={() => {}} />
+        <SelectionBar count={2} onClose={() => {}} />
+      </main>,
+    );
+    expect(screen.getByTestId('page').style.paddingBottom).toBe('7rem');
+
+    view.rerender(
+      <main data-testid="page" style={{ paddingBottom: '1rem' }}>
+        <SelectionBar count={2} onClose={() => {}} />
+      </main>,
+    );
+    expect(screen.getByTestId('page').style.paddingBottom).toBe('7rem');
+
+    view.rerender(<main data-testid="page" style={{ paddingBottom: '1rem' }} />);
+    expect(screen.getByTestId('page').style.paddingBottom).toBe('1rem');
+  });
+
   it('does not reserve space when told not to', () => {
     render(
       <main data-testid="page">
@@ -208,5 +240,22 @@ describe('SelectionBar', () => {
   it('accepts a custom count label and renders without actions', () => {
     render(<SelectionBar count={1} onClose={() => {}} countLabel="One thing" />);
     expect(screen.getByText('One thing')).toBeInTheDocument();
+  });
+});
+
+describe('useSelection exclusive groups', () => {
+  it('turns the other selection in the group off when one turns on', () => {
+    const a = renderHook(() => useSelection<number>({ exclusiveGroup: 'cards' }));
+    const b = renderHook(() => useSelection<number>({ exclusiveGroup: 'cards' }));
+    const other = renderHook(() => useSelection<number>({ exclusiveGroup: 'elsewhere' }));
+    act(() => other.result.current.add([9]));
+    act(() => a.result.current.add([1]));
+    expect(a.result.current.active).toBe(true);
+
+    act(() => b.result.current.add([2]));
+    expect(b.result.current.active).toBe(true);
+    expect(a.result.current.active).toBe(false);
+    expect(a.result.current.count).toBe(0);
+    expect(other.result.current.active).toBe(true);
   });
 });

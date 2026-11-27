@@ -1,5 +1,3 @@
-import { SelectModeToggle, SelectionBar, SelectionCheckbox, useSelection } from './selection';
-import { Button } from './Button';
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Palette, Plus, Trash2, RotateCcw, Pencil, Check, X, Search, Download, Upload, Cloud } from 'lucide-react';
@@ -12,6 +10,8 @@ import { ConfirmModal } from './ConfirmModal';
 import { FilamentSwatch } from './FilamentSwatch';
 import { FILAMENT_EFFECT_OPTIONS } from './filamentSwatchHelpers';
 import { ReactSelect } from './ToolbarControls';
+import { SelectModeToggle, SelectionBar, SelectionCheckbox, useSelection } from './selection';
+import { Button } from './Button';
 
 export function ColorCatalogSettings() {
   const { t } = useTranslation();
@@ -34,7 +34,7 @@ export function ColorCatalogSettings() {
   const [saving, setSaving] = useState(false);
 
   // Selection state
-  const selection = useSelection<number>();
+  const selection = useSelection<number>({ exclusiveGroup: 'settings-filament-catalogs' });
   const { selected: selectedIds, active: selectionMode } = selection;
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
@@ -679,7 +679,6 @@ export function ColorCatalogSettings() {
         />
       )}
 
-      {/* Bulk delete confirmation */}
       {selectionMode && (
         <SelectionBar count={selectedIds.size} onClose={selection.exit}>
           <Button variant="secondary" size="sm" onClick={toggleSelectAll}>
@@ -697,6 +696,7 @@ export function ColorCatalogSettings() {
         </SelectionBar>
       )}
 
+      {/* Bulk delete confirmation */}
       {showBulkDeleteConfirm && (
         <ConfirmModal
           title={t('settings.colorCatalog.deleteSelected')}

@@ -1,5 +1,3 @@
-import { SelectModeToggle, SelectionBar, SelectionCheckbox, useSelection } from './selection';
-import { Button } from './Button';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Database, Plus, Trash2, RotateCcw, Pencil, Check, X, Search, Download, Upload } from 'lucide-react';
@@ -9,6 +7,8 @@ import type { SpoolCatalogEntry } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { Card, CardHeader, CardContent } from './Card';
 import { ConfirmModal } from './ConfirmModal';
+import { SelectModeToggle, SelectionBar, SelectionCheckbox, useSelection } from './selection';
+import { Button } from './Button';
 
 export function SpoolCatalogSettings() {
   const { t } = useTranslation();
@@ -31,7 +31,7 @@ export function SpoolCatalogSettings() {
   const [saving, setSaving] = useState(false);
 
   // Selection state
-  const selection = useSelection<number>();
+  const selection = useSelection<number>({ exclusiveGroup: 'settings-filament-catalogs' });
   const { selected: selectedIds, active: selectionMode } = selection;
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 

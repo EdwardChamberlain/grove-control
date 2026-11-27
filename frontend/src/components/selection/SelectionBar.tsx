@@ -18,6 +18,9 @@ interface SelectionBarProps {
   reserveSpace?: boolean;
 }
 
+/** Bars currently reserving space on each scroll container, with its padding from before the first one. */
+const reservations = new WeakMap<HTMLElement, { count: number; previous: string }>();
+
 /** Vertical divider used between groups of controls in the bar. */
 export function SelectionBarDivider() {
   return <div className="w-px h-6 bg-bambu-dark-tertiary" />;
@@ -36,10 +39,16 @@ export function SelectionBar({ count, onClose, children, countLabel, className =
     if (!reserveSpace) return;
     const main = barRef.current?.closest('main');
     if (!main) return;
-    const previous = main.style.paddingBottom;
+    const entry = reservations.get(main) ?? { count: 0, previous: main.style.paddingBottom };
+    entry.count += 1;
+    reservations.set(main, entry);
     main.style.paddingBottom = '7rem';
     return () => {
-      main.style.paddingBottom = previous;
+      entry.count -= 1;
+      if (entry.count === 0) {
+        main.style.paddingBottom = entry.previous;
+        reservations.delete(main);
+      }
     };
   }, [reserveSpace]);
 

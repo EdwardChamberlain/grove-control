@@ -269,7 +269,7 @@ export function LibraryTrashPage() {
                   <tr
                     key={item.id}
                     className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${selectionMode ? 'cursor-pointer' : ''} ${selected.has(item.id) ? 'bg-bambu-green/10' : ''}`}
-                    onClick={selectionMode ? () => toggleOne(item.id) : undefined}
+                    onClick={selectionMode ? (e) => { if (!(e.target as HTMLElement).closest('button, a')) toggleOne(item.id); } : undefined}
                   >
                     {selectionMode && (
                       <td className="px-3 py-2">

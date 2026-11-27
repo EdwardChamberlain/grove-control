@@ -678,7 +678,10 @@ function ArchiveCard({
       data-archive-id={archive.id}
       className={`relative flex flex-col group ${isSelected ? 'ring-2 ring-bambu-green' : ''} ${selectionMode ? 'cursor-pointer' : ''}`}
       style={isHighlighted ? { outline: '4px solid #facc15', outlineOffset: '2px' } : undefined}
-      onClick={selectionMode ? () => onSelect(archive.id) : undefined}
+      onClick={selectionMode ? (e) => {
+        // Buttons and links on the card keep their own action.
+        if (!(e.target as HTMLElement).closest('button, a, input, label')) onSelect(archive.id);
+      } : undefined}
     >
       {/* Selection checkbox */}
       {selectionMode && (
@@ -1843,7 +1846,11 @@ export function ArchivesPage() {
 
   // The log and the grid list different things, so a selection made in one means nothing in the other.
   const inLogView = viewMode === 'log';
-  const { clear: clearSelectedIds } = selection;
+  const { clear: clearSelectedIds, exit: exitSelectionMode } = selection;
+  // The calendar has no item selectors, so selecting there would act on items the user cannot see.
+  useEffect(() => {
+    if (viewMode === 'calendar') exitSelectionMode();
+  }, [viewMode, exitSelectionMode]);
   useEffect(() => {
     clearSelectedIds();
   }, [inLogView, clearSelectedIds]);
@@ -2071,7 +2078,7 @@ export function ArchivesPage() {
         onManageTags={() => setShowTagManagement(true)}
         onClearLog={() => setShowClearLogConfirm(true)}
         clearLogDisabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
-        beforeViewSwitch={<SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />}
+        beforeViewSwitch={viewMode !== 'calendar' ? <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} /> : null}
       />
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}

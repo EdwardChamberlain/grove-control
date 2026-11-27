@@ -1,4 +1,3 @@
-import { SelectModeToggle, SelectionBar, SelectionBarDivider, SelectionCheckbox, useSelection } from './selection';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +31,7 @@ import type { PlateMetadata } from '../types/plates';
 import { useToast } from '../contexts/ToastContext';
 import { formatFileSize } from '../utils/file';
 import { ReactSelect } from './ToolbarControls';
+import { SelectModeToggle, SelectionBar, SelectionBarDivider, SelectionCheckbox, useSelection } from './selection';
 
 interface FileManagerModalProps {
   printerId: number;

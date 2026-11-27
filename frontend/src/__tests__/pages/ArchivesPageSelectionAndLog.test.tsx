@@ -98,6 +98,36 @@ describe('ArchivesPage bulk selection', () => {
     expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
 
+  it('keeps a button on a card from also toggling the card', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    const card = screen.getAllByText('Benchy')[0].closest('[data-archive-id]') as HTMLElement;
+    const menuButton = within(card).getAllByRole('button').find((b) => b.getAttribute('role') !== 'checkbox') as HTMLElement;
+    await user.click(menuButton);
+
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
+  it('has no select toggle in the calendar view and leaves select mode when switching to it', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Calendar view' }));
+    expect(screen.queryByTestId('select-mode-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+  });
+
   it('Escape and Close leave selection mode', async () => {
     setView('grid');
     useArchives();
