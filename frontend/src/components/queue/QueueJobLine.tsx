@@ -384,7 +384,8 @@ export function QueueJobLine({
           <div
             className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t ${footerPad} ${tone.footer}`}
             // Covers the whole strip, as the stand-alone filament-short strip did; the Start button keeps its own title.
-            title={showFilamentShort ? t('queue.filamentShort.rowTooltip') : undefined}
+            // With a waiting reason in the strip it moves to the filament line, so it does not describe the wrong text.
+            title={showFilamentShort && !showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined}
           >
             {showWaitingReason || showFilamentShort ? (
               <span className="flex min-w-0 flex-1 flex-col gap-1">
@@ -395,7 +396,10 @@ export function QueueJobLine({
                   </span>
                 )}
                 {showFilamentShort && (
-                  <span className="flex items-start gap-2">
+                  <span
+                    className="flex items-start gap-2"
+                    title={showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined}
+                  >
                     <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
                     <span>{t('queue.filamentShort.rowBadge')}</span>
                   </span>

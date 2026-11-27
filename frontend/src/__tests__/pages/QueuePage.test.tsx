@@ -1069,6 +1069,10 @@ describe('QueuePage', () => {
       const footer = reason.closest('div.border-t');
       expect(footer).not.toBeNull();
       expect(footer).toContainElement(message);
+      // The filament tooltip stays on the filament line, not over the waiting reason.
+      expect(footer).not.toHaveAttribute('title');
+      expect(message.closest('span[title]')).toHaveAttribute('title', expect.stringMatching(/dispatch scheduler flagged this item/i));
+      expect(reason.closest('span[title]')).toBeNull();
       expect(footer!.querySelector('button[title="Start Print"], button[title="You do not have permission to start prints"]')).not.toBeNull();
     });
 
