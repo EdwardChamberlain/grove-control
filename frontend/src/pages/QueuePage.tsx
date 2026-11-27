@@ -329,6 +329,7 @@ function SortableQueueItem({
   printerState,
   onMoveUp,
   onMoveDown,
+  reorderLocked = false,
   t,
 }: {
   item: PrintQueueItem;
@@ -348,6 +349,8 @@ function SortableQueueItem({
   printerState?: string | null;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  /** True while a search shows only some jobs: no drag handle, as a drop would be ignored. */
+  reorderLocked?: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   // Fetch printer status every 30 seconds while printing to monitor progress
@@ -381,6 +384,7 @@ function SortableQueueItem({
   const plates = platesData?.plates ?? [];
 
   const canReorder =
+    !reorderLocked &&
     hasPermission('queue:reorder') &&
     canModify('queue', 'update', item.created_by_id);
   const {
@@ -617,6 +621,7 @@ interface QueueRowRenderProps {
   t: (key: string, options?: Record<string, unknown>) => string;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  reorderLocked?: boolean;
 }
 
 function QueueRowRender({
@@ -632,6 +637,7 @@ function QueueRowRender({
   t,
   onMoveUp,
   onMoveDown,
+  reorderLocked,
 }: QueueRowRenderProps) {
   return (
     <SortableQueueItem
@@ -648,6 +654,7 @@ function QueueRowRender({
       canModify={canModify}
       onMoveUp={onMoveUp}
       onMoveDown={onMoveDown}
+      reorderLocked={reorderLocked}
       t={t}
     />
   );
@@ -1018,10 +1025,11 @@ export function QueuePage() {
 
   const bulkUpdateMutation = useMutation({
     mutationFn: (data: PrintQueueBulkUpdate) => api.bulkUpdateQueue(data),
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      setSelectedItems([]);
+      // Only the jobs acted on; selections a filter hides are kept.
+      setSelectedItems((prev) => prev.filter((id) => !variables.item_ids.includes(id)));
       setShowBulkEditModal(false);
       showToast(result.message);
     },
@@ -1035,10 +1043,11 @@ export function QueuePage() {
       }
       return ids.length;
     },
-    onSuccess: (count) => {
+    onSuccess: (count, ids) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      setSelectedItems([]);
+      // Only the jobs cancelled; selections a filter hides are kept.
+      setSelectedItems((prev) => prev.filter((id) => !ids.includes(id)));
       showToast(t('queue.toast.bulkCancelled', { count }));
     },
     onError: () => showToast(t('queue.toast.bulkCancelFailed'), 'error'),
@@ -2012,6 +2021,7 @@ export function QueuePage() {
                           hasPermission={hasPermission}
                           canModify={canModify}
                           t={t}
+                          reorderLocked={!!searchTerm}
                           {...rowMovers(groupedRows, index)}
                         />
                       ))}
@@ -2045,6 +2055,7 @@ export function QueuePage() {
                                   hasPermission={hasPermission}
                                   canModify={canModify}
                                   t={t}
+                                  reorderLocked={!!searchTerm}
                                   {...rowMovers(bucket.rows, index)}
                                 />
                               ))}

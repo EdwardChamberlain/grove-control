@@ -748,9 +748,11 @@ describe('QueuePage', () => {
       await user.click(screen.getByRole('button', { name: 'Cancel Selected' }));
       await waitFor(() => expect(cancelled).toEqual([11]));
 
-      // The hidden selection comes back when the search is cleared.
+      // Only the cancelled job leaves the selection; the hidden one is kept and
+      // comes back when the search is cleared.
       await user.clear(screen.getByRole('searchbox'));
-      await waitFor(() => expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument());
+      expect(await screen.findByText('1 selected')).toBeInTheDocument();
+      expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument();
     });
 
     it('does not count a selected job that has left the pending list as hidden', async () => {
@@ -795,9 +797,11 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
       await screen.findByText('Benchy');
+      expect(screen.getAllByTitle(/Drag to reorder/).length).toBeGreaterThan(0);
       await type(user, 'e');
       await waitFor(() => expect(screen.queryByText('Plain')).not.toBeInTheDocument());
       expect(screen.getByText('Gear')).toBeInTheDocument();
+      expect(screen.queryAllByTitle(/Drag to reorder/)).toHaveLength(0);
       act(() => dnd.onDragEnd?.({ active: { id: 12 }, over: { id: 11 } }));
       await new Promise((r) => setTimeout(r, 50));
       expect(reorders).toEqual([]);
