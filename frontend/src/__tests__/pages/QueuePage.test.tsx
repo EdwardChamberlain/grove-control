@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { QueuePage } from '../../pages/QueuePage';
@@ -737,7 +737,8 @@ describe('QueuePage', () => {
       await screen.findByText('Benchy');
 
       // Select both pending jobs, then narrow the search to one of them.
-      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
       expect(screen.getByText('2 selected')).toBeInTheDocument();
       await type(user, 'alpha');
 
@@ -767,7 +768,8 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
       await screen.findByText('Benchy');
-      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
       expect(screen.getByText('2 selected')).toBeInTheDocument();
 
       // Benchy starts printing elsewhere; the page picks that up on refocus.
@@ -811,7 +813,8 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
       await screen.findByText('Benchy');
-      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
       await type(user, 'alpha');
 
       await user.click(screen.getByRole('button', { name: 'Deselect All' }));
