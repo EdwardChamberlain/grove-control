@@ -58,6 +58,8 @@ export function SelectionBar({ count, onClose, children, countLabel, className =
       role="toolbar"
       aria-label={t('selection.barLabel')}
       data-testid="selection-bar"
+      // The bar can sit inside a dialog backdrop that closes on click; its buttons must not reach it.
+      onClick={(e) => e.stopPropagation()}
       className={`fixed bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] md:w-auto max-w-[calc(100%-2rem)] bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl px-4 py-3 flex items-center justify-center gap-3 flex-wrap ${className}`}
     >
       <Button

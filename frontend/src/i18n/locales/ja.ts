@@ -52,6 +52,8 @@ export default {
     selectItem: '項目を選択',
     deselectItem: '項目の選択を解除',
     barLabel: '選択操作',
+    selectAll: 'すべて選択',
+    deselectAll: 'すべて選択解除',
   },
 
   // Common

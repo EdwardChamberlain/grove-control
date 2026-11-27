@@ -650,12 +650,12 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
             selectedFiles.size > 0 ? (
               <Button variant="secondary" size="sm" onClick={deselectAllFiles}>
                 <MinusSquare className="w-4 h-4" />
-                Deselect All
+                {t('selection.deselectAll')}
               </Button>
             ) : (
               <Button variant="secondary" size="sm" onClick={selectAllFiles}>
                 <CheckSquare className="w-4 h-4" />
-                Select All
+                {t('selection.selectAll')}
               </Button>
             )
           )}
@@ -674,7 +674,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
             ) : (
               <>
                 <Download className="w-4 h-4" />
-                Download
+                {t('common.download')}
               </>
             )}
           </Button>

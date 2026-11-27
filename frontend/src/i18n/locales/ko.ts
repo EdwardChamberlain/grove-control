@@ -49,6 +49,8 @@ export default {
     selectItem: '항목 선택',
     deselectItem: '항목 선택 해제',
     barLabel: '선택 작업',
+    selectAll: '모두 선택',
+    deselectAll: '모두 선택 해제',
   },
 
   // Common

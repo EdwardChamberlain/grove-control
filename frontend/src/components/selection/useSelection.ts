@@ -18,6 +18,10 @@ export interface UseSelectionOptions {
 
 const EXCLUSIVE_EVENT = 'selection-exclusive';
 
+/** Fields where Escape belongs to the field. Checkboxes, radios and buttons are not text entry. */
+const TEXT_ENTRY =
+  'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]), textarea, select, [contenteditable="true"]';
+
 /** True when a dialog or full-screen overlay is showing (hidden ones, like the compact drawer backdrop, don't count). */
 function isOverlayOpen(): boolean {
   return Array.from(
@@ -112,7 +116,7 @@ export function useSelection<T extends SelectionId = number>(
       // Escape in a text field only leaves the field, and Escape in an open
       // dialog only closes the dialog; neither should throw the selection away.
       const target = e.target as HTMLElement | null;
-      if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      if (target?.closest?.(TEXT_ENTRY)) return;
       if (isOverlayOpen()) return;
       exit();
     };

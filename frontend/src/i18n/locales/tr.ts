@@ -52,6 +52,8 @@ export default {
     selectItem: 'Öğeyi seç',
     deselectItem: 'Öğe seçimini kaldır',
     barLabel: 'Seçim eylemleri',
+    selectAll: 'Tümünü seç',
+    deselectAll: 'Tümünün seçimini kaldır',
   },
 
   // Common

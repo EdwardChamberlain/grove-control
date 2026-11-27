@@ -282,8 +282,8 @@ describe('select mode', () => {
 
     if (view === 'grid') {
       // A click anywhere on the card toggles it while select mode is on.
-      await user.click(cardOf('benchy.gcode.3mf').querySelector('[aria-hidden="true"].cursor-pointer') as HTMLElement);
-      await user.click(cardOf('hook.stl').querySelector('[aria-hidden="true"].cursor-pointer') as HTMLElement);
+      await user.click(screen.getByText('benchy.gcode.3mf'));
+      await user.click(screen.getByText('hook.stl'));
     } else {
       await user.click(screen.getByText('benchy.gcode.3mf'));
       await user.click(screen.getByRole('checkbox', { name: 'Select hook.stl' }));
@@ -295,7 +295,7 @@ describe('select mode', () => {
     await user.click(lastButton(/Delete/));
 
     await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/api/v1/library/bulk-delete' })));
-    await waitFor(() => expect(screen.getByText('0 selected')).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
   });
 
   it('disables Move, Tag and Delete until a file is selected', async () => {
@@ -312,6 +312,17 @@ describe('select mode', () => {
     expect(bar.getByRole('button', { name: 'Delete' })).toBeEnabled();
   });
 
+  it('keeps a card button working in select mode without toggling the card', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('select-mode-toggle'));
+
+    await user.click(within(cardOf('benchy.gcode.3mf')).getByRole('button', { name: 'Print' }));
+
+    expect(await screen.findByRole('heading', { name: 'Print' })).toBeInTheDocument();
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
   it('deletes a single selected file from the bar', async () => {
     const user = userEvent.setup();
     await ready();
@@ -323,7 +334,6 @@ describe('select mode', () => {
     await user.click(lastButton(/Delete/));
 
     await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'DELETE', path: '/api/v1/library/files/3' })));
-    await waitFor(() => expect(screen.getByText('0 selected')).toBeInTheDocument());
   });
 
   it('opens Move and Tag for the selection from the bar', async () => {

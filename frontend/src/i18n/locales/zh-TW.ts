@@ -52,6 +52,8 @@ export default {
     selectItem: '選取項目',
     deselectItem: '取消選取項目',
     barLabel: '選取操作',
+    selectAll: '全選',
+    deselectAll: '取消全選',
   },
 
   // Common

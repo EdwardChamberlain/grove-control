@@ -52,6 +52,8 @@ export default {
     selectItem: 'Element auswählen',
     deselectItem: 'Auswahl aufheben',
     barLabel: 'Auswahlaktionen',
+    selectAll: 'Alle auswählen',
+    deselectAll: 'Alle abwählen',
   },
 
   // Common

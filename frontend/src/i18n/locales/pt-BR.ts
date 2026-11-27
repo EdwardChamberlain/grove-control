@@ -52,6 +52,8 @@ export default {
     selectItem: 'Selecionar item',
     deselectItem: 'Desmarcar item',
     barLabel: 'Ações de seleção',
+    selectAll: 'Selecionar tudo',
+    deselectAll: 'Desmarcar tudo',
   },
 
   // Common

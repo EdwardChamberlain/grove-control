@@ -120,6 +120,17 @@ describe('useSelection Escape handling', () => {
     hidden.remove();
   });
 
+  it('still exits when focus is on a checkbox rather than a text field', () => {
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    document.body.appendChild(box);
+    const { result } = renderHook(() => useSelection<number>());
+    act(() => result.current.add([1]));
+    press(box);
+    expect(result.current.active).toBe(false);
+    box.remove();
+  });
+
   it('ignores an Escape another handler already used', () => {
     const { result } = renderHook(() => useSelection<number>());
     act(() => result.current.add([1]));
@@ -196,6 +207,23 @@ describe('SelectionBar', () => {
     expect(screen.getByRole('button', { name: 'Do it' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Exit selection' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps clicks on the bar from reaching a clickable parent such as a dialog backdrop', async () => {
+    const onBackdrop = vi.fn();
+    const onAction = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <div onClick={onBackdrop}>
+        <SelectionBar count={1} onClose={() => {}}>
+          <button onClick={onAction}>Do it</button>
+        </SelectionBar>
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Do it' }));
+    await user.click(screen.getByRole('button', { name: 'Exit selection' }));
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(onBackdrop).not.toHaveBeenCalled();
   });
 
   it('reserves bottom space on the page scroll container while shown and restores it', () => {

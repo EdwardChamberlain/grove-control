@@ -52,6 +52,8 @@ export default {
     selectItem: 'Sélectionner l\'élément',
     deselectItem: 'Désélectionner l\'élément',
     barLabel: 'Actions de sélection',
+    selectAll: 'Tout sélectionner',
+    deselectAll: 'Tout désélectionner',
   },
 
   // Common

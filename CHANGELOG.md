@@ -10,7 +10,9 @@
   icon, the bar's close button and Esc leave select mode. This covers Printers,
   History, K-Profiles, Files, Queue, Inventory (table view), Files → Trash, the
   Spool and Color catalogs, and the on-printer file browser (#394). Files cards
-  and rows, and Queue jobs, are no longer selectable outside select mode.
+  and rows, and Queue jobs, are no longer selectable outside select mode. On
+  the Files page the search and filter bar no longer has its own panel
+  background, and the search box now takes the full free width.
 - Queue: the Timeline now shows a job that targets a printer model on the
   printer it would be dispatched to (#383). Three one-hour jobs for "Any P1S"
   with two idle P1S printers show two running side by side and one after, and

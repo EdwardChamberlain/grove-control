@@ -884,7 +884,11 @@ function FileCard({ file, isSelected, isHighlighted = false, selectionMode, onSe
           : isHighlighted
           ? 'border-bambu-green ring-2 ring-bambu-green/70'
           : 'border-bambu-dark-tertiary hover:border-bambu-green/50'
-      }`}
+      } ${selectionMode ? 'cursor-pointer' : ''}`}
+      // In select mode a click on the card toggles it; its own buttons and links keep their action.
+      onClick={selectionMode ? (e) => {
+        if (!(e.target as HTMLElement).closest('button, a, input, label')) onSelect(file.id);
+      } : undefined}
     >
       {/* Thumbnail */}
       <div className="aspect-square bg-bambu-dark flex items-center justify-center overflow-hidden">
@@ -1006,21 +1010,13 @@ function FileCard({ file, isSelected, isHighlighted = false, selectionMode, onSe
       />
       </div>
 
-      {/* Select mode: a click anywhere on the card toggles it, with the checkbox over the corner */}
       {selectionMode && (
-        <>
-          <div
-            className="absolute inset-0 z-10 cursor-pointer"
-            onClick={() => onSelect(file.id)}
-            aria-hidden="true"
-          />
-          <SelectionCheckbox
-            variant="overlay"
-            checked={isSelected}
-            onToggle={() => onSelect(file.id)}
-            label={t(isSelected ? 'fileManager.deselectFile' : 'fileManager.selectFile', { name: file.print_name || file.filename })}
-          />
-        </>
+        <SelectionCheckbox
+          variant="overlay"
+          checked={isSelected}
+          onToggle={() => onSelect(file.id)}
+          label={t(isSelected ? 'fileManager.deselectFile' : 'fileManager.selectFile', { name: file.print_name || file.filename })}
+        />
       )}
     </div>
   );
@@ -1482,7 +1478,7 @@ export function FileManagerPage() {
     onSuccess: (group) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       showToast(t('fileManager.variants.grouped', { count: group.members.length }), 'success');
-      selection.clear();
+      selection.exit();
     },
     onError: (error: Error) => showToast(error.message, 'error'),
   });
@@ -1495,7 +1491,7 @@ export function FileManagerPage() {
       queryClient.invalidateQueries({ queryKey: ['library-stats'] });
       queryClient.invalidateQueries({ queryKey: ['library-trash-count'] });
       showToast(t('fileManager.toast.filesDeleted', { count: fileIds.length }), 'success');
-      selection.clear();
+      selection.exit();
       setDeleteConfirm(null);
     },
     onError: (error: Error) => {
@@ -1510,7 +1506,8 @@ export function FileManagerPage() {
     onSuccess: (_, { fileIds }) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
-      selection.remove(fileIds);
+      if (selectedFiles.every((id) => fileIds.includes(id))) selection.exit();
+      else selection.remove(fileIds);
       setShowMoveModal(false);
       setSingleMoveFileId(null);
       showToast(t('fileManager.toast.filesMoved'), 'success');
@@ -2811,7 +2808,7 @@ export function FileManagerPage() {
           onClose={() => setPrintFile(null)}
           onSuccess={() => {
             setPrintFile(null);
-            selection.clear();
+            selection.exit();
             queryClient.invalidateQueries({ queryKey: ['library-files'] });
             queryClient.invalidateQueries({ queryKey: ['queue'] });
             queryClient.invalidateQueries({ queryKey: ['archives'] });

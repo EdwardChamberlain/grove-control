@@ -1646,7 +1646,7 @@ export function ArchivesPage() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['archives'] });
-      selection.clear();
+      selection.exit();
       showToast(`${count} archive${count !== 1 ? 's' : ''} deleted`);
     },
     onError: () => {

@@ -332,6 +332,15 @@ describe('FileManagerModal', () => {
       });
     });
 
+    it('does not close the dialog when a bar button is clicked', async () => {
+      await open();
+
+      fireEvent.click(screen.getByRole('button', { name: /Select All/ }));
+      fireEvent.click(within(screen.getByTestId('selection-bar')).getByRole('button', { name: 'Exit selection' }));
+
+      expect(mockOnClose).not.toHaveBeenCalled();
+    });
+
     it('hides the selection bar while the delete confirmation is open', async () => {
       await open();
 

@@ -1973,7 +1973,7 @@ export function QueuePage() {
                           setConfirmAction={setConfirmAction}
                           startMutation={startMutation}
                           selectedItems={selectedItems}
- selectionActive={selectionActive}
+                          selectionActive={selectionActive}
                           handleToggleSelect={handleToggleSelect}
                           timeFormat={timeFormat}
                           hasPermission={hasPermission}
@@ -2008,7 +2008,7 @@ export function QueuePage() {
                                   setConfirmAction={setConfirmAction}
                                   startMutation={startMutation}
                                   selectedItems={selectedItems}
- selectionActive={selectionActive}
+                                  selectionActive={selectionActive}
                                   handleToggleSelect={handleToggleSelect}
                                   timeFormat={timeFormat}
                                   hasPermission={hasPermission}
