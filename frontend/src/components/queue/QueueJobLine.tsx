@@ -148,34 +148,6 @@ function thumbnailUrl(item: QueueJobLineItem): string | null {
 }
 
 /**
- * One alert line in a footer strip: an icon beside text.
- *
- * The icon sits in a box one text line tall (`h-6` at kiosk size, `h-4` otherwise), so it stays on the first
- * line when the text wraps. Two small offsets then line the pair up by eye: at the compact size the glyphs sit a
- * little above the middle of their line box, so the icon is lifted by 0.1em to meet them (the kiosk's taller line
- * box needs no lift), and the whole line is dropped by 1px so the pair is centred in the strip. Both were tuned
- * against rendered screenshots.
- */
-function FooterAlertLine({
-  kiosk,
-  title,
-  children,
-}: {
-  kiosk: boolean;
-  title?: string;
-  children: ReactNode;
-}) {
-  return (
-    <span className="flex translate-y-px items-start gap-2" title={title}>
-      <span className={`flex flex-shrink-0 items-center ${kiosk ? 'h-6' : 'h-4 -translate-y-[0.1em]'}`}>
-        <AlertCircle className={kiosk ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
-      </span>
-      <span>{children}</span>
-    </span>
-  );
-}
-
-/**
  * One job in a print queue: a full-height status gutter, the job's details and
  * a stack of footers (progress, waiting reason, pause reason, heat soak, errors).
  *
@@ -266,6 +238,21 @@ export function QueueJobLine({
   const footerPad = k ? 'px-[18px] py-1.5 text-base' : 'px-4 py-1.5 text-xs';
   const progressPad = k ? 'px-[18px] py-2 text-base' : 'px-4 py-2 text-xs';
   const footerIcon = k ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  // Height of one footer text line (text-base / text-xs, set by footerPad above). The alert icon sits in a box this
+  // tall so it stays on the first line when the text wraps.
+  const footerLineHeight = k ? 'h-6' : 'h-4';
+  // One alert line in a footer strip: an icon beside text. Two whole-pixel offsets line the pair up by eye, tuned
+  // against rendered screenshots: the icon is lifted 1px at the compact size, where the glyphs sit a little above
+  // the middle of their line box (the kiosk's taller line box needs no lift), and the whole line is dropped 1px so
+  // the pair is centred in the strip. Whole pixels keep the icon crisp on 1x displays.
+  const renderAlertLine = (text: ReactNode, title?: string) => (
+    <span className="flex translate-y-px items-start gap-2" title={title}>
+      <span className={`flex flex-shrink-0 items-center ${footerLineHeight} ${k ? '' : '-translate-y-px'}`}>
+        <AlertCircle className={footerIcon} />
+      </span>
+      <span>{text}</span>
+    </span>
+  );
 
   return (
     <div
@@ -417,17 +404,12 @@ export function QueueJobLine({
           >
             {showWaitingReason || showFilamentShort ? (
               <span className="flex min-w-0 flex-1 flex-col gap-1">
-                {showWaitingReason && (
-                  <FooterAlertLine kiosk={k}>{item.waiting_reason}</FooterAlertLine>
-                )}
-                {showFilamentShort && (
-                  <FooterAlertLine
-                    kiosk={k}
-                    title={showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined}
-                  >
-                    {t('queue.filamentShort.rowBadge')}
-                  </FooterAlertLine>
-                )}
+                {showWaitingReason && renderAlertLine(item.waiting_reason)}
+                {showFilamentShort &&
+                  renderAlertLine(
+                    t('queue.filamentShort.rowBadge'),
+                    showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined,
+                  )}
               </span>
             ) : (
               <span className="flex-1" />
@@ -449,7 +431,7 @@ export function QueueJobLine({
             className={`border-t ${QUEUE_TONES.waiting.footer} ${footerPad}`}
             title={t('queue.filamentShort.rowTooltip')}
           >
-            <FooterAlertLine kiosk={k}>{t('queue.filamentShort.rowBadge')}</FooterAlertLine>
+            {renderAlertLine(t('queue.filamentShort.rowBadge'))}
           </div>
         )}
 
