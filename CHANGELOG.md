@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Queue: a staged job that is short on filament now shows the "Insufficient
+  filament" message and the Start button on one footer line instead of two
+  stacked strips (#395).
 - Files: file cards are now selected only from their checkbox, so clicking a
   card no longer selects it by accident. A selected checkbox shows a tick
   instead of a dot, and printable files have a green **Print** button beside

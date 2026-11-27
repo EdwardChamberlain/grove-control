@@ -1020,6 +1020,62 @@ describe('QueuePage', () => {
       });
     });
 
+    it('puts the filament-short message and the Start button in one footer', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([shortItem])),
+      );
+
+      render(<QueuePage />);
+
+      const message = await screen.findByText(/Insufficient filament for the assigned spool/i);
+      const startButton = document.querySelector<HTMLButtonElement>('button[title="Start Print"], button[title="You do not have permission to start prints"]');
+      expect(startButton).not.toBeNull();
+
+      // Both sit in the same strip, so the job has a single footer border.
+      const footer = message.closest('div.border-t');
+      expect(footer).not.toBeNull();
+      expect(footer).toContainElement(startButton);
+      // The tooltip covers the whole strip, not just the message line.
+      expect(footer).toHaveAttribute('title', expect.stringMatching(/dispatch scheduler flagged this item/i));
+    });
+
+    it('keeps a stand-alone filament-short strip for a job with no staged footer', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([{ ...shortItem, manual_start: false, waiting_reason: null }]),
+        ),
+      );
+
+      render(<QueuePage />);
+
+      const message = await screen.findByText(/Insufficient filament for the assigned spool/i);
+      const strip = message.closest('div.border-t');
+      expect(strip).not.toBeNull();
+      expect(strip).toHaveAttribute('title', expect.stringMatching(/dispatch scheduler flagged this item/i));
+      expect(strip!.querySelector('button')).toBeNull();
+    });
+
+    it('shows the waiting reason and the filament-short message in one footer with the Start button', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([{ ...shortItem, waiting_reason: 'Waiting on PLA (Ash Gray)' }]),
+        ),
+      );
+
+      render(<QueuePage />);
+
+      const reason = await screen.findByText('Waiting on PLA (Ash Gray)');
+      const message = screen.getByText(/Insufficient filament for the assigned spool/i);
+      const footer = reason.closest('div.border-t');
+      expect(footer).not.toBeNull();
+      expect(footer).toContainElement(message);
+      // The filament tooltip stays on the filament line, not over the waiting reason.
+      expect(footer).not.toHaveAttribute('title');
+      expect(message.closest('span[title]')).toHaveAttribute('title', expect.stringMatching(/dispatch scheduler flagged this item/i));
+      expect(reason.closest('span[title]')).toBeNull();
+      expect(footer!.querySelector('button[title="Start Print"], button[title="You do not have permission to start prints"]')).not.toBeNull();
+    });
+
     it('opens the Print Anyway modal when ▶ returns 409 and retries with skip_filament_check', async () => {
       let secondCallSkippedCheck: boolean | null = null;
       let attempts = 0;

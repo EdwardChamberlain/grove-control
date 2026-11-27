@@ -207,6 +207,10 @@ export function QueueJobLine({
   const showStartButton = isPending && item.manual_start;
   const showWaitingReason = isPending && !!item.waiting_reason;
   const showStagedFooter = (showStartButton && !!startAction) || showWaitingReason;
+  // Filament-short flag from the dispatch pre-flight (#1496). It shares the staged
+  // footer with the Start button when there is one, so a staged job that is also
+  // short on filament gets a single strip rather than two stacked ones.
+  const showFilamentShort = !!item.filament_short && isPending;
 
   const printerLabel =
     (item.variants?.length ?? 0) > 1 && !item.printer_id
@@ -377,17 +381,35 @@ export function QueueJobLine({
         )}
 
         {showStagedFooter && (
-          <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t ${footerPad} ${tone.footer}`}>
-            {showWaitingReason ? (
-              <span className="flex min-w-0 flex-1 items-start gap-2">
-                <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
-                <span>{item.waiting_reason}</span>
+          <div
+            className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t ${footerPad} ${tone.footer}`}
+            // Covers the whole strip, as the stand-alone filament-short strip did; the Start button keeps its own title.
+            // With a waiting reason in the strip it moves to the filament line, so it does not describe the wrong text.
+            title={showFilamentShort && !showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined}
+          >
+            {showWaitingReason || showFilamentShort ? (
+              <span className="flex min-w-0 flex-1 flex-col gap-1">
+                {showWaitingReason && (
+                  <span className="flex items-start gap-2">
+                    <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
+                    <span>{item.waiting_reason}</span>
+                  </span>
+                )}
+                {showFilamentShort && (
+                  <span
+                    className="flex items-start gap-2"
+                    title={showWaitingReason ? t('queue.filamentShort.rowTooltip') : undefined}
+                  >
+                    <AlertCircle className={`mt-0.5 flex-shrink-0 ${footerIcon}`} />
+                    <span>{t('queue.filamentShort.rowBadge')}</span>
+                  </span>
+                )}
               </span>
             ) : (
               <span className="flex-1" />
             )}
-            {/* The gutter already says Staged unless a waiting reason took its place. */}
-            {item.manual_start && showWaitingReason && (
+            {/* The gutter already says Staged unless a waiting reason or filament flag took its place. */}
+            {item.manual_start && (showWaitingReason || showFilamentShort) && (
               <span className="flex items-center gap-1.5">
                 <Hand className="h-3 w-3" />
                 {t('queue.badges.staged')}
@@ -397,8 +419,8 @@ export function QueueJobLine({
           </div>
         )}
 
-        {/* Filament-short flag from the dispatch pre-flight (#1496). */}
-        {item.filament_short && item.status === 'pending' && (
+        {/* Filament-short flag on its own strip when no staged footer can carry it. */}
+        {showFilamentShort && !showStagedFooter && (
           <div
             className={`flex items-start gap-2 border-t ${QUEUE_TONES.waiting.footer} ${footerPad}`}
             title={t('queue.filamentShort.rowTooltip')}
