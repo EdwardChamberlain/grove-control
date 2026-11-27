@@ -1346,7 +1346,7 @@ export default {
       timelineView: 'Zaman Çizelgesi',
       unassigned: 'Atanmamış',
       noData: 'Bu gün için zamanlanmış baskı yok',
-      nothingCommitted: 'Bu pencerede onaylanmış programlar yok. Hazırlanmış öğeler, beklemedeki öğeler ve boştaki yazıcılardaki ASAP işleri gösterilmez — burada görmek için zamanlanmış bir saat belirleyin veya hazırlanmış bir öğeyi serbest bırakın.',
+      nothingCommitted: 'Bu pencerede onaylanmış programlar yok. Hazırlanmış öğeler ve boştaki yazıcılardaki ASAP işleri gösterilmez — burada görmek için zamanlanmış bir saat belirleyin veya hazırlanmış bir öğeyi serbest bırakın.',
       allDoneBy: 'Tüm baskıların {{time}}\'e kadar bitmesi tahmin ediliyor',
       staged: 'Hazırlandı',
       filterAll: 'Tümünü Göster',
@@ -1364,11 +1364,24 @@ export default {
         today: 'Bugün',
       },
       window: {
-        back12h: '12 saat geri',
-        forward12h: '12 saat ileri',
+        zoom: 'Yakınlaştırma',
+        hours: '{{count}} sa',
+        earlier: 'Daha erken',
+        later: 'Daha geç',
         now: 'Şimdi',
       },
-      printerColumnHeader: 'Yazıcı',
+      nowLabel: 'Şimdi {{time}}',
+      legend: {
+        scheduledQueued: 'Zamanlanmış veya kuyrukta',
+        blocked: 'Engellendi, işlem gerekli',
+      },
+      lane: {
+        printingFree: 'Yazdırıyor · {{time}} boşalır',
+        idleNext: 'Boşta · sonraki iş {{time}}',
+        idleEmpty: 'Boşta · kuyrukta iş yok',
+        noEligible: 'Uygun makine yok',
+        deactivated: 'Devre dışı',
+      },
     },
     // İzinler
     permissions: {

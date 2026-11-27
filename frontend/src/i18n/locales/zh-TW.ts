@@ -1346,7 +1346,7 @@ export default {
       timelineView: '時間線',
       unassigned: '未分配',
       noData: '當天沒有計畫的列印任務',
-      nothingCommitted: '此時間視窗內沒有已確定的排程。暫存項目、等待項目以及閒置印表機上的 ASAP 任務不會顯示 — 設定排程時間或釋放暫存項目即可在此處查看。',
+      nothingCommitted: '此時間視窗內沒有已確定的排程。暫存項目以及閒置印表機上的 ASAP 任務不會顯示 — 設定排程時間或釋放暫存項目即可在此處查看。',
       allDoneBy: '所有列印預計在 {{time}} 前完成',
       staged: '暫存',
       filterAll: '全部顯示',
@@ -1364,11 +1364,24 @@ export default {
         today: '今天',
       },
       window: {
-        back12h: '後退 12 小時',
-        forward12h: '前進 12 小時',
+        zoom: '縮放',
+        hours: '{{count}} 小時',
+        earlier: '較早',
+        later: '較晚',
         now: '現在',
       },
-      printerColumnHeader: '印表機',
+      nowLabel: '現在 {{time}}',
+      legend: {
+        scheduledQueued: '已排程或排隊中',
+        blocked: '已封鎖，需要處理',
+      },
+      lane: {
+        printingFree: '列印中 · {{time}} 空閒',
+        idleNext: '閒置 · 下一個工作 {{time}}',
+        idleEmpty: '閒置 · 無排隊工作',
+        noEligible: '無符合條件的設備',
+        deactivated: '已停用',
+      },
     },
     // Permissions
     permissions: {

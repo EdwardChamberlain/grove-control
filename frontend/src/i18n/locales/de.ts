@@ -1346,7 +1346,7 @@ export default {
       timelineView: 'Zeitstrahl',
       unassigned: 'Nicht zugewiesen',
       noData: 'Keine geplanten Drucke für diesen Tag',
-      nothingCommitted: 'Keine festgelegten Pläne in diesem Zeitfenster. Vorgemerkte Einträge, wartende Einträge und ASAP-Aufträge auf inaktiven Druckern werden nicht angezeigt — leg eine geplante Zeit fest oder gib einen vorgemerkten Eintrag frei, damit er hier erscheint.',
+      nothingCommitted: 'Keine festgelegten Pläne in diesem Zeitfenster. Vorgemerkte Einträge und ASAP-Aufträge auf inaktiven Druckern werden nicht angezeigt — leg eine geplante Zeit fest oder gib einen vorgemerkten Eintrag frei, damit er hier erscheint.',
       allDoneBy: 'Alle Drucke voraussichtlich fertig um {{time}}',
       staged: 'Bereitgestellt',
       filterAll: 'Alle anzeigen',
@@ -1364,11 +1364,24 @@ export default {
         today: 'Heute',
       },
       window: {
-        back12h: '12 Stunden zurück',
-        forward12h: '12 Stunden vor',
+        zoom: 'Zeitraum',
+        hours: '{{count}} Std.',
+        earlier: 'Früher',
+        later: 'Später',
         now: 'Jetzt',
       },
-      printerColumnHeader: 'Drucker',
+      nowLabel: 'Jetzt {{time}}',
+      legend: {
+        scheduledQueued: 'Geplant oder in der Warteschlange',
+        blocked: 'Blockiert, Eingriff nötig',
+      },
+      lane: {
+        printingFree: 'Druckt · frei {{time}}',
+        idleNext: 'Leerlauf · nächster Auftrag {{time}}',
+        idleEmpty: 'Leerlauf · nichts in der Warteschlange',
+        noEligible: 'Kein geeignetes Gerät',
+        deactivated: 'Deaktiviert',
+      },
     },
     // Permissions
     permissions: {

@@ -1346,7 +1346,7 @@ export default {
       timelineView: '时间线',
       unassigned: '未分配',
       noData: '当天没有计划的打印任务',
-      nothingCommitted: '此时间窗口内没有已确定的计划。暂存项目、等待项目以及空闲打印机上的 ASAP 任务不会显示 — 设置计划时间或释放暂存项目以在此处查看。',
+      nothingCommitted: '此时间窗口内没有已确定的计划。暂存项目以及空闲打印机上的 ASAP 任务不会显示 — 设置计划时间或释放暂存项目以在此处查看。',
       allDoneBy: '所有打印预计在 {{time}} 前完成',
       staged: '暂存',
       filterAll: '全部显示',
@@ -1364,11 +1364,24 @@ export default {
         today: '今天',
       },
       window: {
-        back12h: '后退 12 小时',
-        forward12h: '前进 12 小时',
+        zoom: '缩放',
+        hours: '{{count}} 小时',
+        earlier: '更早',
+        later: '更晚',
         now: '现在',
       },
-      printerColumnHeader: '打印机',
+      nowLabel: '现在 {{time}}',
+      legend: {
+        scheduledQueued: '已计划或排队中',
+        blocked: '已阻塞，需要处理',
+      },
+      lane: {
+        printingFree: '打印中 · {{time}} 空闲',
+        idleNext: '空闲 · 下一个任务 {{time}}',
+        idleEmpty: '空闲 · 无排队任务',
+        noEligible: '无符合条件的设备',
+        deactivated: '已停用',
+      },
     },
     // Permissions
     permissions: {

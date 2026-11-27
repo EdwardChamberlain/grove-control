@@ -1346,7 +1346,7 @@ export default {
       timelineView: 'Chronologie',
       unassigned: 'Non attribué',
       noData: 'Aucune impression planifiée pour ce jour',
-      nothingCommitted: 'Aucun horaire confirmé dans cette fenêtre. Les éléments en attente d’action, les éléments bloqués et les jobs ASAP sur des imprimantes inactives ne sont pas affichés — définissez une heure planifiée ou libérez un élément en attente pour qu’il apparaisse ici.',
+      nothingCommitted: 'Aucun horaire confirmé dans cette fenêtre. Les éléments en attente d’action et les jobs ASAP sur des imprimantes inactives ne sont pas affichés — définissez une heure planifiée ou libérez un élément en attente pour qu’il apparaisse ici.',
       allDoneBy: 'Toutes les impressions terminées vers {{time}}',
       staged: 'En attente',
       filterAll: 'Tout afficher',
@@ -1364,11 +1364,24 @@ export default {
         today: 'Aujourd\'hui',
       },
       window: {
-        back12h: 'Reculer de 12 heures',
-        forward12h: 'Avancer de 12 heures',
+        zoom: 'Plage horaire',
+        hours: '{{count}} h',
+        earlier: 'Plus tôt',
+        later: 'Plus tard',
         now: 'Maintenant',
       },
-      printerColumnHeader: 'Imprimante',
+      nowLabel: 'Maintenant {{time}}',
+      legend: {
+        scheduledQueued: 'Planifié ou en file',
+        blocked: 'Bloqué, action requise',
+      },
+      lane: {
+        printingFree: 'Impression · libre à {{time}}',
+        idleNext: 'Inactive · prochain travail {{time}}',
+        idleEmpty: 'Inactive · rien en file',
+        noEligible: 'Aucune machine éligible',
+        deactivated: 'Désactivée',
+      },
     },
     // Permissions
     permissions: {

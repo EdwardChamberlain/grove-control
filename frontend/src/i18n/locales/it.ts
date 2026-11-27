@@ -1346,7 +1346,7 @@ export default {
       timelineView: 'Cronologia',
       unassigned: 'Non assegnato',
       noData: 'Nessuna stampa programmata per questo giorno',
-      nothingCommitted: 'Nessuna pianificazione confermata in questa finestra. Elementi preparati, in attesa e ASAP su stampanti inattive non sono mostrati — imposta un orario pianificato o rilascia un elemento preparato per vederlo qui.',
+      nothingCommitted: 'Nessuna pianificazione confermata in questa finestra. Elementi preparati e ASAP su stampanti inattive non sono mostrati — imposta un orario pianificato o rilascia un elemento preparato per vederlo qui.',
       allDoneBy: 'Tutte le stampe completate entro le {{time}}',
       staged: 'In attesa',
       filterAll: 'Mostra tutto',
@@ -1364,11 +1364,24 @@ export default {
         today: 'Oggi',
       },
       window: {
-        back12h: 'Indietro di 12 ore',
-        forward12h: 'Avanti di 12 ore',
+        zoom: 'Intervallo',
+        hours: '{{count}} h',
+        earlier: 'Prima',
+        later: 'Dopo',
         now: 'Adesso',
       },
-      printerColumnHeader: 'Stampante',
+      nowLabel: 'Adesso {{time}}',
+      legend: {
+        scheduledQueued: 'Pianificato o in coda',
+        blocked: 'Bloccato, serve intervento',
+      },
+      lane: {
+        printingFree: 'In stampa · libera alle {{time}}',
+        idleNext: 'Inattiva · prossimo lavoro {{time}}',
+        idleEmpty: 'Inattiva · niente in coda',
+        noEligible: 'Nessuna macchina idonea',
+        deactivated: 'Disattivata',
+      },
     },
     // Permissions
     permissions: {

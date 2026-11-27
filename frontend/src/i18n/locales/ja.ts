@@ -1345,7 +1345,7 @@ export default {
       timelineView: 'タイムライン',
       unassigned: '未割当',
       noData: 'この日の予定された印刷はありません',
-      nothingCommitted: 'この時間枠に確定したスケジュールはありません。手動開始のステージ済み項目、待機中の項目、アイドル状態のプリンターのASAPジョブは表示されません — 予定時刻を設定するか、ステージ済み項目をリリースすると表示されます。',
+      nothingCommitted: 'この時間枠に確定したスケジュールはありません。手動開始のステージ済み項目、アイドル状態のプリンターのASAPジョブは表示されません — 予定時刻を設定するか、ステージ済み項目をリリースすると表示されます。',
       allDoneBy: 'すべての印刷は {{time}} までに完了予定',
       staged: 'ステージング',
       filterAll: 'すべて表示',
@@ -1363,11 +1363,24 @@ export default {
         today: '今日',
       },
       window: {
-        back12h: '12時間戻る',
-        forward12h: '12時間進む',
+        zoom: 'ズーム',
+        hours: '{{count}}時間',
+        earlier: '前へ',
+        later: '後へ',
         now: '現在',
       },
-      printerColumnHeader: 'プリンター',
+      nowLabel: '現在 {{time}}',
+      legend: {
+        scheduledQueued: '予約済みまたはキュー待ち',
+        blocked: 'ブロック中・要対応',
+      },
+      lane: {
+        printingFree: '印刷中・{{time}} に空き',
+        idleNext: '待機中・次のジョブ {{time}}',
+        idleEmpty: '待機中・キューなし',
+        noEligible: '対象マシンなし',
+        deactivated: '無効',
+      },
     },
     // Permissions
     permissions: {

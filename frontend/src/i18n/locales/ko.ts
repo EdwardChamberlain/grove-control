@@ -1278,7 +1278,7 @@ export default {
       timelineView: '타임라인',
       unassigned: '미할당',
       noData: '이 날에 예약된 인쇄 없음',
-      nothingCommitted: '이 시간 창에 확정된 일정이 없습니다. 대기 중인 항목, 보류된 항목, 유휴 프린터의 ASAP 작업은 표시되지 않습니다 — 예약 시간을 설정하거나 대기 항목을 릴리스하면 여기에 표시됩니다.',
+      nothingCommitted: '이 시간 창에 확정된 일정이 없습니다. 대기 중인 항목, 유휴 프린터의 ASAP 작업은 표시되지 않습니다 — 예약 시간을 설정하거나 대기 항목을 릴리스하면 여기에 표시됩니다.',
       allDoneBy: '모든 인쇄 예상 완료 시간: {{time}}',
       staged: '준비됨',
       filterAll: '모두 표시',
@@ -1296,11 +1296,24 @@ export default {
         today: '오늘'
       },
       window: {
-        back12h: '12시간 이전',
-        forward12h: '12시간 이후',
+        zoom: '확대/축소',
+        hours: '{{count}}시간',
+        earlier: '이전',
+        later: '이후',
         now: '지금',
       },
-      printerColumnHeader: '프린터',
+      nowLabel: '지금 {{time}}',
+      legend: {
+        scheduledQueued: '예약 또는 대기 중',
+        blocked: '차단됨, 조치 필요',
+      },
+      lane: {
+        printingFree: '출력 중 · {{time}}에 가능',
+        idleNext: '대기 · 다음 작업 {{time}}',
+        idleEmpty: '대기 · 대기열 없음',
+        noEligible: '사용 가능한 장비 없음',
+        deactivated: '비활성화됨',
+      },
     },
     permissions: {
       noStopPrint: '인쇄를 정지할 권한이 없습니다',
