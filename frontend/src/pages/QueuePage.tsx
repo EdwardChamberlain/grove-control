@@ -1139,7 +1139,12 @@ export function QueuePage() {
     const visible = new Set(pendingItems.map((i) => i.id));
     return selectedIds.filter((id) => visible.has(id));
   }, [selectedIds, pendingItems]);
-  const hiddenSelectedCount = selectedIds.length - selectedItems.length;
+  // Selected jobs a filter or search hides. Ids of jobs that have since left the
+  // pending list (started, cancelled, removed) are not hidden, just stale.
+  const hiddenSelectedCount = useMemo(() => {
+    const pendingIds = new Set((queue ?? []).filter((i) => i.status === 'pending').map((i) => i.id));
+    return selectedIds.filter((id) => pendingIds.has(id)).length - selectedItems.length;
+  }, [selectedIds, selectedItems, queue]);
   const allVisibleSelected = pendingItems.length > 0 && pendingItems.every(i => selectedItems.includes(i.id));
   const handleSelectAll = () => {
     // Acts on the visible (filtered) jobs only; selections already made outside
@@ -1349,7 +1354,10 @@ export function QueuePage() {
   const canReorderManually =
     hasPermission('queue:reorder') &&
     hasAnyPermission('queue:update_own', 'queue:update_all') &&
-    pendingSortBy === 'position';
+    pendingSortBy === 'position' &&
+    // A search shows only some of the pending jobs, and a reorder renumbers the
+    // list it is given, which would push the hidden jobs out of order.
+    !searchTerm;
 
   const rowCanMove = (row: QueueRow | undefined): row is QueueRow =>
     !!row &&

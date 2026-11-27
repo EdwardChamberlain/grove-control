@@ -749,6 +749,58 @@ describe('QueuePage', () => {
       await waitFor(() => expect(cancelled).toEqual([11]));
 
       // The hidden selection comes back when the search is cleared.
+      await user.clear(screen.getByRole('searchbox'));
+      await waitFor(() => expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument());
+    });
+
+    it('does not count a selected job that has left the pending list as hidden', async () => {
+      let started = false;
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json(
+            started ? [{ ...searchItems[0], status: 'printing' }, searchItems[1]] : searchItems.slice(0, 2),
+          ),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+      // Benchy starts printing elsewhere; the page picks that up on refocus.
+      started = true;
+      act(() => {
+        window.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('focus'));
+      });
+      await waitFor(() => expect(screen.getByText('1 selected')).toBeInTheDocument());
+      expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument();
+    });
+
+    it('turns off manual reordering while a search is active', async () => {
+      const reorders: unknown[] = [];
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            ...searchItems.slice(0, 2),
+            { ...searchItems[0], id: 15, position: 3, archive_name: 'Plain', printer_name: 'Gamma', created_by_username: 'carol' },
+          ]),
+        ),
+      );
+      server.use(http.post('/api/v1/queue/reorder', async ({ request }) => {
+        reorders.push(await request.json());
+        return HttpResponse.json({ success: true });
+      }));
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+      await type(user, 'e');
+      await waitFor(() => expect(screen.queryByText('Plain')).not.toBeInTheDocument());
+      expect(screen.getByText('Gear')).toBeInTheDocument();
+      act(() => dnd.onDragEnd?.({ active: { id: 12 }, over: { id: 11 } }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(reorders).toEqual([]);
     });
 
     it('Select All and Deselect All only touch the jobs that are visible', async () => {
