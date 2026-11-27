@@ -201,6 +201,25 @@ describe('KProfilesView — bulk actions', () => {
     expect(captured.filter((c) => c.method === 'DELETE').map((c) => c.body?.slot_id).sort()).toEqual([1, 2]);
   });
 
+  it('selects a profile from its checkbox and leaves select mode after deleting', async () => {
+    const user = userEvent.setup();
+    render(<KProfilesView />);
+    await screen.findByText('High Flow_Bambu PLA Basic');
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    const bar = within(screen.getByTestId('selection-bar'));
+    expect(bar.getByText('1 selected')).toBeInTheDocument();
+
+    await user.click(bar.getByRole('button', { name: 'Delete' }));
+    const confirm = await screen.findAllByRole('button', { name: /^Delete$/ });
+    await user.click(confirm[confirm.length - 1]);
+
+    await waitFor(() => expect(captured.filter((c) => c.method === 'DELETE')).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument(), { timeout: 3000 });
+  });
+
   it('exports the current profiles as a JSON download', async () => {
     const createObjectURL = vi.fn(() => 'blob:kprofiles');
     const revokeObjectURL = vi.fn();

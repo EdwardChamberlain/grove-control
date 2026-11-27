@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { render } from '../utils';
 import { FileManagerModal } from '../../components/FileManagerModal';
 import { http, HttpResponse } from 'msw';
@@ -277,6 +277,107 @@ describe('FileManagerModal', () => {
       fireEvent.click(screen.getByTestId('select-mode-toggle'));
       fireEvent.keyDown(window, { key: 'Escape' });
       expect(mockOnClose).toHaveBeenCalled();
+    });
+  });
+
+  describe('select mode actions', () => {
+    const open = async () => {
+      render(
+        <FileManagerModal
+          printerId={1}
+          printerName="X1 Carbon"
+          onClose={mockOnClose}
+        />
+      );
+      await waitFor(() => {
+        expect(screen.getByText('benchy.3mf')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
+    };
+
+    it('toggles a file by clicking its row and clears the selection when a folder is opened', async () => {
+      await open();
+
+      fireEvent.click(screen.getByText('benchy.3mf'));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('cache'));
+      await waitFor(() => {
+        expect(screen.getByText('0 selected')).toBeInTheDocument();
+      });
+    });
+
+    it('selects every file and deletes them after confirming', async () => {
+      const deleted: string[] = [];
+      server.use(
+        http.delete('/api/v1/printers/:id/files', ({ request }) => {
+          deleted.push(new URL(request.url).searchParams.get('path') ?? '');
+          return HttpResponse.json({ status: 'deleted', path: '' });
+        })
+      );
+      await open();
+
+      fireEvent.click(screen.getByRole('button', { name: /Select All/ }));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+      fireEvent.click(within(screen.getByTestId('selection-bar')).getByRole('button', { name: /Delete/ }));
+      const confirmButtons = await screen.findAllByRole('button', { name: /Delete/ });
+      fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(deleted.sort()).toEqual(['/benchy.3mf', '/print_job.gcode']);
+      });
+      await waitFor(() => {
+        expect(screen.getByText('0 selected')).toBeInTheDocument();
+      });
+    });
+
+    it('downloads a single selected file directly and clears the selection', async () => {
+      const requested: string[] = [];
+      Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:file'), revokeObjectURL: vi.fn() });
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      server.use(
+        http.get('/api/v1/printers/:id/files/download', ({ request }) => {
+          requested.push(new URL(request.url).searchParams.get('path') ?? '');
+          return new HttpResponse('data', { headers: { 'Content-Type': 'application/octet-stream' } });
+        })
+      );
+      await open();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'benchy.3mf' }));
+      fireEvent.click(screen.getByRole('button', { name: /Download/ }));
+
+      await waitFor(() => {
+        expect(requested).toEqual(['/benchy.3mf']);
+      });
+      await waitFor(() => {
+        expect(screen.getByText('0 selected')).toBeInTheDocument();
+      });
+    });
+
+    it('downloads several files as a ZIP, showing progress, then clears the selection', async () => {
+      Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:zip'), revokeObjectURL: vi.fn() });
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      server.use(
+        http.post('/api/v1/printers/:id/files/download-zip', async () => {
+          await gate;
+          return new HttpResponse('zip', { headers: { 'Content-Type': 'application/zip' } });
+        })
+      );
+      await open();
+
+      fireEvent.click(screen.getByRole('button', { name: /Select All/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Download/ }));
+      expect(await screen.findByText('0/2')).toBeInTheDocument();
+
+      release();
+      await waitFor(() => {
+        expect(screen.getByText('0 selected')).toBeInTheDocument();
+      });
     });
   });
 

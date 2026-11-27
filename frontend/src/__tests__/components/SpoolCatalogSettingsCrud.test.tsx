@@ -323,4 +323,22 @@ describe('SpoolCatalogSettings CRUD', () => {
     await user.click(screen.getAllByRole('button', { name: /Reset/ }).pop()!);
     await waitFor(() => expect(screen.getByText('Failed to reset catalog')).toBeInTheDocument());
   });
+  it('keeps checkboxes and the empty state aligned in select mode', async () => {
+    const user = userEvent.setup();
+    render(<SpoolCatalogSettings />);
+    await screen.findByText('My Reusable Spool');
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0);
+
+    // An entry that is being edited keeps its checkbox.
+    const row = rowOf('My Reusable Spool');
+    await user.click(within(row).getAllByRole('button')[0]);
+    expect(within(row).getByRole('checkbox')).toBeInTheDocument();
+    await user.click(within(row).getAllByRole('button')[1]);
+
+    await user.type(screen.getByPlaceholderText('Search catalog...'), 'nothing');
+    expect(screen.getByText('No entries match your search')).toBeInTheDocument();
+  });
 });

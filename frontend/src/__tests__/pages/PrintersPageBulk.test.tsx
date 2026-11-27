@@ -4,7 +4,7 @@
  * partial failures), and selecting printers by state or location.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -180,5 +180,51 @@ describe('Bulk selection shortcuts', () => {
     await user.click(await screen.findByRole('button', { name: 'Garage' }));
 
     expect(within(toolbar).getByText('1 selected')).toBeInTheDocument();
+  });
+});
+
+describe('Select mode item checkboxes', () => {
+  it('selects a printer from its checkbox in the grid', async () => {
+    setup();
+    const user = userEvent.setup();
+    render(<PrintersPage />);
+    await screen.findAllByText('X1 Carbon');
+    expect(screen.queryByRole('checkbox', { name: 'X1 Carbon' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('checkbox', { name: 'X1 Carbon' }));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'X1 Carbon' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('selects a printer from the checkbox in each list layout', async () => {
+    setup();
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => (key === 'printerViewMode' ? 'list' : null));
+    const user = userEvent.setup();
+    render(<PrintersPage />);
+    await screen.findAllByText('X1 Carbon');
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    // The list renders a phone row and a desktop row for each printer.
+    const boxes = screen.getAllByRole('checkbox', { name: 'X1 Carbon' });
+    expect(boxes).toHaveLength(2);
+    await user.click(boxes[0]);
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    await user.click(boxes[1]);
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
+  it('selects every printer of one model from a group header', async () => {
+    setup();
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => (key === 'printerSortBy' ? 'model' : null));
+    const user = userEvent.setup();
+    render(<PrintersPage />);
+    await screen.findAllByText('X1 Carbon');
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    const groupButtons = screen.getAllByRole('button', { name: 'Select All' }).filter((b) => b.closest('h2'));
+    expect(groupButtons.length).toBeGreaterThan(0);
+    await user.click(groupButtons[0]);
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
   });
 });

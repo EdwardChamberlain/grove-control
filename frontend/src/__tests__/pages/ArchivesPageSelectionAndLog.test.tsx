@@ -80,6 +80,24 @@ describe('ArchivesPage bulk selection', () => {
     expect(await screen.findByText('2 archives deleted')).toBeInTheDocument();
   });
 
+  it('shows card checkboxes only in select mode and toggles an archive from its checkbox', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes.length).toBeGreaterThan(0);
+    await user.click(boxes[0]);
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
   it('Escape and Close leave selection mode', async () => {
     setView('grid');
     useArchives();

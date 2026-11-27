@@ -246,6 +246,31 @@ describe('bulk actions', () => {
     expect(await screen.findByText('2 spools updated')).toBeInTheDocument();
   });
 
+  it('opens the label picker for the selection from the bar', async () => {
+    const user = userEvent.setup();
+    await ready();
+
+    await selectTwo(user);
+    await user.click(within(bulkBar()).getByRole('button', { name: /Print labels/ }));
+
+    expect(await screen.findByText('Print spool labels')).toBeInTheDocument();
+  });
+
+  it('selects and deselects a whole group from its checkbox', async () => {
+    const user = userEvent.setup();
+    await ready();
+
+    await user.click(screen.getByTitle('Group'));
+    await enterSelectMode(user);
+    const groupBox = screen.getByRole('checkbox', { name: 'Select group' });
+    await user.click(groupBox);
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select group' })).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(screen.getByRole('checkbox', { name: 'Select group' }));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
   it('selects all visible rows and clears the selection', async () => {
     const user = userEvent.setup();
     await ready();

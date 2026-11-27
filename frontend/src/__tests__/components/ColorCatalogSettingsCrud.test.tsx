@@ -262,4 +262,21 @@ describe('ColorCatalogSettings CRUD', () => {
 
     expect(await screen.findByText('Failed to load color catalog')).toBeInTheDocument();
   });
+  it('keeps checkboxes and the empty state aligned in select mode', async () => {
+    const user = userEvent.setup();
+    await ready();
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0);
+
+    // An entry that is being edited keeps its checkbox.
+    const row = rowOf('Galaxy');
+    await user.click(within(row).getAllByRole('button')[0]);
+    expect(within(row).getByRole('checkbox')).toBeInTheDocument();
+    await user.click(within(row).getAllByRole('button')[1]);
+
+    await user.type(screen.getByPlaceholderText('Search colors...'), 'nothing');
+    expect(screen.getByText('No colors match your search')).toBeInTheDocument();
+  });
 });

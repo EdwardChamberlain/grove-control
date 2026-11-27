@@ -198,6 +198,28 @@ describe('LibraryTrashPage', () => {
       await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
     });
 
+    it('selects a file from its checkbox and permanently deletes the selection', async () => {
+      const purged: number[] = [];
+      useTwoItems([
+        http.delete('*/library/trash/:id', ({ params }) => {
+          purged.push(Number(params.id));
+          return HttpResponse.json({ status: 'success' });
+        }),
+      ]);
+      render(<LibraryTrashPage />);
+
+      await screen.findByText('old_benchy.3mf');
+      await userEvent.click(screen.getByTestId('select-mode-toggle'));
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Select two.3mf' }));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+      await userEvent.click(await screen.findByRole('button', { name: /delete permanently/i }));
+
+      await waitFor(() => expect(purged).toEqual([2]));
+      await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
+    });
+
     it('selects a row by clicking it and confirms before deleting the selection', async () => {
       useTwoItems();
       render(<LibraryTrashPage />);

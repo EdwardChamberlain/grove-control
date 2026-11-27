@@ -270,3 +270,81 @@ describe('file actions', () => {
     expect(await screen.findByText('File is in use')).toBeInTheDocument();
   });
 });
+
+describe('select mode', () => {
+  const cardOf = (name: string) => screen.getByText(name).closest('[data-file-id]') as HTMLElement;
+
+  it.each(['grid', 'list'])('selects items by clicking them in %s view and bulk deletes the selection', async (view) => {
+    const user = userEvent.setup();
+    await ready();
+    if (view === 'list') await user.click(screen.getByTitle('List view'));
+    await user.click(screen.getByTestId('select-mode-toggle'));
+
+    if (view === 'grid') {
+      // A click anywhere on the card toggles it while select mode is on.
+      await user.click(cardOf('benchy.gcode.3mf').querySelector('[aria-hidden="true"].cursor-pointer') as HTMLElement);
+      await user.click(cardOf('hook.stl').querySelector('[aria-hidden="true"].cursor-pointer') as HTMLElement);
+    } else {
+      await user.click(screen.getByText('benchy.gcode.3mf'));
+      await user.click(screen.getByRole('checkbox', { name: 'Select hook.stl' }));
+    }
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    const bar = within(screen.getByTestId('selection-bar'));
+    await user.click(bar.getByRole('button', { name: 'Delete' }));
+    await user.click(lastButton(/Delete/));
+
+    await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/api/v1/library/bulk-delete' })));
+    await waitFor(() => expect(screen.getByText('0 selected')).toBeInTheDocument());
+  });
+
+  it('deletes a single selected file from the bar', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('checkbox', { name: 'Select hook.stl' }));
+
+    await user.click(within(screen.getByTestId('selection-bar')).getByRole('button', { name: 'Delete' }));
+    expect(screen.getByText('Are you sure you want to delete this file?')).toBeInTheDocument();
+    await user.click(lastButton(/Delete/));
+
+    await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'DELETE', path: '/api/v1/library/files/3' })));
+    await waitFor(() => expect(screen.getByText('0 selected')).toBeInTheDocument());
+  });
+
+  it('opens Move and Tag for the selection from the bar', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('checkbox', { name: 'Select hook.stl' }));
+    const bar = within(screen.getByTestId('selection-bar'));
+
+    await user.click(bar.getByRole('button', { name: 'Move' }));
+    expect(await screen.findByText('Move 1 File(s)')).toBeInTheDocument();
+    await user.click(lastButton(/Cancel/));
+
+    await user.click(bar.getByRole('button', { name: 'Tag' }));
+    expect(await screen.findByText('Tag 1 selected file(s)')).toBeInTheDocument();
+  });
+
+  it('prints a selected sliced file from the bar and clears the selection afterwards', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('checkbox', { name: 'Select benchy.gcode.3mf' }));
+
+    await user.click(within(screen.getByTestId('selection-bar')).getByRole('button', { name: 'Print' }));
+    expect(await screen.findByRole('heading', { name: 'Print' })).toBeInTheDocument();
+  });
+
+  it('shows the checkbox in list view only while select mode is on', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTitle('List view'));
+    expect(screen.queryByRole('checkbox', { name: 'Select hook.stl' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('checkbox', { name: 'Select hook.stl' }));
+    expect(screen.getByRole('checkbox', { name: 'Deselect hook.stl' })).toHaveAttribute('aria-checked', 'true');
+  });
+});
