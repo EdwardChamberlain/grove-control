@@ -3642,6 +3642,8 @@ export default {
     noPermissionPrint: 'Sie haben keine Berechtigung zum Drucken',
     noPermissionSlice: 'Sie haben keine Berechtigung, Dateien zu slicen',
     noPermissionAddToQueue: 'Sie haben keine Berechtigung, zur Warteschlange hinzuzufügen',
+    selectFile: '{{name}} auswählen',
+    deselectFile: '{{name}} abwählen',
     noPermissionDownload: 'Sie haben keine Berechtigung, Dateien herunterzuladen',
     noPermissionRenameFile: 'Sie haben keine Berechtigung, diese Datei umzubenennen',
     noPermissionGenerateThumbnail: 'Sie haben keine Berechtigung, Vorschaubilder zu generieren',

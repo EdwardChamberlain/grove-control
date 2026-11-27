@@ -3456,6 +3456,8 @@ export default {
     noPermissionDeleteFolder: '폴더 삭제 권한이 없습니다',
     noPermissionPrint: '인쇄 권한이 없습니다',
     noPermissionAddToQueue: '대기열 추가 권한이 없습니다',
+    selectFile: '{{name}} 선택',
+    deselectFile: '{{name}} 선택 해제',
     noPermissionSlice: '파일 슬라이싱 권한이 없습니다',
     noPermissionDownload: '파일 다운로드 권한이 없습니다',
     noPermissionRenameFile: '파일 이름 변경 권한이 없습니다',

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Files: file cards are now selected only from their checkbox, so clicking a
+  card no longer selects it by accident. A selected checkbox shows a tick
+  instead of a dot, and printable files have a green **Print** button beside
+  the kebab menu (#388).
 - Maintenance: each printer's Status view now has a maintenance mode button, an
   icon just left of **Log a repair** (#379). It is grey normally and turns blue
   while the printer is in maintenance mode, and its tooltip reads **Enter** or

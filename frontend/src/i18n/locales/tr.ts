@@ -3636,6 +3636,8 @@ export default {
     noPermissionDeleteFolder: 'Klasörleri silme izniniz yok',
     noPermissionPrint: 'Yazdırma izniniz yok',
     noPermissionAddToQueue: 'Kuyruğa ekleme izniniz yok',
+    selectFile: '{{name}} seç',
+    deselectFile: '{{name}} seçimini kaldır',
     noPermissionSlice: 'Dosyaları dilimleme izniniz yok',
     noPermissionDownload: 'Dosyaları indirme izniniz yok',
     noPermissionRenameFile: 'Bu dosyayı yeniden adlandırma izniniz yok',

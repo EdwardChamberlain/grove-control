@@ -3631,6 +3631,8 @@ export default {
     noPermissionPrint: 'Pas d\'autorisation impression',
     noPermissionSlice: 'Vous n\'avez pas la permission de découper des fichiers',
     noPermissionAddToQueue: 'Pas d\'autorisation file',
+    selectFile: 'Sélectionner {{name}}',
+    deselectFile: 'Désélectionner {{name}}',
     noPermissionDownload: 'Pas d\'autorisation téléchargement',
     noPermissionRenameFile: 'Pas d\'autorisation renommage fichier',
     noPermissionGenerateThumbnail: 'Pas d\'autorisation vignettes',

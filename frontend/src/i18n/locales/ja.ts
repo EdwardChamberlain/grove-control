@@ -3642,6 +3642,8 @@ export default {
     noPermissionPrint: '印刷する権限がありません',
     noPermissionSlice: 'ファイルをスライスする権限がありません',
     noPermissionAddToQueue: 'キューに追加する権限がありません',
+    selectFile: '{{name}}を選択',
+    deselectFile: '{{name}}の選択を解除',
     noPermissionDownload: 'ファイルをダウンロードする権限がありません',
     noPermissionRenameFile: 'このファイル名を変更する権限がありません',
     noPermissionGenerateThumbnail: 'サムネイルを生成する権限がありません',
