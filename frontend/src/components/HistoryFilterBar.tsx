@@ -33,8 +33,8 @@ interface HistoryFilterBarProps {
   /** Log view only: opens the clear-log confirmation. The icon button is hidden without it. */
   onClearLog?: () => void;
   clearLogDisabled?: boolean;
-  /** Extra control shown at the end of the toolbar, after the view switch (the multi-select toggle). */
-  trailing?: ReactNode;
+  /** Extra control shown just before the view switch (the multi-select toggle). */
+  beforeViewSwitch?: ReactNode;
 }
 
 const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-wide text-bambu-gray';
@@ -46,7 +46,7 @@ const sectionHeadingClass = 'mb-2 text-[11px] font-semibold uppercase tracking-w
  */
 export function HistoryFilterBar({
   filters, viewMode, onViewModeChange, chips, printers, users, showUserFilter = true, uniqueMaterials, uniqueColors, uniqueTags,
-  shownCount, searchInputRef, onManageTags, onClearLog, clearLogDisabled, trailing,
+  shownCount, searchInputRef, onManageTags, onClearLog, clearLogDisabled, beforeViewSwitch,
 }: HistoryFilterBarProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -414,6 +414,7 @@ export function HistoryFilterBar({
             <Trash2 className="w-4 h-4" />
           </button>
         )}
+        {beforeViewSwitch}
         <div className="flex h-8 items-center border border-bambu-dark-tertiary rounded-lg overflow-hidden flex-shrink-0">
           <button
             type="button"
@@ -443,7 +444,6 @@ export function HistoryFilterBar({
             <ClipboardList className="w-4 h-4" />
           </button>
         </div>
-        {trailing}
       </div>
 
       {/* Active filters, shown only when something is filtered */}

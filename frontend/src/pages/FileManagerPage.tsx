@@ -2247,7 +2247,7 @@ export function FileManagerPage() {
           {files && files.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 py-2 sticky top-0 z-10 bg-bambu-dark lg:static lg:bg-transparent">
               {/* Search */}
-              <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-xs">
+              <div className="relative w-full sm:w-auto sm:flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
                 <input
                   type="text"
@@ -2349,7 +2349,7 @@ export function FileManagerPage() {
                 </span>
               )}
 
-              <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="ml-auto" />
+              <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />
             </div>
           )}
 

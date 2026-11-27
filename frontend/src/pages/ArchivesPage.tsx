@@ -2071,7 +2071,7 @@ export function ArchivesPage() {
         onManageTags={() => setShowTagManagement(true)}
         onClearLog={() => setShowClearLogConfirm(true)}
         clearLogDisabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
-        trailing={<SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />}
+        beforeViewSwitch={<SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />}
       />
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}
