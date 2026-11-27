@@ -7,6 +7,7 @@ import { Spinner } from '../components/Spinner';
 
 import { api } from '../api/client';
 import { Button } from '../components/Button';
+import { SelectModeToggle, SelectionBar, SelectionBarDivider, SelectionCheckbox, useSelection } from '../components/selection';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -38,7 +39,8 @@ export function LibraryTrashPage() {
   const { showToast } = useToast();
   const { hasPermission, authEnabled } = useAuth();
   const [pending, setPending] = useState<PendingAction>(null);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const selection = useSelection<number>();
+  const { selected, active: selectionMode } = selection;
 
   const isAdmin = !authEnabled || hasPermission('library:purge');
 
@@ -119,7 +121,7 @@ export function LibraryTrashPage() {
     mutationFn: (ids: number[]) => Promise.all(ids.map((id) => api.restoreLibraryTrash(id))),
     onSuccess: (_, ids) => {
       showToast(t('libraryTrash.toast.bulkRestored', { count: ids.length }), 'success');
-      setSelected(new Set());
+      selection.exit();
       queryClient.invalidateQueries({ queryKey: ['library-trash'] });
       queryClient.invalidateQueries({ queryKey: ['library-trash-count'] });
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
@@ -132,7 +134,7 @@ export function LibraryTrashPage() {
     mutationFn: (ids: number[]) => Promise.all(ids.map((id) => api.hardDeleteLibraryTrash(id))),
     onSuccess: (_, ids) => {
       showToast(t('libraryTrash.toast.bulkPurged', { count: ids.length }), 'success');
-      setSelected(new Set());
+      selection.exit();
       queryClient.invalidateQueries({ queryKey: ['library-trash'] });
       queryClient.invalidateQueries({ queryKey: ['library-trash-count'] });
     },
@@ -143,19 +145,12 @@ export function LibraryTrashPage() {
   const retentionDays = trashQuery.data?.retention_days ?? 30;
   const totalBytes = useMemo(() => items.reduce((sum, i) => sum + i.file_size, 0), [items]);
   const allSelected = items.length > 0 && items.every((i) => selected.has(i.id));
-  const someSelected = selected.size > 0 && !allSelected;
 
-  const toggleOne = (id: number) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  const toggleOne = selection.toggle;
 
   const toggleAll = () => {
-    setSelected((prev) => (prev.size === items.length ? new Set() : new Set(items.map((i) => i.id))));
+    if (allSelected) selection.clear();
+    else selection.set(items.map((i) => i.id));
   };
 
   const handleConfirm = () => {
@@ -193,6 +188,8 @@ export function LibraryTrashPage() {
           </p>
         </div>
         {items.length > 0 && (
+          <div className="flex items-center gap-2">
+            <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="!h-10 !px-3" />
           <Button
             variant="secondary"
             onClick={() => setPending({ type: 'empty' })}
@@ -201,6 +198,7 @@ export function LibraryTrashPage() {
             <Trash2 className="w-4 h-4 mr-1" />
             {t('libraryTrash.emptyTrash')}
           </Button>
+          </div>
         )}
       </div>
 
@@ -251,47 +249,12 @@ export function LibraryTrashPage() {
             <div className="text-xs text-gray-500 dark:text-gray-400">
               {t('libraryTrash.summary', { count: items.length, size: formatFileSize(totalBytes) })}
             </div>
-            {selected.size > 0 && (
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-gray-600 dark:text-gray-400">
-                  {t('libraryTrash.selectionCount', { count: selected.size })}
-                </span>
-                <Button
-                  variant="secondary"
-                  onClick={() => bulkRestoreMutation.mutate(Array.from(selected))}
-                  disabled={bulkRestoreMutation.isPending}
-                >
-                  <RotateCcw className="w-4 h-4 mr-1" />
-                  {t('libraryTrash.bulkRestore')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setPending({ type: 'bulkDelete', count: selected.size })}
-                  disabled={bulkDeleteMutation.isPending}
-                  className="text-red-600 dark:text-red-400"
-                >
-                  <Trash2 className="w-4 h-4 mr-1" />
-                  {t('libraryTrash.bulkPurge')}
-                </Button>
-              </div>
-            )}
           </div>
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 dark:bg-gray-800 text-left text-gray-600 dark:text-gray-300">
                 <tr>
-                  <th className="px-3 py-2 w-10">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = someSelected;
-                      }}
-                      onChange={toggleAll}
-                      aria-label={t('libraryTrash.selectAll')}
-                      className="rounded border-gray-300 cursor-pointer"
-                    />
-                  </th>
+                  {selectionMode && <th className="px-3 py-2 w-10" />}
                   <th className="px-3 py-2 font-medium">{t('libraryTrash.col.filename')}</th>
                   <th className="px-3 py-2 font-medium">{t('libraryTrash.col.folder')}</th>
                   <th className="px-3 py-2 font-medium text-right">{t('libraryTrash.col.size')}</th>
@@ -303,16 +266,20 @@ export function LibraryTrashPage() {
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {items.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(item.id)}
-                        onChange={() => toggleOne(item.id)}
-                        aria-label={t('libraryTrash.selectOne', { filename: item.filename })}
-                        className="rounded border-gray-300 cursor-pointer"
-                      />
-                    </td>
+                  <tr
+                    key={item.id}
+                    className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 ${selectionMode ? 'cursor-pointer' : ''} ${selected.has(item.id) ? 'bg-bambu-green/10' : ''}`}
+                    onClick={selectionMode ? () => toggleOne(item.id) : undefined}
+                  >
+                    {selectionMode && (
+                      <td className="px-3 py-2">
+                        <SelectionCheckbox
+                          checked={selected.has(item.id)}
+                          onToggle={() => toggleOne(item.id)}
+                          label={t('libraryTrash.selectOne', { filename: item.filename })}
+                        />
+                      </td>
+                    )}
                     <td
                       className="px-3 py-2 text-gray-900 dark:text-gray-100 truncate max-w-md"
                       title={item.filename}
@@ -383,6 +350,33 @@ export function LibraryTrashPage() {
           confirmText={t('libraryTrash.confirm.cta')}
           variant="danger"
         />
+      )}
+
+      {selectionMode && items.length > 0 && (
+        <SelectionBar count={selected.size} onClose={selection.exit}>
+          <Button variant="secondary" size="sm" onClick={toggleAll}>
+            {allSelected ? t('libraryTrash.deselectAll') : t('libraryTrash.selectAll')}
+          </Button>
+          <SelectionBarDivider />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => bulkRestoreMutation.mutate(Array.from(selected))}
+            disabled={selected.size === 0 || bulkRestoreMutation.isPending}
+          >
+            <RotateCcw className="w-4 h-4" />
+            {t('libraryTrash.bulkRestore')}
+          </Button>
+          <Button
+            size="sm"
+            className="bg-red-500 hover:bg-red-600"
+            onClick={() => setPending({ type: 'bulkDelete', count: selected.size })}
+            disabled={selected.size === 0 || bulkDeleteMutation.isPending}
+          >
+            <Trash2 className="w-4 h-4" />
+            {t('libraryTrash.bulkPurge')}
+          </Button>
+        </SelectionBar>
       )}
 
       {/* Small escape hatch in case the user navigated here without auth */}

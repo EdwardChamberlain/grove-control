@@ -1800,7 +1800,7 @@ describe('PrintersPage', () => {
       });
 
       // The Select button should be in the toolbar (title attribute)
-      const selectButton = screen.getByTitle('Select');
+      const selectButton = screen.getByTestId('select-mode-toggle');
       expect(selectButton).toBeInTheDocument();
     });
 
@@ -1812,7 +1812,7 @@ describe('PrintersPage', () => {
       });
 
       // Click the Select button to enter selection mode
-      fireEvent.click(screen.getByTitle('Select'));
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
 
       // The floating toolbar should appear with Select All
       await waitFor(() => {
@@ -1828,7 +1828,7 @@ describe('PrintersPage', () => {
       });
 
       // Enter selection mode
-      fireEvent.click(screen.getByTitle('Select'));
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
 
       await waitFor(() => {
         expect(screen.getByText('Select All')).toBeInTheDocument();
@@ -1851,7 +1851,7 @@ describe('PrintersPage', () => {
       });
 
       // Enter selection mode
-      fireEvent.click(screen.getByTitle('Select'));
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
 
       await waitFor(() => {
         expect(screen.getByText('Select by State')).toBeInTheDocument();
@@ -1866,14 +1866,14 @@ describe('PrintersPage', () => {
       });
 
       // Enter selection mode
-      fireEvent.click(screen.getByTitle('Select'));
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
 
       await waitFor(() => {
         expect(screen.getByText('Select All')).toBeInTheDocument();
       });
 
       // Click the Select button again to exit (it toggles)
-      fireEvent.click(screen.getByTitle('Select'));
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
 
       // Floating toolbar should disappear
       await waitFor(() => {

@@ -65,7 +65,7 @@ function setup({ failing = [] as number[], stateOverrides = {} as Record<number,
 async function selectAllPrinters(user: ReturnType<typeof userEvent.setup>) {
   render(<PrintersPage />);
   await screen.findAllByText('X1 Carbon');
-  await user.click(screen.getByTitle('Select'));
+  await user.click(screen.getByTestId('select-mode-toggle'));
   await user.click(await screen.findByRole('button', { name: 'Select All' }));
   return screen.getByText('3 selected').parentElement as HTMLElement;
 }
@@ -153,7 +153,7 @@ describe('Bulk printer actions', () => {
 async function openEmptySelection(user: ReturnType<typeof userEvent.setup>) {
   render(<PrintersPage />);
   await screen.findAllByText('X1 Carbon');
-  await user.click(screen.getByTitle('Select'));
+  await user.click(screen.getByTestId('select-mode-toggle'));
   const toolbar = (await screen.findByRole('button', { name: 'Select by State' })).closest('.fixed') as HTMLElement;
   expect(within(toolbar).getByText('0 selected')).toBeInTheDocument();
   return toolbar;

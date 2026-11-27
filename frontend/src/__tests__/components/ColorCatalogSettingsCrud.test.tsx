@@ -146,7 +146,8 @@ describe('ColorCatalogSettings CRUD', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await screen.findByText('Color deleted')).toBeInTheDocument();
 
-    await user.click(screen.getAllByRole('checkbox')[0]);
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Select all' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Delete Selected/ }));
     await user.click(screen.getAllByRole('button', { name: /Delete/ }).pop()!);
@@ -244,6 +245,7 @@ describe('ColorCatalogSettings CRUD', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await screen.findByText('Failed to delete color')).toBeInTheDocument();
 
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(within(rowOf('Galaxy')).getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: /Delete Selected/ }));
     await user.click(screen.getAllByRole('button', { name: /Delete/ }).pop()!);

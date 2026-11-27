@@ -196,7 +196,7 @@ describe('FileManagerModal', () => {
   });
 
   describe('file selection', () => {
-    it('selects a file when checkbox is clicked', async () => {
+    it('selects a file from its checkbox once select mode is on', async () => {
       render(
         <FileManagerModal
           printerId={1}
@@ -209,21 +209,21 @@ describe('FileManagerModal', () => {
         expect(screen.getByText('benchy.3mf')).toBeInTheDocument();
       });
 
-      // Find and click a checkbox (files have checkboxes, directories don't)
-      const checkboxes = screen.getAllByRole('button').filter(btn =>
-        btn.querySelector('svg')?.classList.contains('lucide-square')
-      );
+      // No checkboxes or action bar until select mode is turned on
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
 
-      if (checkboxes.length > 0) {
-        fireEvent.click(checkboxes[0]);
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
 
-        await waitFor(() => {
-          expect(screen.getByText('1 selected')).toBeInTheDocument();
-        });
-      }
+      fireEvent.click(screen.getByRole('checkbox', { name: 'benchy.3mf' }));
+
+      await waitFor(() => {
+        expect(screen.getByText('1 selected')).toBeInTheDocument();
+      });
     });
 
-    it('enables download button when files are selected', async () => {
+    it('keeps Download disabled until a file is selected', async () => {
       render(
         <FileManagerModal
           printerId={1}
@@ -236,12 +236,15 @@ describe('FileManagerModal', () => {
         expect(screen.getByText('benchy.3mf')).toBeInTheDocument();
       });
 
-      // Download button should be disabled initially
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
       const downloadButton = screen.getByRole('button', { name: /Download/i });
       expect(downloadButton).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'benchy.3mf' }));
+      expect(downloadButton).toBeEnabled();
     });
 
-    it('shows Select All button when files exist', async () => {
+    it('shows Select All in the select mode bar when files exist', async () => {
       render(
         <FileManagerModal
           printerId={1}
@@ -251,8 +254,29 @@ describe('FileManagerModal', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('Select All')).toBeInTheDocument();
+        expect(screen.getByText('benchy.3mf')).toBeInTheDocument();
       });
+
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
+      expect(screen.getByText('Select All')).toBeInTheDocument();
+    });
+
+    it('closes the dialog on Escape without needing to leave select mode first', async () => {
+      render(
+        <FileManagerModal
+          printerId={1}
+          printerName="X1 Carbon"
+          onClose={mockOnClose}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('benchy.3mf')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByTestId('select-mode-toggle'));
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(mockOnClose).toHaveBeenCalled();
     });
   });
 

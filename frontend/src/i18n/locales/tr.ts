@@ -45,6 +45,16 @@ export default {
   },
 
   // Ortak
+  selection: {
+    toggle: 'Çoklu seçim',
+    exit: 'Seçimden çık',
+    count: '{{count}} seçildi',
+    selectItem: 'Öğeyi seç',
+    deselectItem: 'Öğe seçimini kaldır',
+    barLabel: 'Seçim eylemleri',
+  },
+
+  // Common
   common: {
     plusNMore: '+{{count}} tane daha',
     save: 'Kaydet',
@@ -2347,6 +2357,8 @@ export default {
       resetTooltip: 'Varsayılana sıfırla',
       selectedCount: '{{count}} seçildi',
       deleteSelected: 'Seçilenleri Sil',
+      selectAll: 'Tümünü seç',
+      deselectAll: 'Tümünün seçimini kaldır',
       bulkDeleteConfirm: '{{count}} girişi silmek istediğinizden emin misiniz?',
       bulkDeleted: '{{count}} giriş silindi',
       bulkDeleteFailed: 'Girişler silinemedi',
@@ -2401,6 +2413,8 @@ export default {
       importFailed: 'İçe aktarma başarısız: geçersiz JSON formatı',
       selectedCount: '{{count}} seçildi',
       deleteSelected: 'Seçilenleri Sil',
+      selectAll: 'Tümünü seç',
+      deselectAll: 'Tümünün seçimini kaldır',
       bulkDeleteConfirm: '{{count}} rengi silmek istediğinizden emin misiniz?',
       bulkDeleted: '{{count}} renk silindi',
       bulkDeleteFailed: 'Renkler silinemedi',
@@ -6371,6 +6385,7 @@ export default {
     days: 'gün',
     retentionLabel: 'Otomatik sil',
     selectAll: 'Tümünü seç',
+    deselectAll: 'Tümünün seçimini kaldır',
     selectOne: '{{filename}} seç',
     selectionCount: '{{count}} seçildi',
     bulkRestore: 'Seçilenleri geri yükle',

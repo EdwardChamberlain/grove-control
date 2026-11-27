@@ -44,6 +44,16 @@ export default {
     installAppSuccess: 'Grove Control 已安裝',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: '多選',
+    exit: '結束選取',
+    count: '已選取 {{count}} 項',
+    selectItem: '選取項目',
+    deselectItem: '取消選取項目',
+    barLabel: '選取操作',
+  },
+
   // Common
   common: {
     plusNMore: '另 {{count}} 個',
@@ -2344,6 +2354,8 @@ export default {
       resetTooltip: '重設為預設值',
       selectedCount: '已選擇 {{count}} 項',
       deleteSelected: '刪除所選',
+      selectAll: '全選',
+      deselectAll: '取消全選',
       bulkDeleteConfirm: '確定要刪除 {{count}} 個條目嗎？',
       bulkDeleted: '已刪除 {{count}} 個條目',
       bulkDeleteFailed: '刪除條目失敗',
@@ -2398,6 +2410,8 @@ export default {
       importFailed: '匯入失敗：無效的 JSON 格式',
       selectedCount: '已選擇 {{count}} 項',
       deleteSelected: '刪除所選',
+      selectAll: '全選',
+      deselectAll: '取消全選',
       bulkDeleteConfirm: '確定要刪除 {{count}} 種顏色嗎？',
       bulkDeleted: '已刪除 {{count}} 種顏色',
       bulkDeleteFailed: '刪除顏色失敗',
@@ -6412,6 +6426,7 @@ export default {
     days: '天',
     retentionLabel: '自動刪除時間',
     selectAll: '全選',
+    deselectAll: '取消全選',
     selectOne: '選擇 {{filename}}',
     selectionCount: '已選擇 {{count}} 項',
     bulkRestore: '還原所選',

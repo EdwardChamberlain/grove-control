@@ -582,7 +582,7 @@ describe('QueuePage', () => {
         screen.getByRole('button', { name: 'All Status' }),
         screen.getByRole('button', { name: /By Printer/ }),
         screen.getByRole('button', { name: 'Sort by Position' }),
-        screen.getByRole('button', { name: 'Select All' }),
+        screen.getByTestId('select-mode-toggle'),
       ]) {
         expect(toolbar).toContainElement(control);
       }
@@ -1710,19 +1710,22 @@ describe('QueuePage', () => {
   });
 
   describe('selection checkbox on the thumbnail', () => {
-    it('renders an accessible checkbox for pending jobs that reveals on hover', async () => {
+    it('shows no job checkboxes until select mode is turned on', async () => {
+      const user = userEvent.setup();
       render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      expect(screen.queryByRole('checkbox', { name: 'Select Test Print 1' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('select-mode-toggle'));
 
       const checkbox = await screen.findByRole('checkbox', { name: 'Select Test Print 1' });
       expect(checkbox).not.toBeChecked();
-      const label = checkbox.closest('label') as HTMLElement;
-      // Keyed on hover capability, so touch screens of any width keep it visible.
-      expect(label.className).toContain('can-hover:opacity-0');
-      expect(label.className).toContain('group-hover:opacity-100');
-      expect(label.className).not.toContain('sm:opacity-0');
+      expect(screen.getByTestId('selection-bar')).toBeInTheDocument();
     });
 
-    it('selects a job from the checkbox and keeps every checkbox visible while something is selected', async () => {
+    it('selects a job from the checkbox or by clicking the card without opening the editor', async () => {
       const user = userEvent.setup();
       server.use(
         http.get('/api/v1/queue/', () => HttpResponse.json([
@@ -1732,12 +1735,14 @@ describe('QueuePage', () => {
       );
       render(<QueuePage />);
 
+      await user.click(await screen.findByTestId('select-mode-toggle'));
       await user.click(await screen.findByRole('checkbox', { name: 'Select Test Print 1' }));
 
       expect(screen.getByRole('checkbox', { name: 'Select Test Print 1' })).toBeChecked();
       expect(screen.getByText('1 selected')).toBeInTheDocument();
-      const other = screen.getByRole('checkbox', { name: 'Select Second Pending' });
-      expect((other.closest('label') as HTMLElement).className).not.toContain('can-hover:opacity-0');
+
+      await user.click(screen.getByText('Second Pending'));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
       expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
     });
   });
@@ -1781,7 +1786,8 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
 
-      await user.click(await screen.findByRole('button', { name: 'Select All' }));
+      await user.click(await screen.findByTestId('select-mode-toggle'));
+    await user.click(await screen.findByRole('button', { name: 'Select All' }));
 
       const edit = screen.getByRole('button', { name: 'Edit Selected' });
       const cancel = screen.getByRole('button', { name: 'Cancel Selected' });

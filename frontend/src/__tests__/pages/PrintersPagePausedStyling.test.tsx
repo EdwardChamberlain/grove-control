@@ -100,7 +100,7 @@ describe('Paused printer status markers', () => {
     const user = userEvent.setup();
     await screen.findAllByText('Paused Pete');
 
-    await user.click(screen.getByTitle('Select'));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(await screen.findByRole('button', { name: 'Select by State' }));
 
     // The menu option is the "Paused" button that starts with a coloured dot.
@@ -124,7 +124,7 @@ describe('Paused list row when selected', () => {
     const row = await screen.findByTestId('printer-list-row-1');
     await waitFor(() => expect(row).toHaveClass('bg-orange-500/10'));
 
-    await user.click(screen.getByTitle('Select'));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(await screen.findByRole('button', { name: 'Select All' }));
 
     await waitFor(() => expect(screen.getByTestId('printer-list-row-1')).toHaveClass('bg-bambu-green/10'));

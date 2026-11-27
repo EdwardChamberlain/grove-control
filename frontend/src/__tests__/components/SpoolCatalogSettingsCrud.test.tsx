@@ -199,10 +199,11 @@ describe('SpoolCatalogSettings CRUD', () => {
     render(<SpoolCatalogSettings />);
     await screen.findByText('My Reusable Spool');
 
-    const [selectAll] = screen.getAllByRole('checkbox');
-    await user.click(selectAll);
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Select all' }));
     expect(screen.getByText('3 selected')).toBeInTheDocument();
-    await user.click(selectAll);
+    await user.click(screen.getByRole('button', { name: 'Deselect all' }));
     await user.click(within(rowOf('My Reusable Spool')).getByRole('checkbox'));
     await user.click(within(rowOf('Bambu Lab - Cardboard')).getByRole('checkbox'));
     await user.click(within(rowOf('Bambu Lab - Cardboard')).getByRole('checkbox'));
@@ -312,6 +313,7 @@ describe('SpoolCatalogSettings CRUD', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await screen.findByText('Failed to delete entry')).toBeInTheDocument();
 
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(within(rowOf('My Reusable Spool')).getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: /Delete Selected/ }));
     await user.click(screen.getAllByRole('button', { name: /Delete/ }).pop()!);

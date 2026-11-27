@@ -44,6 +44,16 @@ export default {
     installAppSuccess: 'Grove Control wurde installiert',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: 'Mehrfachauswahl',
+    exit: 'Auswahl beenden',
+    count: '{{count}} ausgewählt',
+    selectItem: 'Element auswählen',
+    deselectItem: 'Auswahl aufheben',
+    barLabel: 'Auswahlaktionen',
+  },
+
   // Common
   common: {
     plusNMore: '+{{count}} weitere',
@@ -2344,6 +2354,8 @@ export default {
       resetTooltip: 'Auf Standardwerte zurücksetzen',
       selectedCount: '{{count}} ausgewählt',
       deleteSelected: 'Ausgewählte löschen',
+      selectAll: 'Alle auswählen',
+      deselectAll: 'Alle abwählen',
       bulkDeleteConfirm: 'Möchten Sie {{count}} Einträge wirklich löschen?',
       bulkDeleted: '{{count}} Einträge gelöscht',
       bulkDeleteFailed: 'Fehler beim Löschen der Einträge',
@@ -2398,6 +2410,8 @@ export default {
       importFailed: 'Import fehlgeschlagen: ungültiges JSON-Format',
       selectedCount: '{{count}} ausgewählt',
       deleteSelected: 'Ausgewählte löschen',
+      selectAll: 'Alle auswählen',
+      deselectAll: 'Alle abwählen',
       bulkDeleteConfirm: 'Möchten Sie {{count}} Farben wirklich löschen?',
       bulkDeleted: '{{count}} Farben gelöscht',
       bulkDeleteFailed: 'Fehler beim Löschen der Farben',
@@ -6427,6 +6441,7 @@ export default {
     days: 'Tage',
     retentionLabel: 'Automatisch löschen nach',
     selectAll: 'Alle auswählen',
+    deselectAll: 'Alle abwählen',
     selectOne: '{{filename}} auswählen',
     selectionCount: '{{count}} ausgewählt',
     bulkRestore: 'Auswahl wiederherstellen',

@@ -44,6 +44,16 @@ export default {
     installAppSuccess: 'Grove Controlをインストールしました',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: '複数選択',
+    exit: '選択を終了',
+    count: '{{count}}件選択中',
+    selectItem: '項目を選択',
+    deselectItem: '項目の選択を解除',
+    barLabel: '選択操作',
+  },
+
   // Common
   common: {
     plusNMore: '他{{count}}件',
@@ -2343,6 +2353,8 @@ export default {
       resetTooltip: 'デフォルトにリセット',
       selectedCount: '{{count}}件選択中',
       deleteSelected: '選択を削除',
+      selectAll: 'すべて選択',
+      deselectAll: 'すべて選択解除',
       bulkDeleteConfirm: '{{count}}件のエントリーを削除してもよろしいですか？',
       bulkDeleted: '{{count}}件のエントリーを削除しました',
       bulkDeleteFailed: 'エントリーの削除に失敗しました',
@@ -2397,6 +2409,8 @@ export default {
       importFailed: 'インポートに失敗しました：無効なJSON形式',
       selectedCount: '{{count}}件選択中',
       deleteSelected: '選択を削除',
+      selectAll: 'すべて選択',
+      deselectAll: 'すべて選択解除',
       bulkDeleteConfirm: '{{count}}件のカラーを削除してもよろしいですか？',
       bulkDeleted: '{{count}}件のカラーを削除しました',
       bulkDeleteFailed: 'カラーの削除に失敗しました',
@@ -6427,6 +6441,7 @@ export default {
     days: '日',
     retentionLabel: '自動削除までの期間',
     selectAll: 'すべて選択',
+    deselectAll: 'すべて選択解除',
     selectOne: '{{filename}} を選択',
     selectionCount: '{{count}} 件選択中',
     bulkRestore: '選択したものを復元',

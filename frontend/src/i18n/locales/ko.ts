@@ -42,6 +42,16 @@ export default {
     installApp: '앱 설치',
     installAppSuccess: 'Grove Control가 설치되었습니다'
   },
+  selection: {
+    toggle: '다중 선택',
+    exit: '선택 종료',
+    count: '{{count}}개 선택됨',
+    selectItem: '항목 선택',
+    deselectItem: '항목 선택 해제',
+    barLabel: '선택 작업',
+  },
+
+  // Common
   common: {
     plusNMore: '외 {{count}}개',
     save: '저장',
@@ -2219,6 +2229,8 @@ export default {
       resetTooltip: '기본값으로 초기화',
       selectedCount: '{{count}}개 선택됨',
       deleteSelected: '선택 항목 삭제',
+      selectAll: '모두 선택',
+      deselectAll: '모두 선택 해제',
       bulkDeleteConfirm: '{{count}}개 항목을 삭제하시겠습니까?',
       bulkDeleted: '{{count}}개 항목이 삭제되었습니다',
       bulkDeleteFailed: '항목 삭제 실패',
@@ -2273,6 +2285,8 @@ export default {
       importFailed: '가져오기 실패: 잘못된 JSON 형식',
       selectedCount: '{{count}}개 선택됨',
       deleteSelected: '선택 항목 삭제',
+      selectAll: '모두 선택',
+      deselectAll: '모두 선택 해제',
       bulkDeleteConfirm: '{{count}}개 색상을 삭제하시겠습니까?',
       bulkDeleted: '{{count}}개 색상이 삭제되었습니다',
       bulkDeleteFailed: '색상 삭제 실패'
@@ -5907,6 +5921,7 @@ export default {
     days: '일',
     retentionLabel: '자동 삭제 기간',
     selectAll: '모두 선택',
+    deselectAll: '모두 선택 해제',
     selectOne: '{{filename}} 선택',
     selectionCount: '{{count}}개 선택됨',
     bulkRestore: '선택 항목 복원',

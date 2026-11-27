@@ -5,7 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse, type JsonBodyType } from 'msw';
 import { render } from '../utils';
@@ -231,32 +231,24 @@ describe('file actions', () => {
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
   });
 
-  it('keeps the selection checkbox visible on mobile and hover-only on desktop', async () => {
+  it('only shows selection checkboxes once select mode is on', async () => {
+    const user = userEvent.setup();
     await ready();
-    const checkbox = () => screen.getByRole('checkbox', { name: 'Select benchy.gcode.3mf' });
-    expect(checkbox()).toHaveClass('opacity-0');
-    cleanup();
+    const checkbox = () => screen.queryByRole('checkbox', { name: 'Select benchy.gcode.3mf' });
+    expect(checkbox()).not.toBeInTheDocument();
 
-    const original = window.matchMedia;
-    window.matchMedia = ((query: string) => ({
-      matches: true, media: query, onchange: null,
-      addListener: () => {}, removeListener: () => {},
-      addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true,
-    })) as typeof window.matchMedia;
-    try {
-      await ready();
-      await waitFor(() => expect(checkbox()).toHaveClass('opacity-100'));
-      expect(checkbox()).not.toHaveClass('opacity-0');
-    } finally {
-      window.matchMedia = original;
-    }
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    expect(checkbox()).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    expect(checkbox()).not.toBeInTheDocument();
   });
 
   it('groups selected sliced files as versions', async () => {
     const user = userEvent.setup();
     await ready();
 
-    // Only the checkbox selects a card.
+    await user.click(screen.getByTestId('select-mode-toggle'));
     for (const name of ['benchy.gcode.3mf', 'cube.gcode.3mf']) {
       await user.click(screen.getByRole('checkbox', { name: new RegExp(`^Select ${name.replace('.', '\\.')}$`) }));
     }

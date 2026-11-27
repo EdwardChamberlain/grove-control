@@ -200,7 +200,12 @@ describe('single spool actions', () => {
 });
 
 describe('bulk actions', () => {
+  async function enterSelectMode(user: ReturnType<typeof userEvent.setup>) {
+    if (!screen.queryByTestId('selection-bar')) await user.click(screen.getByTestId('select-mode-toggle'));
+  }
+
   async function selectTwo(user: ReturnType<typeof userEvent.setup>) {
+    await enterSelectMode(user);
     await user.click(within(rowOf(1)).getByLabelText('Select row'));
     await user.click(within(rowOf(2)).getByLabelText('Select row'));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
@@ -245,9 +250,11 @@ describe('bulk actions', () => {
     const user = userEvent.setup();
     await ready();
 
-    await user.click(screen.getByLabelText('Select all visible'));
+    expect(screen.queryByLabelText('Select row')).not.toBeInTheDocument();
+    await enterSelectMode(user);
+    await user.click(screen.getByRole('button', { name: 'Select all visible' }));
     expect(screen.getByText('4 selected')).toBeInTheDocument();
-    await user.click(screen.getByLabelText('Clear selection'));
+    await user.click(screen.getByRole('button', { name: 'Exit selection' }));
     expect(screen.queryByText('4 selected')).not.toBeInTheDocument();
   });
 
@@ -256,6 +263,7 @@ describe('bulk actions', () => {
     await ready();
 
     await user.click(screen.getByRole('button', { name: 'Archived' }));
+    await enterSelectMode(user);
     await user.click(within(rowOf(5)).getByLabelText('Select row'));
     await user.click(within(bulkBar()).getByRole('button', { name: /^Restore$/ }));
     await confirm(user, /Restore/);

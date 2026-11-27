@@ -189,9 +189,10 @@ describe('KProfilesView — bulk actions', () => {
     const user = userEvent.setup();
     render(<KProfilesView />);
     await screen.findByText('High Flow_Bambu PLA Basic');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: /Select All/ }));
-    await user.click(screen.getByRole('button', { name: /Delete \(2\)/ }));
+    expect(within(screen.getByTestId('selection-bar')).getByText('2 selected')).toBeInTheDocument();
+    await user.click(within(screen.getByTestId('selection-bar')).getByRole('button', { name: 'Delete' }));
 
     const confirm = await screen.findAllByRole('button', { name: /^Delete$/ });
     await user.click(confirm[confirm.length - 1]);

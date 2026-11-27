@@ -84,7 +84,7 @@ function setStorage(values: Record<string, string>) {
 /** Enter selection mode and select every archive on the page. */
 async function selectAll(user: ReturnType<typeof userEvent.setup>) {
   await screen.findAllByText('Benchy');
-  await user.click(screen.getByRole('button', { name: /^Select$/ }));
+  await user.click(screen.getByTestId('select-mode-toggle'));
   await user.click(screen.getByRole('button', { name: 'Select All' }));
 }
 

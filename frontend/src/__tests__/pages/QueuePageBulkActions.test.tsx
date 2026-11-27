@@ -116,6 +116,7 @@ describe('QueuePage selection and bulk actions', () => {
     const user = userEvent.setup();
     render(<QueuePage />);
 
+    await user.click(await screen.findByTestId('select-mode-toggle'));
     await user.click(await screen.findByRole('button', { name: 'Select All' }));
     expect(screen.getByText('3 selected')).toBeInTheDocument();
 
@@ -128,6 +129,7 @@ describe('QueuePage selection and bulk actions', () => {
     const user = userEvent.setup();
     render(<QueuePage />);
 
+    await user.click(await screen.findByTestId('select-mode-toggle'));
     await user.click(await screen.findByRole('button', { name: 'Select All' }));
     await user.click(screen.getByRole('button', { name: /Edit Selected/ }));
 
@@ -165,6 +167,7 @@ describe('QueuePage selection and bulk actions', () => {
     const user = userEvent.setup();
     render(<QueuePage />);
 
+    await user.click(await screen.findByTestId('select-mode-toggle'));
     await user.click(await screen.findByRole('button', { name: 'Select All' }));
     await user.click(screen.getByRole('button', { name: /Edit Selected/ }));
     await user.click(screen.getByRole('combobox'));
@@ -179,6 +182,7 @@ describe('QueuePage selection and bulk actions', () => {
     const user = userEvent.setup();
     render(<QueuePage />);
 
+    await user.click(await screen.findByTestId('select-mode-toggle'));
     await user.click(await screen.findByRole('button', { name: 'Select All' }));
     await user.click(screen.getByRole('button', { name: /Cancel Selected/ }));
 

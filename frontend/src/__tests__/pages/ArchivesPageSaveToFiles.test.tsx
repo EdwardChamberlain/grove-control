@@ -114,7 +114,7 @@ describe('ArchivesPage — Save to Files', () => {
     const user = userEvent.setup();
     render(<ArchivesPage />);
     await screen.findByText('Benchy');
-    await user.click(screen.getByRole('button', { name: 'Select' }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     expect(screen.getByText('0 selected')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Save to Files' }));

@@ -64,7 +64,7 @@ describe('ArchivesPage bulk selection', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -87,13 +87,13 @@ describe('ArchivesPage bulk selection', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('2 selected')).not.toBeInTheDocument());
 
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
-    await user.click(screen.getByRole('button', { name: /Close/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Exit selection' }));
     expect(screen.queryByRole('button', { name: 'Select All' })).not.toBeInTheDocument();
   });
 
@@ -290,7 +290,7 @@ describe('ArchivesPage selection and the Filters panel', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -312,7 +312,7 @@ describe('ArchivesPage selection and the Filters panel', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -335,7 +335,7 @@ describe('ArchivesPage print log selection and limits', () => {
     render(<ArchivesPage />);
 
     await screen.findByText('Log Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
 
     // Archive 2 (Bracket) has no row in the log and the orphan has no archive: only archive 1 counts.

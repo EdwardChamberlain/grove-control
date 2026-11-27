@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Multi-select: every bulk-selection surface now works the same way as the
+  Printers page. No selection checkboxes show on items by default; a
+  multi-select icon in the page's header controls (beside its filters) turns on
+  select mode, which shows a checkbox over each selectable item and an action
+  bar at the bottom of the screen with the count and that page's actions. The
+  icon, the bar's close button and Esc leave select mode. This covers Printers,
+  History, K-Profiles, Files, Queue, Inventory (table view), Files → Trash, the
+  Spool and Color catalogs, and the on-printer file browser (#394). Files cards
+  and rows, and Queue jobs, are no longer selectable outside select mode.
 - Queue: the Timeline now shows a job that targets a printer model on the
   printer it would be dispatched to (#383). Three one-hour jobs for "Any P1S"
   with two idle P1S printers show two running side by side and one after, and

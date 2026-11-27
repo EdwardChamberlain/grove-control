@@ -14,14 +14,13 @@ import {
   Copy,
   Download,
   Upload,
-  CheckSquare,
-  Square,
   StickyNote,
 } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { api } from '../api/client';
 import type { KProfile, KProfileCreate, KProfileDelete, Permission } from '../api/client';
 import { Card, CardContent } from './Card';
+import { SelectModeToggle, SelectionBar, SelectionCheckbox, useSelection } from './selection';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -93,16 +92,7 @@ function KProfileCard({ profile, onEdit, onCopy, selectionMode, isSelected, onTo
   return (
     <div className="flex items-center gap-2">
       {selectionMode && (
-        <button
-          onClick={onToggleSelect}
-          className="text-bambu-gray hover:text-white transition-colors p-1"
-        >
-          {isSelected ? (
-            <CheckSquare className="w-4 h-4 text-bambu-green" />
-          ) : (
-            <Square className="w-4 h-4" />
-          )}
-        </button>
+        <SelectionCheckbox checked={!!isSelected} onToggle={() => onToggleSelect?.()} />
       )}
       <button
         onClick={handleClick}
@@ -723,8 +713,8 @@ export function KProfilesView() {
   });
   // Bulk selection mode
   // Use composite key: `${slot_id}_${extruder_id}` since slot_id alone is not unique across extruders
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedProfiles, setSelectedProfiles] = useState<Set<string>>(new Set());
+  const selection = useSelection<string>();
+  const { active: selectionMode, selected: selectedProfiles, exit: exitSelection } = selection;
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [bulkDeleteInProgress, setBulkDeleteInProgress] = useState(false);
 
@@ -926,16 +916,12 @@ export function KProfilesView() {
       } else if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
         setShowAddModal(true);
-      } else if (e.key === 'Escape' && selectionMode) {
-        e.preventDefault();
-        setSelectionMode(false);
-        setSelectedProfiles(new Set());
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingProfile, showAddModal, copyingProfile, selectionMode, refetchProfiles]);
+  }, [editingProfile, showAddModal, copyingProfile, refetchProfiles]);
 
   // Export profiles to JSON file
   const handleExport = useCallback(() => {
@@ -1023,22 +1009,12 @@ export function KProfilesView() {
   }, [selectedPrinter, nozzleDiameter, showToast, refetchProfiles, t]);
 
   // Toggle profile selection using composite key
-  const toggleProfileSelection = useCallback((profileKey: string) => {
-    setSelectedProfiles(prev => {
-      const next = new Set(prev);
-      if (next.has(profileKey)) {
-        next.delete(profileKey);
-      } else {
-        next.add(profileKey);
-      }
-      return next;
-    });
-  }, []);
+  const toggleProfileSelection = selection.toggle;
 
   // Select all visible profiles
   const selectAllProfiles = useCallback(() => {
-    setSelectedProfiles(new Set(filteredProfiles.map(p => getProfileKey(p))));
-  }, [filteredProfiles, getProfileKey]);
+    selection.set(filteredProfiles.map(p => getProfileKey(p)));
+  }, [filteredProfiles, getProfileKey, selection]);
 
   // Delete selected profiles
   const handleBulkDelete = useCallback(() => {
@@ -1073,10 +1049,9 @@ export function KProfilesView() {
     showToast(t('kProfiles.toast.profilesDeleted', { count: deleted }));
     setBulkDeleteInProgress(false);
     setShowBulkDeleteConfirm(false);
-    setSelectionMode(false);
-    setSelectedProfiles(new Set());
+    exitSelection();
     refetchProfiles();
-  }, [selectedPrinter, selectedProfiles, filteredProfiles, showToast, refetchProfiles, getProfileKey, t]);
+  }, [selectedPrinter, selectedProfiles, filteredProfiles, showToast, refetchProfiles, getProfileKey, exitSelection, t]);
 
   // Generate possible keys for a profile (for notes lookup)
   // Returns array of keys to check: setting_id, slot-based, name-based
@@ -1294,48 +1269,32 @@ export function KProfilesView() {
           {t('kProfiles.import')}
         </Button>
         <div className="flex-1" />
-        {selectionMode ? (
-          <>
-            <Button
-              variant="secondary"
-              onClick={selectAllProfiles}
-            >
-              <CheckSquare className="w-4 h-4" />
-              {t('kProfiles.selectAll')}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleBulkDelete}
-              disabled={selectedProfiles.size === 0 || !hasPermission('kprofiles:delete')}
-              className="text-red-500 hover:bg-red-500/10"
-              title={!hasPermission('kprofiles:delete') ? t('kProfiles.permission.noDelete') : undefined}
-            >
-              <Trash2 className="w-4 h-4" />
-              {t('kProfiles.delete')} ({selectedProfiles.size})
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSelectionMode(false);
-                setSelectedProfiles(new Set());
-              }}
-            >
-              <X className="w-4 h-4" />
-              {t('common.cancel')}
-            </Button>
-          </>
-        ) : (
+        <SelectModeToggle
+          active={selectionMode}
+          onToggle={selection.toggleMode}
+          disabled={(!selectionMode && !filteredProfiles.length) || !hasPermission('kprofiles:delete')}
+          title={!hasPermission('kprofiles:delete') ? t('kProfiles.permission.noDelete') : undefined}
+          className="!h-10 !px-3"
+        />
+      </div>
+
+      {selectionMode && (
+        <SelectionBar count={selectedProfiles.size} onClose={exitSelection}>
+          <Button variant="secondary" size="sm" onClick={selectAllProfiles}>
+            {t('kProfiles.selectAll')}
+          </Button>
           <Button
-            variant="secondary"
-            onClick={() => setSelectionMode(true)}
-            disabled={!filteredProfiles.length || !hasPermission('kprofiles:delete')}
+            size="sm"
+            className="bg-red-500 hover:bg-red-600"
+            onClick={handleBulkDelete}
+            disabled={selectedProfiles.size === 0 || !hasPermission('kprofiles:delete')}
             title={!hasPermission('kprofiles:delete') ? t('kProfiles.permission.noDelete') : undefined}
           >
-            <CheckSquare className="w-4 h-4" />
-            {t('kProfiles.select')}
+            <Trash2 className="w-4 h-4" />
+            {t('kProfiles.delete')}
           </Button>
-        )}
-      </div>
+        </SelectionBar>
+      )}
 
       {/* K-Profiles Grid */}
       {kprofilesLoading ? (
