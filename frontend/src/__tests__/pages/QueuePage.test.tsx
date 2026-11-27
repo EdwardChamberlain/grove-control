@@ -1020,6 +1020,23 @@ describe('QueuePage', () => {
       });
     });
 
+    it('puts the filament-short message and the Start button in one footer', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([shortItem])),
+      );
+
+      render(<QueuePage />);
+
+      const message = await screen.findByText(/Insufficient filament for the assigned spool/i);
+      const startButton = document.querySelector<HTMLButtonElement>('button[title="Start Print"], button[title="You do not have permission to start prints"]');
+      expect(startButton).not.toBeNull();
+
+      // Both sit in the same strip, so the job has a single footer border.
+      const footer = message.closest('div.border-t');
+      expect(footer).not.toBeNull();
+      expect(footer).toContainElement(startButton);
+    });
+
     it('opens the Print Anyway modal when ▶ returns 409 and retries with skip_filament_check', async () => {
       let secondCallSkippedCheck: boolean | null = null;
       let attempts = 0;
