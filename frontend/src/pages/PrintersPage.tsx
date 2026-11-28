@@ -47,7 +47,6 @@ import {
   X,
   Download,
   CheckCircle,
-  CheckSquare,
   User,
   Home,
   Printer as PrinterIcon,
@@ -81,6 +80,7 @@ import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ToolbarDropdown, ToolbarMenu, ReactSelect } from '../components/ToolbarControls';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { SelectModeToggle, SelectionCheckbox, useSelection } from '../components/selection';
 import { BulkPrinterToolbar, type PrinterState } from '../components/BulkPrinterToolbar';
 import { FileManagerModal } from '../components/FileManagerModal';
 import { EmbeddedCameraViewer } from '../components/EmbeddedCameraViewer';
@@ -926,17 +926,12 @@ function PrinterListRow({
       />
       <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3 px-3 py-2.5 md:hidden">
         {selectionMode && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleSelect?.(printer.id);
-            }}
-            className="pointer-events-auto shrink-0 text-bambu-gray hover:text-bambu-green"
-            aria-label={isSelected ? t('printers.bulk.deselectPrinter', 'Deselect printer') : t('printers.bulk.selectPrinter', 'Select printer')}
-          >
-            {isSelected ? <CheckSquare className="h-4 w-4 text-bambu-green" /> : <Square className="h-4 w-4" />}
-          </button>
+          <SelectionCheckbox
+            checked={!!isSelected}
+            onToggle={() => onToggleSelect?.(printer.id)}
+            label={printer.name}
+            className="pointer-events-auto"
+          />
         )}
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -974,17 +969,12 @@ function PrinterListRow({
       <div className="pointer-events-none relative z-10 hidden min-w-[820px] grid-cols-[minmax(15rem,1.5fr)_minmax(8rem,0.8fr)_minmax(9rem,0.9fr)_minmax(13rem,1.25fr)_minmax(10rem,0.85fr)] items-center gap-3 px-3 py-2.5 md:grid">
         <div className="flex min-w-0 items-center gap-3">
           {selectionMode && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleSelect?.(printer.id);
-              }}
-              className="pointer-events-auto shrink-0 text-bambu-gray hover:text-bambu-green"
-              aria-label={isSelected ? t('printers.bulk.deselectPrinter', 'Deselect printer') : t('printers.bulk.selectPrinter', 'Select printer')}
-            >
-              {isSelected ? <CheckSquare className="h-4 w-4 text-bambu-green" /> : <Square className="h-4 w-4" />}
-            </button>
+            <SelectionCheckbox
+              checked={!!isSelected}
+              onToggle={() => onToggleSelect?.(printer.id)}
+              label={printer.name}
+              className="pointer-events-auto"
+            />
           )}
           <img
             src={getPrinterImage(printer.model)}
@@ -4172,11 +4162,11 @@ function PrinterCard({
           className="absolute inset-0 z-20 flex items-start p-2"
           onClick={(e) => { e.stopPropagation(); onToggleSelect?.(printer.id); }}
         >
-          {isSelected ? (
-            <CheckSquare className="w-5 h-5 text-bambu-green" />
-          ) : (
-            <Square className="w-5 h-5 text-bambu-gray" />
-          )}
+          <SelectionCheckbox
+            checked={!!isSelected}
+            onToggle={() => onToggleSelect?.(printer.id)}
+            label={printer.name}
+          />
         </div>
       )}
       {/* Drop zone overlay */}
@@ -6892,36 +6882,10 @@ export function PrintersPage() {
   });
 
   // Bulk selection state
-  const [selectedPrinterIds, setSelectedPrinterIds] = useState<Set<number>>(new Set());
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const selection = useSelection<number>();
   const [bulkConfirmAction, setBulkConfirmAction] = useState<'stop' | 'pause' | 'clearPlate' | null>(null);
   const [bulkActionPending, setBulkActionPending] = useState(false);
-  const selectionMode = isSelectionMode || selectedPrinterIds.size > 0;
-
-  const toggleSelect = useCallback((id: number) => {
-    setSelectedPrinterIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const clearSelection = useCallback(() => {
-    setSelectedPrinterIds(new Set());
-    setIsSelectionMode(false);
-  }, []);
-
-  // Escape key exits selection mode
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && selectionMode) {
-        clearSelection();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectionMode, clearSelection]);
+  const { active: selectionMode, selected: selectedPrinterIds, toggle: toggleSelect, exit: clearSelection } = selection;
 
   const executeBulkAction = useCallback(async (action: 'stop' | 'pause' | 'resume' | 'clearPlate' | 'clearHMS') => {
     setBulkActionPending(true);
@@ -7155,39 +7119,23 @@ export function PrintersPage() {
   }, [selectedSinglePrinter, selectedSinglePrinterId]);
 
   const selectAll = useCallback(() => {
-    setSelectedPrinterIds(new Set(sortedPrinters.map(p => p.id)));
-    setIsSelectionMode(true);
-  }, [sortedPrinters]);
+    selection.set(sortedPrinters.map(p => p.id));
+  }, [sortedPrinters, selection]);
 
   const selectByState = useCallback((state: PrinterState) => {
-    setSelectedPrinterIds(prev => {
-      const next = new Set(prev);
-      sortedPrinters.forEach(p => {
-        const status = queryClient.getQueryData<{ connected: boolean; state: string | null; hms_errors?: HMSError[] }>(['printerStatus', p.id]);
-        if (classifyPrinterStatus(status) === state) next.add(p.id);
-      });
-      return next;
-    });
-    setIsSelectionMode(true);
-  }, [sortedPrinters, queryClient]);
+    selection.add(sortedPrinters.filter(p => {
+      const status = queryClient.getQueryData<{ connected: boolean; state: string | null; hms_errors?: HMSError[] }>(['printerStatus', p.id]);
+      return classifyPrinterStatus(status) === state;
+    }).map(p => p.id));
+  }, [sortedPrinters, queryClient, selection]);
 
   const selectByLocation = useCallback((location: string) => {
-    setSelectedPrinterIds(prev => {
-      const next = new Set(prev);
-      sortedPrinters.filter(p => (p.location || '') === location).forEach(p => next.add(p.id));
-      return next;
-    });
-    setIsSelectionMode(true);
-  }, [sortedPrinters]);
+    selection.add(sortedPrinters.filter(p => (p.location || '') === location).map(p => p.id));
+  }, [sortedPrinters, selection]);
 
   const selectByModel = useCallback((model: string) => {
-    setSelectedPrinterIds(prev => {
-      const next = new Set(prev);
-      sortedPrinters.filter(p => (p.model || 'Unknown') === model).forEach(p => next.add(p.id));
-      return next;
-    });
-    setIsSelectionMode(true);
-  }, [sortedPrinters]);
+    selection.add(sortedPrinters.filter(p => (p.model || 'Unknown') === model).map(p => p.id));
+  }, [sortedPrinters, selection]);
 
   const toggleSectionCollapse = useCallback((key: string) => {
     setCollapsedSections(prev => {
@@ -7398,22 +7346,12 @@ export function PrintersPage() {
   const renderActionControls = (inMenu = false) => (
     <>
       {/* Bulk select toggle */}
-      <button
-        onClick={() => {
-          if (selectionMode) clearSelection();
-          else setIsSelectionMode(true);
-        }}
-        className={`h-8 px-2 rounded-lg border transition-colors ${inMenu ? 'w-full justify-center gap-1.5 text-sm font-medium flex items-center' : ''} ${
-          selectionMode
-            ? 'bg-bambu-green border-bambu-green text-white'
-            : 'bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary'
-        }`}
-        title={t('printers.bulk.select')}
+      <SelectModeToggle
+        active={selectionMode}
+        onToggle={selection.toggleMode}
+        variant={inMenu ? 'menu' : 'icon'}
         disabled={!hasPermission('printers:control')}
-      >
-        <CheckSquare className="w-4 h-4" />
-        {inMenu && <span>{t('printers.bulk.select')}</span>}
-      </button>
+      />
 
       {/* Power dropdown for offline printers with smart plugs */}
       {hideDisconnected && Object.keys(smartPlugByPrinter).length > 0 && (

@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  X,
   Square,
   Pause,
   Play,
@@ -12,6 +11,7 @@ import {
   Eraser,
 } from 'lucide-react';
 import { Button } from './Button';
+import { SelectionBar, SelectionBarDivider } from './selection';
 import { filterKnownHMSErrors } from './HMSErrorModal';
 import type { Printer, HMSError } from '../api/client';
 
@@ -26,7 +26,7 @@ interface PrinterStatus {
 }
 
 interface BulkPrinterToolbarProps {
-  selectedIds: Set<number>;
+  selectedIds: ReadonlySet<number>;
   printers: Printer[];
   onClose: () => void;
   onSelectAll: () => void;
@@ -118,21 +118,7 @@ export function BulkPrinterToolbar({
   };
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl px-4 py-3 flex items-center gap-3 flex-wrap">
-      {/* Close */}
-      <Button variant="secondary" size="sm" onClick={onClose}>
-        <X className="w-4 h-4" />
-      </Button>
-
-      <div className="w-px h-6 bg-bambu-dark-tertiary" />
-
-      {/* Selection count */}
-      <span className="text-white font-medium text-sm">
-        {t('printers.bulk.selected', { count: selectedIds.size })}
-      </span>
-
-      <div className="w-px h-6 bg-bambu-dark-tertiary" />
-
+    <SelectionBar count={selectedIds.size} onClose={onClose}>
       {/* Select All */}
       <Button variant="secondary" size="sm" onClick={onSelectAll}>
         {t('printers.bulk.selectAll')}
@@ -210,7 +196,7 @@ export function BulkPrinterToolbar({
         </div>
       )}
 
-      <div className="w-px h-6 bg-bambu-dark-tertiary" />
+      <SelectionBarDivider />
 
       {/* Action buttons */}
       <Button
@@ -267,6 +253,6 @@ export function BulkPrinterToolbar({
         <Eraser className="w-3.5 h-3.5" />
         {t('printers.bulk.actions.clearPlate')}
       </Button>
-    </div>
+    </SelectionBar>
   );
 }

@@ -200,7 +200,12 @@ describe('single spool actions', () => {
 });
 
 describe('bulk actions', () => {
+  async function enterSelectMode(user: ReturnType<typeof userEvent.setup>) {
+    if (!screen.queryByTestId('selection-bar')) await user.click(screen.getByTestId('select-mode-toggle'));
+  }
+
   async function selectTwo(user: ReturnType<typeof userEvent.setup>) {
+    await enterSelectMode(user);
     await user.click(within(rowOf(1)).getByLabelText('Select row'));
     await user.click(within(rowOf(2)).getByLabelText('Select row'));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
@@ -241,13 +246,68 @@ describe('bulk actions', () => {
     expect(await screen.findByText('2 spools updated')).toBeInTheDocument();
   });
 
+  it('disables the bulk actions until something is selected', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await enterSelectMode(user);
+
+    const bar = within(screen.getByTestId('selection-bar'));
+    for (const name of [/^Edit$/, /Print labels/, /Reset usage/, /^Archive$/, /^Delete$/]) {
+      expect(bar.getByRole('button', { name })).toBeDisabled();
+    }
+
+    await user.click(within(rowOf(1)).getByLabelText('Select row'));
+    expect(bar.getByRole('button', { name: /^Delete$/ })).toBeEnabled();
+  });
+
+  it('flips Select all visible to Deselect visible once the whole page is selected', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await enterSelectMode(user);
+
+    await user.click(screen.getByRole('button', { name: 'Select all visible' }));
+    expect(screen.getByRole('button', { name: 'Deselect visible' })).toBeInTheDocument();
+    expect(screen.getByText('4 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Deselect visible' }));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select all visible' })).toBeInTheDocument();
+  });
+
+  it('opens the label picker for the selection from the bar', async () => {
+    const user = userEvent.setup();
+    await ready();
+
+    await selectTwo(user);
+    await user.click(within(bulkBar()).getByRole('button', { name: /Print labels/ }));
+
+    expect(await screen.findByText('Print spool labels')).toBeInTheDocument();
+  });
+
+  it('selects and deselects a whole group from its checkbox', async () => {
+    const user = userEvent.setup();
+    await ready();
+
+    await user.click(screen.getByTitle('Group'));
+    await enterSelectMode(user);
+    const groupBox = screen.getByRole('checkbox', { name: 'Select group' });
+    await user.click(groupBox);
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select group' })).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(screen.getByRole('checkbox', { name: 'Select group' }));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
   it('selects all visible rows and clears the selection', async () => {
     const user = userEvent.setup();
     await ready();
 
-    await user.click(screen.getByLabelText('Select all visible'));
+    expect(screen.queryByLabelText('Select row')).not.toBeInTheDocument();
+    await enterSelectMode(user);
+    await user.click(screen.getByRole('button', { name: 'Select all visible' }));
     expect(screen.getByText('4 selected')).toBeInTheDocument();
-    await user.click(screen.getByLabelText('Clear selection'));
+    await user.click(screen.getByRole('button', { name: 'Exit selection' }));
     expect(screen.queryByText('4 selected')).not.toBeInTheDocument();
   });
 
@@ -256,6 +316,7 @@ describe('bulk actions', () => {
     await ready();
 
     await user.click(screen.getByRole('button', { name: 'Archived' }));
+    await enterSelectMode(user);
     await user.click(within(rowOf(5)).getByLabelText('Select row'));
     await user.click(within(bulkBar()).getByRole('button', { name: /^Restore$/ }));
     await confirm(user, /Restore/);

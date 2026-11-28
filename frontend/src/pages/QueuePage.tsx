@@ -36,8 +36,6 @@ import {
   ListOrdered,
   ArrowUp,
   ArrowDown,
-  CheckSquare,
-  Square,
   List,
   GanttChart,
   Package,
@@ -50,6 +48,7 @@ import { api, ApiError } from '../api/client';
 import { type TimeFormat, formatDuration, parseUTCDate } from '../utils/date';
 import type { Printer as PrinterRecord, PrinterStatus, PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
 import { Card } from '../components/Card';
+import { SelectModeToggle, SelectionBar, SelectionBarDivider, SelectionCheckbox, useSelection } from '../components/selection';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { PrintModal } from '../components/PrintModal';
@@ -65,7 +64,7 @@ import { PlateClearLine } from '../components/queue/PlateClearLine';
 import { needsPlateClear } from '../utils/plateClear';
 import { formatWeight } from '../components/queue/format';
 import { jobProgressFromStatus, pauseReasonKeyFor, resolveQueueTone } from '../components/queue/queueTones';
-import { ToolbarDropdown, ReactSelect, toolbarControlClass, toolbarIconButtonClass } from '../components/ToolbarControls';
+import { ToolbarDropdown, ReactSelect, toolbarIconButtonClass } from '../components/ToolbarControls';
 
 /** The square cancel/stop button at the right of a queue card. */
 function QueueActionButton({
@@ -341,7 +340,7 @@ function SortableQueueItem({
   onStart: () => void;
   timeFormat?: TimeFormat;
   isSelected?: boolean;
-  /** True while any job is ticked: every card then shows its checkbox. */
+  /** True while select mode is on: pending cards show a checkbox and a click toggles them. */
   selectionActive?: boolean;
   onToggleSelect?: () => void;
   hasPermission: (permission: Permission) => boolean;
@@ -414,17 +413,20 @@ function SortableQueueItem({
   const canUpdate = canModify('queue', 'update', item.created_by_id);
   const canDelete = canModify('queue', 'delete', item.created_by_id);
   const canEditItem = isPending && canUpdate;
-  const showCheckbox = isPending && !!onToggleSelect;
-  const checkboxAlwaysVisible = isSelected || selectionActive;
+  const showCheckbox = isPending && selectionActive && !!onToggleSelect;
   const stopTitle = !canUpdate ? t('queue.permissions.noStopPrint') : t('queue.actions.stopPrint');
 
   const pauseReasonKey = isPrinting && printerState === 'PAUSE' ? pauseReasonKeyFor(status) : undefined;
   const progress = isPrinting && status ? jobProgressFromStatus(status) : null;
 
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!canEditItem) return;
-    // Links, buttons, inputs and the drag handle keep their own behaviour.
+    // Links, buttons, inputs and the drag handle keep their own behaviour, in select mode too.
     if ((e.target as HTMLElement).closest('a, button, input, label, [data-no-card-click]')) return;
+    if (showCheckbox) {
+      onToggleSelect?.();
+      return;
+    }
+    if (!canEditItem) return;
     onEdit();
   };
 
@@ -502,28 +504,22 @@ function SortableQueueItem({
         </>
       )}
       thumbnailAdornment={showCheckbox && (
-        <label
-          className={`absolute -left-2 -top-2 flex h-6 w-6 cursor-pointer items-center justify-center rounded-[7px] border bg-bambu-dark shadow-md transition-opacity ${
+        <div
+          className={`absolute -left-2 -top-2 z-10 flex items-center justify-center rounded-[7px] border bg-bambu-dark p-0.5 shadow-md ${
             isSelected ? 'border-bambu-green' : 'border-bambu-gray-dark'
-          } ${
-            checkboxAlwaysVisible
-              ? 'opacity-100'
-              : 'can-hover:opacity-0 group-hover:opacity-100 focus-within:opacity-100'
           }`}
         >
-          <input
-            type="checkbox"
+          <SelectionCheckbox
             checked={isSelected}
-            onChange={() => onToggleSelect?.()}
-            aria-label={t('queue.selectJob', { name: displayName })}
-            className="m-0 h-4 w-4 cursor-pointer accent-bambu-green"
+            onToggle={() => onToggleSelect?.()}
+            label={t('queue.selectJob', { name: displayName })}
           />
-        </label>
+        </div>
       )}
       title={canEditItem ? (
         <button
           type="button"
-          onClick={onEdit}
+          onClick={showCheckbox ? () => onToggleSelect?.() : onEdit}
           title={t('common.edit')}
           className="min-w-0 truncate text-left text-sm font-semibold text-white hover:underline hover:decoration-bambu-gray-light hover:underline-offset-[3px] focus-visible:underline sm:text-[15px]"
         >
@@ -612,6 +608,7 @@ interface QueueRowRenderProps {
   setConfirmAction: (a: { type: 'cancel' | 'remove' | 'stop'; item: PrintQueueItem }) => void;
   startMutation: { mutate: (vars: { id: number; skipFilamentCheck?: boolean }) => void };
   selectedItems: number[];
+  selectionActive: boolean;
   handleToggleSelect: (id: number) => void;
   timeFormat: TimeFormat;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -630,6 +627,7 @@ function QueueRowRender({
   setConfirmAction,
   startMutation,
   selectedItems,
+  selectionActive,
   handleToggleSelect,
   timeFormat,
   hasPermission,
@@ -648,7 +646,7 @@ function QueueRowRender({
       onStart={() => startMutation.mutate({ id: row.item.id })}
       timeFormat={timeFormat}
       isSelected={selectedItems.includes(row.item.id)}
-      selectionActive={selectedItems.length > 0}
+      selectionActive={selectionActive}
       onToggleSelect={() => handleToggleSelect(row.item.id)}
       hasPermission={hasPermission}
       canModify={canModify}
@@ -794,7 +792,9 @@ export function QueuePage() {
   // Everything the user has ticked, including jobs a filter or search currently
   // hides. Typing in the search never changes it; `selectedItems` below is the
   // visible part, which is all that bulk actions and drags ever act on.
-  const [selectedIds, setSelectedItems] = useState<number[]>([]);
+  const selection = useSelection<number>();
+  const { selected: selectedIdSet, active: selectionActive, exit: exitSelection } = selection;
+  const selectedIds = useMemo(() => Array.from(selectedIdSet), [selectedIdSet]);
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   // #1818: per-printer Resume-after-failure confirm modal. Tracks which
   // printer's gate the user is about to clear; null when no modal is open.
@@ -868,7 +868,8 @@ export function QueuePage() {
 
   useEffect(() => {
     localStorage.setItem('queue.activeTab', activeTab);
-  }, [activeTab]);
+    if (activeTab !== 'queue') exitSelection();
+  }, [activeTab, exitSelection]);
 
   useEffect(() => {
     localStorage.setItem('queue.activeLayout', activeLayout);
@@ -1023,13 +1024,21 @@ export function QueuePage() {
     onError: () => showToast(t('queue.toast.clearHistoryFailed'), 'error'),
   });
 
+  // After a bulk action: drop the jobs acted on, and any that have since left the pending
+  // list, but keep selections a filter hides. Leave select mode when nothing is left.
+  const finishBulkAction = (actedIds: number[]) => {
+    const pendingIds = new Set((queue ?? []).filter((i) => i.status === 'pending').map((i) => i.id));
+    const remaining = selectedIds.filter((id) => !actedIds.includes(id) && pendingIds.has(id));
+    if (remaining.length === 0) selection.exit();
+    else selection.set(remaining);
+  };
+
   const bulkUpdateMutation = useMutation({
     mutationFn: (data: PrintQueueBulkUpdate) => api.bulkUpdateQueue(data),
     onSuccess: (result, variables) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      // Only the jobs acted on; selections a filter hides are kept.
-      setSelectedItems((prev) => prev.filter((id) => !variables.item_ids.includes(id)));
+      finishBulkAction(variables.item_ids);
       setShowBulkEditModal(false);
       showToast(result.message);
     },
@@ -1046,8 +1055,7 @@ export function QueuePage() {
     onSuccess: (count, ids) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
-      // Only the jobs cancelled; selections a filter hides are kept.
-      setSelectedItems((prev) => prev.filter((id) => !ids.includes(id)));
+      finishBulkAction(ids);
       showToast(t('queue.toast.bulkCancelled', { count }));
     },
     onError: () => showToast(t('queue.toast.bulkCancelFailed'), 'error'),
@@ -1069,11 +1077,7 @@ export function QueuePage() {
     onError: () => showToast(t('queue.toast.resumeAfterFailureFailed'), 'error'),
   });
 
-  const handleToggleSelect = (id: number) => {
-    setSelectedItems(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
+  const handleToggleSelect = selection.toggle;
 
   // Get unique locations from printers for the filter dropdown
   const uniqueLocations = useMemo(() => {
@@ -1160,9 +1164,9 @@ export function QueuePage() {
     // the current search are left alone.
     const visibleIds = pendingItems.map(i => i.id);
     if (allVisibleSelected) {
-      setSelectedItems(prev => prev.filter(id => !visibleIds.includes(id)));
+      selection.remove(visibleIds);
     } else {
-      setSelectedItems(prev => [...prev, ...visibleIds.filter(id => !prev.includes(id))]);
+      selection.add(visibleIds);
     }
   };
 
@@ -1813,56 +1817,9 @@ export function QueuePage() {
           </>
         )}
 
-        {activeTab === 'queue' && pendingItems.length > 0 && (
+        {activeTab === 'queue' && (pendingItems.length > 0 || selectionActive) && (
           <div className="flex flex-wrap items-center gap-2 ml-auto">
-            {hiddenSelectedCount > 0 && (
-              <span className="text-xs sm:text-sm text-bambu-gray" data-testid="queue-hidden-selected">
-                {t('queue.bulkEdit.hiddenSelected', { count: hiddenSelectedCount })}
-              </span>
-            )}
-            {selectedItems.length > 0 && (
-              <>
-                <span className="text-xs sm:text-sm text-bambu-gray">
-                  {t('queue.bulkEdit.selected', { count: selectedItems.length })}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowBulkEditModal(true)}
-                  className="flex items-center gap-1.5 text-xs sm:text-sm text-bambu-green hover:text-bambu-green-light"
-                  disabled={!hasAnyPermission('queue:update_own', 'queue:update_all')}
-                  title={!hasAnyPermission('queue:update_own', 'queue:update_all') ? t('queue.permissions.noEditItems') : t('queue.bulkEdit.editSelected')}
-                  aria-label={t('queue.bulkEdit.editSelected')}
-                >
-                  <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span className="hidden 2xl:inline">{t('queue.bulkEdit.editSelected')}</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => bulkCancelMutation.mutate(selectedItems)}
-                  className="flex items-center gap-1.5 text-xs sm:text-sm text-red-400 hover:text-red-300"
-                  disabled={bulkCancelMutation.isPending || !hasAnyPermission('queue:delete_own', 'queue:delete_all')}
-                  title={!hasAnyPermission('queue:delete_own', 'queue:delete_all') ? t('queue.permissions.noCancelItems') : t('queue.bulkEdit.cancelSelected')}
-                  aria-label={t('queue.bulkEdit.cancelSelected')}
-                >
-                  <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span className="hidden 2xl:inline">{t('queue.bulkEdit.cancelSelected')}</span>
-                </Button>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={handleSelectAll}
-              className={`${toolbarControlClass} flex items-center gap-2`}
-            >
-              {allVisibleSelected ? (
-                <CheckSquare className="w-4 h-4 text-bambu-green" />
-              ) : (
-                <Square className="w-4 h-4 text-bambu-gray" />
-              )}
-              {allVisibleSelected ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
-            </button>
+            <SelectModeToggle active={selectionActive} onToggle={selection.toggleMode} />
           </div>
         )}
 
@@ -2016,6 +1973,7 @@ export function QueuePage() {
                           setConfirmAction={setConfirmAction}
                           startMutation={startMutation}
                           selectedItems={selectedItems}
+                          selectionActive={selectionActive}
                           handleToggleSelect={handleToggleSelect}
                           timeFormat={timeFormat}
                           hasPermission={hasPermission}
@@ -2050,6 +2008,7 @@ export function QueuePage() {
                                   setConfirmAction={setConfirmAction}
                                   startMutation={startMutation}
                                   selectedItems={selectedItems}
+                                  selectionActive={selectionActive}
                                   handleToggleSelect={handleToggleSelect}
                                   timeFormat={timeFormat}
                                   hasPermission={hasPermission}
@@ -2223,6 +2182,42 @@ export function QueuePage() {
           }}
           onCancel={() => setShowClearHistoryConfirm(false)}
         />
+      )}
+
+      {selectionActive && activeTab === 'queue' && (
+        <SelectionBar count={selectedItems.length} onClose={selection.exit}>
+          <Button variant="secondary" size="sm" onClick={handleSelectAll}>
+            {allVisibleSelected ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
+          </Button>
+          {hiddenSelectedCount > 0 && (
+            <span className="text-xs sm:text-sm text-bambu-gray" data-testid="queue-hidden-selected">
+              {t('queue.bulkEdit.hiddenSelected', { count: hiddenSelectedCount })}
+            </span>
+          )}
+          <SelectionBarDivider />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowBulkEditModal(true)}
+            disabled={selectedItems.length === 0 || !hasAnyPermission('queue:update_own', 'queue:update_all')}
+            title={!hasAnyPermission('queue:update_own', 'queue:update_all') ? t('queue.permissions.noEditItems') : t('queue.bulkEdit.editSelected')}
+            aria-label={t('queue.bulkEdit.editSelected')}
+          >
+            <Pencil className="w-4 h-4" />
+            <span className="hidden sm:inline">{t('queue.bulkEdit.editSelected')}</span>
+          </Button>
+          <Button
+            size="sm"
+            className="bg-red-500 hover:bg-red-600"
+            onClick={() => bulkCancelMutation.mutate(selectedItems)}
+            disabled={selectedItems.length === 0 || bulkCancelMutation.isPending || !hasAnyPermission('queue:delete_own', 'queue:delete_all')}
+            title={!hasAnyPermission('queue:delete_own', 'queue:delete_all') ? t('queue.permissions.noCancelItems') : t('queue.bulkEdit.cancelSelected')}
+            aria-label={t('queue.bulkEdit.cancelSelected')}
+          >
+            <X className="w-4 h-4" />
+            <span className="hidden sm:inline">{t('queue.bulkEdit.cancelSelected')}</span>
+          </Button>
+        </SelectionBar>
       )}
 
       {/* Bulk Edit Modal */}

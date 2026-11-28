@@ -44,6 +44,18 @@ export default {
     installAppSuccess: 'Grove Control was installed',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: 'Select multiple',
+    exit: 'Exit selection',
+    count: '{{count}} selected',
+    selectItem: 'Select item',
+    deselectItem: 'Deselect item',
+    barLabel: 'Selection actions',
+    selectAll: 'Select All',
+    deselectAll: 'Deselect All',
+  },
+
   // Common
   common: {
     plusNMore: '+{{count}} more',
@@ -505,10 +517,8 @@ export default {
     },
     // Bulk actions
     bulk: {
-      select: 'Select',
       selectAll: 'Select All',
       selectByLocation: 'Select by Location',
-      selected: '{{count}} selected',
       actions: {
         stop: 'Stop',
         pause: 'Pause',
@@ -797,7 +807,6 @@ export default {
       exportCsv: 'Export as CSV',
       exportExcel: 'Export as Excel',
       compare: 'Compare',
-      select: 'Select',
       allMaterials: 'All Materials',
       allFiles: 'All Files',
       sliced: 'Sliced (GCODE)',
@@ -1318,7 +1327,6 @@ export default {
       applyChanges: 'Apply Changes',
       selectAll: 'Select All',
       deselectAll: 'Deselect All',
-      selected: '{{count}} selected',
       hiddenSelected: '{{count}} hidden by filters',
       editSelected: 'Edit Selected',
       cancelSelected: 'Cancel Selected',
@@ -2365,8 +2373,9 @@ export default {
       exportTooltip: 'Export catalog to JSON',
       importTooltip: 'Import catalog from JSON',
       resetTooltip: 'Reset to defaults',
-      selectedCount: '{{count}} selected',
       deleteSelected: 'Delete Selected',
+      selectAll: 'Select all',
+      deselectAll: 'Deselect all',
       bulkDeleteConfirm: 'Are you sure you want to delete {{count}} entries?',
       bulkDeleted: 'Deleted {{count}} entries',
       bulkDeleteFailed: 'Failed to delete entries',
@@ -2419,8 +2428,9 @@ export default {
       exported: 'Exported {{count}} colors',
       imported: 'Imported {{added}} colors ({{skipped}} skipped)',
       importFailed: 'Failed to import: invalid JSON format',
-      selectedCount: '{{count}} selected',
       deleteSelected: 'Delete Selected',
+      selectAll: 'Select all',
+      deselectAll: 'Deselect all',
       bulkDeleteConfirm: 'Are you sure you want to delete {{count}} colors?',
       bulkDeleted: 'Deleted {{count}} colors',
       bulkDeleteFailed: 'Failed to delete colors',
@@ -3658,7 +3668,6 @@ export default {
     resultsCount: '{{showing}} of {{total}} files',
     selectAll: 'Select All',
     deselectAll: 'Deselect All',
-    selected: '{{count}} selected',
     adding: 'Adding...',
     loadingFiles: 'Loading files...',
     folderIsEmpty: 'Folder is empty',
@@ -4111,16 +4120,15 @@ export default {
     unknownSpoolSlot: 'Slot',
     bulk: {
       selectAllVisible: 'Select all visible',
+      deselectVisible: 'Deselect visible',
       selectRow: 'Select row',
       selectGroup: 'Select group',
-      selectionCount: '{{count}} selected',
       edit: 'Edit',
       printLabels: 'Print labels',
       resetUsage: 'Reset usage',
       restore: 'Restore',
       archive: 'Archive',
       delete: 'Delete',
-      clearSelection: 'Clear selection',
       editTitle: 'Bulk edit spools',
       editSubtitle: 'Applies to {{count}} selected spools. Only fields you tick get updated.',
       editHint: 'Type into a field to mark it for update — only ticked rows are sent. Leaving a field empty leaves the spools unchanged (clearing fields is per-spool only).',
@@ -4971,7 +4979,6 @@ export default {
     addProfile: 'Add Profile',
     export: 'Export',
     import: 'Import',
-    select: 'Select',
     selectAll: 'Select All',
     delete: 'Delete',
     // Filters
@@ -6461,8 +6468,8 @@ export default {
     days: 'days',
     retentionLabel: 'Auto-delete after',
     selectAll: 'Select all',
+    deselectAll: 'Deselect all',
     selectOne: 'Select {{filename}}',
-    selectionCount: '{{count}} selected',
     bulkRestore: 'Restore selected',
     bulkPurge: 'Delete selected',
     col: {

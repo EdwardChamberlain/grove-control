@@ -147,4 +147,108 @@ describe('LibraryTrashPage', () => {
 
     await waitFor(() => expect(emptyCalled).toBe(true));
   });
+  describe('multi-select', () => {
+    function useTwoItems(extra: Parameters<typeof server.use> = []) {
+      server.use(
+        http.get('*/library/trash', () =>
+          HttpResponse.json({
+            items: [trashItem(), trashItem({ id: 2, filename: 'two.3mf' })],
+            total: 2,
+            retention_days: 30,
+          }),
+        ),
+        http.get('*/library/trash/settings', () =>
+          HttpResponse.json({ retention_days: 30 }),
+        ),
+        ...extra,
+      );
+    }
+
+    it('shows no checkboxes or action bar until select mode is turned on', async () => {
+      useTwoItems();
+      render(<LibraryTrashPage />);
+
+      await screen.findByText('old_benchy.3mf');
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId('select-mode-toggle'));
+
+      expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+    });
+
+    it('selects every file and restores them from the bar', async () => {
+      const restored: number[] = [];
+      useTwoItems([
+        http.post('*/library/trash/:id/restore', ({ params }) => {
+          restored.push(Number(params.id));
+          return HttpResponse.json({ status: 'success', id: Number(params.id) });
+        }),
+      ]);
+      render(<LibraryTrashPage />);
+
+      await screen.findByText('old_benchy.3mf');
+      await userEvent.click(screen.getByTestId('select-mode-toggle'));
+      await userEvent.click(screen.getByRole('button', { name: 'Select all' }));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Restore selected' }));
+
+      await waitFor(() => expect(restored.sort()).toEqual([1, 2]));
+      await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
+    });
+
+    it('selects a file from its checkbox and permanently deletes the selection', async () => {
+      const purged: number[] = [];
+      useTwoItems([
+        http.delete('*/library/trash/:id', ({ params }) => {
+          purged.push(Number(params.id));
+          return HttpResponse.json({ status: 'success' });
+        }),
+      ]);
+      render(<LibraryTrashPage />);
+
+      await screen.findByText('old_benchy.3mf');
+      await userEvent.click(screen.getByTestId('select-mode-toggle'));
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Select two.3mf' }));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+      await userEvent.click(await screen.findByRole('button', { name: /delete permanently/i }));
+
+      await waitFor(() => expect(purged).toEqual([2]));
+      await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
+    });
+
+    it('keeps a row action button from also toggling that row', async () => {
+      const restored: number[] = [];
+      useTwoItems([
+        http.post('*/library/trash/:id/restore', ({ params }) => {
+          restored.push(Number(params.id));
+          return HttpResponse.json({ status: 'success', id: Number(params.id) });
+        }),
+      ]);
+      render(<LibraryTrashPage />);
+
+      await screen.findByText('old_benchy.3mf');
+      await userEvent.click(screen.getByTestId('select-mode-toggle'));
+      await userEvent.click(screen.getAllByRole('button', { name: 'Restore' })[1]);
+
+      await waitFor(() => expect(restored).toEqual([2]));
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+    });
+
+    it('selects a row by clicking it and confirms before deleting the selection', async () => {
+      useTwoItems();
+      render(<LibraryTrashPage />);
+
+      await screen.findByText('old_benchy.3mf');
+      await userEvent.click(screen.getByTestId('select-mode-toggle'));
+      await userEvent.click(screen.getByText('two.3mf'));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+      expect(await screen.findByText(/selected files will be deleted/i)).toBeInTheDocument();
+    });
+  });
 });

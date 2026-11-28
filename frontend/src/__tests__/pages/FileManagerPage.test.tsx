@@ -388,12 +388,18 @@ describe('FileManagerPage', () => {
   });
 
   describe('selection', () => {
-    it('shows select all button', async () => {
+    it('shows no selection controls until select mode is turned on', async () => {
+      const user = userEvent.setup();
       render(<FileManagerPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Select All')).toBeInTheDocument();
-      });
+      await screen.findByText('Benchy');
+      expect(screen.queryByRole('checkbox', { name: 'Select Benchy' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('select-mode-toggle'));
+
+      expect(screen.getByRole('checkbox', { name: 'Select Benchy' })).toBeInTheDocument();
+      expect(within(screen.getByTestId('selection-bar')).getByText('Select All')).toBeInTheDocument();
     });
 
     it('can select files', async () => {
@@ -404,9 +410,9 @@ describe('FileManagerPage', () => {
         expect(screen.getByText('Benchy')).toBeInTheDocument();
       });
 
-      // Selection happens only from the checkbox, not the card body
-      await user.click(screen.getByText('Benchy'));
-      expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+      // Selection only exists in select mode
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
       await user.click(screen.getByRole('checkbox', { name: 'Select Benchy' }));
       expect(screen.getByRole('checkbox', { name: 'Deselect Benchy' })).toHaveAttribute('aria-checked', 'true');
 
@@ -419,11 +425,9 @@ describe('FileManagerPage', () => {
       const user = userEvent.setup();
       render(<FileManagerPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Select All')).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByText('Select All'));
+      await screen.findByText('Benchy');
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByText('Select All'));
 
       await waitFor(() => {
         expect(screen.getByText('Move')).toBeInTheDocument();
@@ -548,6 +552,7 @@ describe('FileManagerPage', () => {
       });
 
       // The sliced card has its own Print button; selecting it adds the bulk one.
+      await user.click(screen.getByTestId('select-mode-toggle'));
       const before = screen.getAllByRole('button', { name: /^Print$/ }).length;
       await user.click(screen.getByRole('checkbox', { name: 'Select Benchy' }));
 
@@ -560,9 +565,9 @@ describe('FileManagerPage', () => {
       const user = userEvent.setup();
       render(<FileManagerPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Select All')).toBeInTheDocument();
-      });
+      await screen.findByText('Benchy');
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await screen.findByText('Select All');
 
       const before = screen.getAllByRole('button', { name: /^Print$/ }).length;
       await user.click(screen.getByText('Select All'));

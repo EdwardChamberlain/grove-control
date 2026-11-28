@@ -44,6 +44,18 @@ export default {
     installAppSuccess: 'Grove Control se ha instalado',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: 'Selección múltiple',
+    exit: 'Salir de la selección',
+    count: '{{count}} seleccionados',
+    selectItem: 'Seleccionar elemento',
+    deselectItem: 'Deseleccionar elemento',
+    barLabel: 'Acciones de selección',
+    selectAll: 'Seleccionar todo',
+    deselectAll: 'Deseleccionar todo',
+  },
+
   // Common
   common: {
     plusNMore: '+{{count}} más',
@@ -502,10 +514,8 @@ export default {
     },
     // Bulk actions
     bulk: {
-      select: 'Seleccionar',
       selectAll: 'Seleccionar todo',
       selectByLocation: 'Seleccionar por ubicación',
-      selected: '{{count}} seleccionadas',
       actions: {
         stop: 'Detener',
         pause: 'Pausar',
@@ -783,7 +793,6 @@ export default {
       exportCsv: 'Exportar como CSV',
       exportExcel: 'Exportar como Excel',
       compare: 'Comparar',
-      select: 'Seleccionar',
       allMaterials: 'Todos los materiales',
       allFiles: 'Todos los archivos',
       sliced: 'Laminado (GCODE)',
@@ -1298,7 +1307,6 @@ export default {
       applyChanges: 'Aplicar cambios',
       selectAll: 'Seleccionar todo',
       deselectAll: 'Deseleccionar todo',
-      selected: '{{count}} seleccionados',
       hiddenSelected: '{{count}} ocultos por los filtros',
       editSelected: 'Editar seleccionados',
       cancelSelected: 'Cancelar seleccionados',
@@ -2344,8 +2352,9 @@ export default {
       exportTooltip: 'Exportar el catálogo a JSON',
       importTooltip: 'Importar el catálogo desde JSON',
       resetTooltip: 'Restablecer a los valores predeterminados',
-      selectedCount: '{{count}} seleccionadas',
       deleteSelected: 'Eliminar seleccionadas',
+      selectAll: 'Seleccionar todo',
+      deselectAll: 'Deseleccionar todo',
       bulkDeleteConfirm: '¿Está seguro de que desea eliminar {{count}} entradas?',
       bulkDeleted: 'Se eliminaron {{count}} entradas',
       bulkDeleteFailed: 'Error al eliminar las entradas',
@@ -2398,8 +2407,9 @@ export default {
       exported: 'Se exportaron {{count}} colores',
       imported: 'Se importaron {{added}} colores ({{skipped}} omitidos)',
       importFailed: 'Error al importar: formato JSON no válido',
-      selectedCount: '{{count}} seleccionados',
       deleteSelected: 'Eliminar seleccionados',
+      selectAll: 'Seleccionar todo',
+      deselectAll: 'Deseleccionar todo',
       bulkDeleteConfirm: '¿Está seguro de que desea eliminar {{count}} colores?',
       bulkDeleted: 'Se eliminaron {{count}} colores',
       bulkDeleteFailed: 'Error al eliminar los colores',
@@ -3636,7 +3646,6 @@ export default {
     resultsCount: '{{showing}} de {{total}} archivos',
     selectAll: 'Seleccionar todo',
     deselectAll: 'Deseleccionar todo',
-    selected: '{{count}} seleccionados',
     adding: 'Añadiendo...',
     loadingFiles: 'Cargando archivos...',
     folderIsEmpty: 'La carpeta está vacía',
@@ -4089,16 +4098,15 @@ export default {
     unknownSpoolSlot: 'Ranura',
     bulk: {
       selectAllVisible: 'Seleccionar todo lo visible',
+      deselectVisible: 'Deseleccionar visibles',
       selectRow: 'Seleccionar fila',
       selectGroup: 'Seleccionar grupo',
-      selectionCount: '{{count}} seleccionadas',
       edit: 'Editar',
       printLabels: 'Imprimir etiquetas',
       resetUsage: 'Restablecer uso',
       restore: 'Restaurar',
       archive: 'Archivar',
       delete: 'Eliminar',
-      clearSelection: 'Limpiar selección',
       editTitle: 'Edición masiva de bobinas',
       editSubtitle: 'Se aplica a {{count}} bobinas seleccionadas. Solo se actualizan los campos marcados.',
       editHint: 'Escriba en un campo para marcarlo para actualización — solo se envían las filas marcadas. Los campos vacíos no cambian las bobinas (vaciar campos solo se hace por bobina).',
@@ -4945,7 +4953,6 @@ export default {
     addProfile: 'Añadir perfil',
     export: 'Exportar',
     import: 'Importar',
-    select: 'Seleccionar',
     selectAll: 'Seleccionar todo',
     delete: 'Eliminar',
     // Filters
@@ -6435,8 +6442,8 @@ export default {
     days: 'días',
     retentionLabel: 'Eliminar automáticamente tras',
     selectAll: 'Seleccionar todo',
+    deselectAll: 'Deseleccionar todo',
     selectOne: 'Seleccionar {{filename}}',
-    selectionCount: '{{count}} seleccionados',
     bulkRestore: 'Restaurar los seleccionados',
     bulkPurge: 'Eliminar los seleccionados',
     col: {

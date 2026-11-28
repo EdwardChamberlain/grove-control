@@ -13,6 +13,7 @@ import { Spinner } from '../components/Spinner';
 import { ForecastPanel } from '../components/ForecastPanel';
 import { api, ApiError } from '../api/client';
 import type { InventorySpool, SpoolCatalogEntry } from '../api/client';
+import { SelectModeToggle, SelectionBar, SelectionBarDivider, SelectionCheckbox, useSelection } from '../components/selection';
 import { Button } from '../components/Button';
 import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 import { FilamentSwatch } from '../components/FilamentSwatch';
@@ -522,24 +523,23 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
   // Bulk-selection state for batch actions on the spool list (#1795).
   // Cleared when the user switches filter/tab/page because cross-page selection
   // produces a confusing toolbar count vs. visible-row count delta.
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const selection = useSelection<number>();
+  const { selected: selectedIds, active: selectionMode } = selection;
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkConfirmAction, setBulkConfirmAction] = useState<'delete' | 'archive' | 'restore' | 'reset-consumed-counter' | null>(null);
-  const toggleSelected = useCallback((id: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+  const toggleSelected = selection.toggle;
+  // After a bulk action finishes, leave select mode so the action bar collapses.
+  const clearSelection = selection.exit;
 
   // Clear selection on any filter/tab change so the toolbar count stays
   // honest vs. what the user is actually looking at.
+  const { clear: clearSelectedIds, exit: exitSelection } = selection;
   useEffect(() => {
-    setSelectedIds(new Set());
-  }, [archiveFilter, usageFilter, materialFilter, brandFilter, categoryFilter, spoolFilter, stockFilter, search]);
+    if (viewMode !== 'table') exitSelection();
+  }, [viewMode, exitSelection]);
+  useEffect(() => {
+    clearSelectedIds();
+  }, [clearSelectedIds, archiveFilter, usageFilter, materialFilter, brandFilter, categoryFilter, spoolFilter, stockFilter, search]);
 
   // Pagination state (pageSize persisted to localStorage)
   const [pageIndex, setPageIndex] = useState(0);
@@ -1269,6 +1269,9 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
   const pagedItems = showAll
     ? displayItems
     : displayItems.slice(safePageIndex * effectivePageSize, (safePageIndex + 1) * effectivePageSize);
+  const pageSpoolIds = pagedItems.flatMap((item) => (item.type === 'group' ? item.spools.map((s) => s.id) : [item.spool.id]));
+  const allPageSelected = pageSpoolIds.length > 0 && pageSpoolIds.every((id) => selectedIds.has(id));
+  const noneSelected = selectedIds.size === 0;
   const toggleGroupSimilar = () => {
     const next = !groupSimilar;
     setGroupSimilar(next);
@@ -1518,6 +1521,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Multi-select (table view only: cards and the forecast have no item selectors) */}
+          {viewMode === 'table' && (
+            <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />
+          )}
           {/* Columns button (table view only) */}
           {viewMode === 'table' && (
             <button
@@ -1805,52 +1812,48 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         )}
       </div>
 
-      {/* Bulk action toolbar (#1795). Appears as soon as at least one
-          spool is selected; sticky so it stays visible while the user
-          scrolls a long list. */}
-      {selectedIds.size > 0 && viewMode !== 'forecast' && (
-        <div className="sticky top-2 z-10 mb-4 flex items-center gap-2 px-3 py-2 bg-bambu-green/10 border border-bambu-green/30 rounded-lg backdrop-blur-sm">
-          <span className="text-sm text-bambu-green font-medium">
-            {t('inventory.bulk.selectionCount', { count: selectedIds.size })}
-          </span>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setBulkEditOpen(true)}>
-              <Edit2 className="w-3.5 h-3.5 mr-1.5" />
-              {t('inventory.bulk.edit')}
+      {/* Multi-select action bar (#1795): shown while select mode is on. */}
+      {selectionMode && viewMode === 'table' && (
+        <SelectionBar count={selectedIds.size} onClose={selection.exit}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              if (allPageSelected) selection.remove(pageSpoolIds);
+              else selection.add(pageSpoolIds);
+            }}
+          >
+            {allPageSelected ? t('inventory.bulk.deselectVisible') : t('inventory.bulk.selectAllVisible')}
+          </Button>
+          <SelectionBarDivider />
+          <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkEditOpen(true)}>
+            <Edit2 className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.edit')}
+          </Button>
+          <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setLabelPickerSpoolIds([...selectedIds])}>
+            <Printer className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.printLabels')}
+          </Button>
+          <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkConfirmAction('reset-consumed-counter')}>
+            <Eraser className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.resetUsage')}
+          </Button>
+          {archiveFilter === 'archived' ? (
+            <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkConfirmAction('restore')}>
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+              {t('inventory.bulk.restore')}
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => setLabelPickerSpoolIds([...selectedIds])}>
-              <Printer className="w-3.5 h-3.5 mr-1.5" />
-              {t('inventory.bulk.printLabels')}
+          ) : (
+            <Button size="sm" variant="secondary" disabled={noneSelected} onClick={() => setBulkConfirmAction('archive')}>
+              <Archive className="w-3.5 h-3.5 mr-1.5" />
+              {t('inventory.bulk.archive')}
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => setBulkConfirmAction('reset-consumed-counter')}>
-              <Eraser className="w-3.5 h-3.5 mr-1.5" />
-              {t('inventory.bulk.resetUsage')}
-            </Button>
-            {archiveFilter === 'archived' ? (
-              <Button size="sm" variant="secondary" onClick={() => setBulkConfirmAction('restore')}>
-                <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
-                {t('inventory.bulk.restore')}
-              </Button>
-            ) : (
-              <Button size="sm" variant="secondary" onClick={() => setBulkConfirmAction('archive')}>
-                <Archive className="w-3.5 h-3.5 mr-1.5" />
-                {t('inventory.bulk.archive')}
-              </Button>
-            )}
-            <Button size="sm" variant="danger" onClick={() => setBulkConfirmAction('delete')}>
-              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-              {t('inventory.bulk.delete')}
-            </Button>
-            <button
-              className="p-1.5 text-bambu-gray hover:text-white rounded transition-colors"
-              onClick={clearSelection}
-              title={t('inventory.bulk.clearSelection')}
-              aria-label={t('inventory.bulk.clearSelection')}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+          )}
+          <Button size="sm" variant="danger" disabled={noneSelected} onClick={() => setBulkConfirmAction('delete')}>
+            <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+            {t('inventory.bulk.delete')}
+          </Button>
+        </SelectionBar>
       )}
 
       {/* Content */}
@@ -1980,34 +1983,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-bambu-dark-tertiary bg-bambu-dark-tertiary/30">
-                    <th className="w-10 px-3 py-3">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 cursor-pointer"
-                        aria-label={t('inventory.bulk.selectAllVisible')}
-                        checked={pagedItems.length > 0 && pagedItems.every((item) => {
-                          const ids = item.type === 'group' ? item.spools.map((s) => s.id) : [item.spool.id];
-                          return ids.every((id) => selectedIds.has(id));
-                        })}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            const next = new Set(selectedIds);
-                            for (const item of pagedItems) {
-                              const ids = item.type === 'group' ? item.spools.map((s) => s.id) : [item.spool.id];
-                              for (const id of ids) next.add(id);
-                            }
-                            setSelectedIds(next);
-                          } else {
-                            const next = new Set(selectedIds);
-                            for (const item of pagedItems) {
-                              const ids = item.type === 'group' ? item.spools.map((s) => s.id) : [item.spool.id];
-                              for (const id of ids) next.delete(id);
-                            }
-                            setSelectedIds(next);
-                          }
-                        }}
-                      />
-                    </th>
+                    {selectionMode && <th className="w-10 px-3 py-3" />}
                     {visibleColumns.map((colId) => {
                       const sortable = !!columnSortValues[colId];
                       const isActive = sortState?.column === colId;
@@ -2057,15 +2033,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
                           selectedIds={selectedIds}
                           onToggleSelected={toggleSelected}
                           onToggleGroupSelected={(ids, select) => {
-                            setSelectedIds((prev) => {
-                              const next = new Set(prev);
-                              for (const id of ids) {
-                                if (select) next.add(id);
-                                else next.delete(id);
-                              }
-                              return next;
-                            });
+                            if (select) selection.add(ids);
+                            else selection.remove(ids);
                           }}
+                          selectionMode={selectionMode}
                           onEdit={(s) => setFormModal({ spool: s, mode: 'edit' })}
                           onCopy={(s) => setFormModal({ spool: s, mode: 'copy' })}
                           onArchive={(id) => setConfirmAction({ type: 'archive', spoolId: id })}
@@ -2092,6 +2063,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
                         remaining={remaining}
                         pct={pct}
                         isSelected={selectedIds.has(spool.id)}
+                        selectionMode={selectionMode}
                         onToggleSelected={() => toggleSelected(spool.id)}
                         onEdit={() => setFormModal({ spool, mode: 'edit' })}
                         onCopy={() => setFormModal({ spool: spool, mode: 'copy' })}
@@ -2511,7 +2483,7 @@ function SpoolCard({
 
 /* Single spool row for table view */
 function SpoolTableRow({
-  spool, remaining, pct, isSelected, onToggleSelected,
+  spool, remaining, pct, isSelected, selectionMode = false, onToggleSelected,
   onEdit, onCopy, onRestore, onArchive, onDelete, onPrintLabel, onResetConsumedCounter,
   visibleColumns, assignmentMap, catalogMap, currencySymbol, dateFormat, t, onSyncWeight,
 }: {
@@ -2519,6 +2491,7 @@ function SpoolTableRow({
   remaining: number;
   pct: number;
   isSelected?: boolean;
+  selectionMode?: boolean;
   onToggleSelected?: () => void;
   onEdit: () => void;
   onCopy?: () => void;
@@ -2540,19 +2513,19 @@ function SpoolTableRow({
       className={`border-b border-bambu-dark-tertiary/50 hover:bg-bambu-dark-tertiary/30 transition-colors cursor-pointer ${
         spool.archived_at ? 'opacity-50' : ''
       } ${isSelected ? 'bg-bambu-green/10' : ''}`}
-      onClick={onEdit}
+      onClick={selectionMode && onToggleSelected ? onToggleSelected : onEdit}
     >
-      <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
-        {onToggleSelected && (
-          <input
-            type="checkbox"
-            className="h-4 w-4 cursor-pointer"
-            aria-label={t('inventory.bulk.selectRow')}
-            checked={!!isSelected}
-            onChange={onToggleSelected}
-          />
-        )}
-      </td>
+      {selectionMode && (
+        <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+          {onToggleSelected && (
+            <SelectionCheckbox
+              label={t('inventory.bulk.selectRow')}
+              checked={!!isSelected}
+              onToggle={onToggleSelected}
+            />
+          )}
+        </td>
+      )}
       {visibleColumns.map((colId) => (
         <td key={colId} className="py-3 px-4">
           {columnCells[colId]?.({ spool, remaining, pct, assignmentMap, catalogMap, currencySymbol, dateFormat, t, onSyncWeight })}
@@ -2605,7 +2578,7 @@ function SpoolTableGroup({
   spools, headerSpool, remaining, pct, isExpanded, onToggle,
   onEdit, onCopy, onArchive, onDelete, onPrintLabel, onResetConsumedCounter,
   visibleColumns, assignmentMap, catalogMap, currencySymbol, dateFormat, t, onSyncWeight,
-  selectedIds, onToggleSelected, onToggleGroupSelected,
+  selectedIds, onToggleSelected, onToggleGroupSelected, selectionMode = false,
 }: {
   spools: InventorySpool[];
   // Aggregate of all members (summed quantities, shared identity) — rendered
@@ -2628,7 +2601,8 @@ function SpoolTableGroup({
   dateFormat: DateFormat;
   t: TFn;
   onSyncWeight?: (spool: InventorySpool) => void;
-  selectedIds?: Set<number>;
+  selectedIds?: ReadonlySet<number>;
+  selectionMode?: boolean;
   onToggleSelected?: (id: number) => void;
   onToggleGroupSelected?: (ids: number[], select: boolean) => void;
 }) {
@@ -2640,17 +2614,17 @@ function SpoolTableGroup({
         className="border-b border-bambu-dark-tertiary/50 hover:bg-bambu-dark-tertiary/30 transition-colors cursor-pointer bg-bambu-green/5"
         onClick={onToggle}
       >
-        <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
-          {onToggleGroupSelected && (
-            <input
-              type="checkbox"
-              className="h-4 w-4 cursor-pointer"
-              aria-label={t('inventory.bulk.selectGroup')}
-              checked={allMembersSelected}
-              onChange={(e) => onToggleGroupSelected(spools.map((s) => s.id), e.target.checked)}
-            />
-          )}
-        </td>
+        {selectionMode && (
+          <td className="w-10 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+            {onToggleGroupSelected && (
+              <SelectionCheckbox
+                label={t('inventory.bulk.selectGroup')}
+                checked={allMembersSelected}
+                onToggle={() => onToggleGroupSelected(spools.map((s) => s.id), !allMembersSelected)}
+              />
+            )}
+          </td>
+        )}
         {visibleColumns.map((colId, idx) => (
           <td key={colId} className="py-3 px-4">
             {idx === 0 ? (
@@ -2684,6 +2658,7 @@ function SpoolTableGroup({
             remaining={r}
             pct={p}
             isSelected={selectedIds?.has(spool.id)}
+            selectionMode={selectionMode}
             onToggleSelected={onToggleSelected ? () => onToggleSelected(spool.id) : undefined}
             onEdit={() => onEdit(spool)}
             onCopy={onCopy ? () => onCopy(spool) : undefined}

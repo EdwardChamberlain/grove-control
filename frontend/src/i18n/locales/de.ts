@@ -44,6 +44,18 @@ export default {
     installAppSuccess: 'Grove Control wurde installiert',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: 'Mehrfachauswahl',
+    exit: 'Auswahl beenden',
+    count: '{{count}} ausgewählt',
+    selectItem: 'Element auswählen',
+    deselectItem: 'Auswahl aufheben',
+    barLabel: 'Auswahlaktionen',
+    selectAll: 'Alle auswählen',
+    deselectAll: 'Alle abwählen',
+  },
+
   // Common
   common: {
     plusNMore: '+{{count}} weitere',
@@ -502,10 +514,8 @@ export default {
     },
     // Bulk actions
     bulk: {
-      select: 'Auswählen',
       selectAll: 'Alle auswählen',
       selectByLocation: 'Nach Standort auswählen',
-      selected: '{{count}} ausgewählt',
       actions: {
         stop: 'Stoppen',
         pause: 'Pausieren',
@@ -783,7 +793,6 @@ export default {
       exportCsv: 'Als CSV exportieren',
       exportExcel: 'Als Excel exportieren',
       compare: 'Vergleichen',
-      select: 'Auswählen',
       allMaterials: 'Alle Materialien',
       allFiles: 'Alle Dateien',
       sliced: 'Gesliced (GCODE)',
@@ -1298,7 +1307,6 @@ export default {
       applyChanges: 'Änderungen übernehmen',
       selectAll: 'Alle auswählen',
       deselectAll: 'Auswahl aufheben',
-      selected: '{{count}} ausgewählt',
       hiddenSelected: '{{count}} durch Filter ausgeblendet',
       editSelected: 'Ausgewählte bearbeiten',
       cancelSelected: 'Ausgewählte abbrechen',
@@ -2342,8 +2350,9 @@ export default {
       exportTooltip: 'Katalog als JSON exportieren',
       importTooltip: 'Katalog aus JSON importieren',
       resetTooltip: 'Auf Standardwerte zurücksetzen',
-      selectedCount: '{{count}} ausgewählt',
       deleteSelected: 'Ausgewählte löschen',
+      selectAll: 'Alle auswählen',
+      deselectAll: 'Alle abwählen',
       bulkDeleteConfirm: 'Möchten Sie {{count}} Einträge wirklich löschen?',
       bulkDeleted: '{{count}} Einträge gelöscht',
       bulkDeleteFailed: 'Fehler beim Löschen der Einträge',
@@ -2396,8 +2405,9 @@ export default {
       exported: '{{count}} Farben exportiert',
       imported: '{{added}} Farben importiert ({{skipped}} übersprungen)',
       importFailed: 'Import fehlgeschlagen: ungültiges JSON-Format',
-      selectedCount: '{{count}} ausgewählt',
       deleteSelected: 'Ausgewählte löschen',
+      selectAll: 'Alle auswählen',
+      deselectAll: 'Alle abwählen',
       bulkDeleteConfirm: 'Möchten Sie {{count}} Farben wirklich löschen?',
       bulkDeleted: '{{count}} Farben gelöscht',
       bulkDeleteFailed: 'Fehler beim Löschen der Farben',
@@ -3634,7 +3644,6 @@ export default {
     resultsCount: '{{showing}} von {{total}} Dateien',
     selectAll: 'Alle auswählen',
     deselectAll: 'Auswahl aufheben',
-    selected: '{{count}} ausgewählt',
     adding: 'Hinzufügen...',
     loadingFiles: 'Dateien werden geladen...',
     folderIsEmpty: 'Ordner ist leer',
@@ -4087,16 +4096,15 @@ export default {
     unknownSpoolSlot: 'Slot',
     bulk: {
       selectAllVisible: 'Alle sichtbaren auswählen',
+      deselectVisible: 'Sichtbare abwählen',
       selectRow: 'Zeile auswählen',
       selectGroup: 'Gruppe auswählen',
-      selectionCount: '{{count}} ausgewählt',
       edit: 'Bearbeiten',
       printLabels: 'Etiketten drucken',
       resetUsage: 'Verbrauch zurücksetzen',
       restore: 'Wiederherstellen',
       archive: 'Archivieren',
       delete: 'Löschen',
-      clearSelection: 'Auswahl aufheben',
       editTitle: 'Spulen sammelbearbeiten',
       editSubtitle: 'Wird auf {{count}} ausgewählte Spulen angewendet. Nur angekreuzte Felder werden aktualisiert.',
       editHint: 'In ein Feld tippen markiert es für die Aktualisierung — nur angekreuzte Zeilen werden gesendet. Leere Felder bleiben unverändert (Felder leeren geht nur pro Spule).',
@@ -4937,7 +4945,6 @@ export default {
     addProfile: 'Profil hinzufügen',
     export: 'Exportieren',
     import: 'Importieren',
-    select: 'Auswählen',
     selectAll: 'Alle auswählen',
     delete: 'Löschen',
     // Filters
@@ -6427,8 +6434,8 @@ export default {
     days: 'Tage',
     retentionLabel: 'Automatisch löschen nach',
     selectAll: 'Alle auswählen',
+    deselectAll: 'Alle abwählen',
     selectOne: '{{filename}} auswählen',
-    selectionCount: '{{count}} ausgewählt',
     bulkRestore: 'Auswahl wiederherstellen',
     bulkPurge: 'Auswahl löschen',
     col: {

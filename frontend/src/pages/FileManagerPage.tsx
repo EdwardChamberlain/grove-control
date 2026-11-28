@@ -16,7 +16,6 @@ import {
   HardDrive,
   File,
   MoveRight,
-  Check,
   CheckSquare,
   Square,
   Layers,
@@ -70,7 +69,7 @@ import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { PurgeOldFilesModal } from '../components/PurgeOldFilesModal';
 import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 import { useToast } from '../contexts/ToastContext';
-import { useIsMobile } from '../hooks/useIsMobile';
+import { SelectModeToggle, SelectionBar, SelectionCheckbox, useSelection } from '../components/selection';
 import { usePageFileDrop } from '../hooks/usePageFileDrop';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDate, formatDuration, parseUTCDate } from '../utils/date';
@@ -748,7 +747,8 @@ interface FileCardProps {
   isSelected: boolean;
   /** Briefly emphasised after arriving via a `?file=` deep link. */
   isHighlighted?: boolean;
-  isMobile: boolean;
+  /** Select mode: the card shows a checkbox and a click anywhere on it toggles selection. */
+  selectionMode: boolean;
   onSelect: (id: number) => void;
   onDelete: (id: number) => void;
   onDownload: (id: number) => void;
@@ -873,7 +873,7 @@ function FileActionsMenu({
   );
 }
 
-function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onMove, onGenerateThumbnail, isGeneratingThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
+function FileCard({ file, isSelected, isHighlighted = false, selectionMode, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onMove, onGenerateThumbnail, isGeneratingThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
   return (
     <div
       data-file-id={file.id}
@@ -884,7 +884,11 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
           : isHighlighted
           ? 'border-bambu-green ring-2 ring-bambu-green/70'
           : 'border-bambu-dark-tertiary hover:border-bambu-green/50'
-      }`}
+      } ${selectionMode ? 'cursor-pointer' : ''}`}
+      // In select mode a click on the card toggles it; its own buttons and links keep their action.
+      onClick={selectionMode ? (e) => {
+        if (!(e.target as HTMLElement).closest('button, a, input, label')) onSelect(file.id);
+      } : undefined}
     >
       {/* Thumbnail */}
       <div className="aspect-square bg-bambu-dark flex items-center justify-center overflow-hidden">
@@ -1006,21 +1010,14 @@ function FileCard({ file, isSelected, isHighlighted = false, isMobile, onSelect,
       />
       </div>
 
-      {/* Selection checkbox - always visible on mobile, hover on desktop */}
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={isSelected}
-        aria-label={t(isSelected ? 'fileManager.deselectFile' : 'fileManager.selectFile', { name: file.print_name || file.filename })}
-        onClick={() => onSelect(file.id)}
-        className={`absolute top-2 left-2 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-          isSelected
-            ? 'bg-bambu-green border-bambu-green'
-            : `border-white/30 bg-black/30 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`
-        }`}
-      >
-        {isSelected && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-      </button>
+      {selectionMode && (
+        <SelectionCheckbox
+          variant="overlay"
+          checked={isSelected}
+          onToggle={() => onSelect(file.id)}
+          label={t(isSelected ? 'fileManager.deselectFile' : 'fileManager.selectFile', { name: file.print_name || file.filename })}
+        />
+      )}
     </div>
   );
 }
@@ -1047,7 +1044,9 @@ export function FileManagerPage() {
   // combined view across every linked external folder (#1621). Per-folder
   // selection bypasses this (selectedFolderId !== null disables the filter).
   const [topLevelView, setTopLevelView] = useState<'internal' | 'external'>('internal');
-  const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
+  const selection = useSelection<number>();
+  const { selected: selectedFileSet, active: selectionMode } = selection;
+  const selectedFiles = useMemo(() => Array.from(selectedFileSet), [selectedFileSet]);
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [showExternalFolderModal, setShowExternalFolderModal] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
@@ -1158,7 +1157,6 @@ export function FileManagerPage() {
   });
 
   // Mobile detection for touch-friendly UI
-  const isMobile = useIsMobile();
 
   // Update selectedFolderId when URL parameter changes (e.g., navigating from Project or Archive page)
   useEffect(() => {
@@ -1461,7 +1459,7 @@ export function FileManagerPage() {
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
       queryClient.invalidateQueries({ queryKey: ['library-stats'] });
       queryClient.invalidateQueries({ queryKey: ['library-trash-count'] });
-      setSelectedFiles((prev) => prev.filter((id) => id !== deleteConfirm?.id));
+      if (deleteConfirm) selection.remove([deleteConfirm.id]);
       setDeleteConfirm(null);
       showToast(t('fileManager.toast.fileDeleted'), 'success');
     },
@@ -1480,7 +1478,7 @@ export function FileManagerPage() {
     onSuccess: (group) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       showToast(t('fileManager.variants.grouped', { count: group.members.length }), 'success');
-      setSelectedFiles([]);
+      selection.exit();
     },
     onError: (error: Error) => showToast(error.message, 'error'),
   });
@@ -1493,7 +1491,7 @@ export function FileManagerPage() {
       queryClient.invalidateQueries({ queryKey: ['library-stats'] });
       queryClient.invalidateQueries({ queryKey: ['library-trash-count'] });
       showToast(t('fileManager.toast.filesDeleted', { count: fileIds.length }), 'success');
-      setSelectedFiles([]);
+      selection.exit();
       setDeleteConfirm(null);
     },
     onError: (error: Error) => {
@@ -1508,7 +1506,8 @@ export function FileManagerPage() {
     onSuccess: (_, { fileIds }) => {
       queryClient.invalidateQueries({ queryKey: ['library-files'] });
       queryClient.invalidateQueries({ queryKey: ['library-folders'] });
-      setSelectedFiles((prev) => prev.filter((id) => !fileIds.includes(id)));
+      if (selectedFiles.every((id) => fileIds.includes(id))) selection.exit();
+      else selection.remove(fileIds);
       setShowMoveModal(false);
       setSingleMoveFileId(null);
       showToast(t('fileManager.toast.filesMoved'), 'success');
@@ -1650,22 +1649,15 @@ export function FileManagerPage() {
   }, [printFile, selectedSlicedFiles, printFileGroup]);
 
   // Handlers
-  const handleFileSelect = useCallback((id: number) => {
-    // Always toggle selection (multi-select by default)
-    setSelectedFiles((prev) => {
-      return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-    });
-  }, []);
+  const handleFileSelect = selection.toggle;
 
   const handleSelectAll = useCallback(() => {
     if (filteredAndSortedFiles.length > 0) {
-      setSelectedFiles(filteredAndSortedFiles.map((f) => f.id));
+      selection.set(filteredAndSortedFiles.map((f) => f.id));
     }
-  }, [filteredAndSortedFiles]);
+  }, [filteredAndSortedFiles, selection]);
 
-  const handleDeselectAll = useCallback(() => {
-    setSelectedFiles([]);
-  }, []);
+  const handleDeselectAll = selection.clear;
 
   const handleUploadComplete = () => {
     queryClient.invalidateQueries({ queryKey: ['library-files'] });
@@ -2250,9 +2242,9 @@ export function FileManagerPage() {
           )}
           {/* Search, Filter, Sort toolbar - sticky on mobile for easier access */}
           {files && files.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 p-2 sm:p-3 bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary sticky top-0 z-10 lg:static">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 py-2 sticky top-0 z-10 bg-bambu-dark lg:static lg:bg-transparent">
               {/* Search */}
-              <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-xs">
+              <div className="relative w-full sm:w-auto sm:flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray" />
                 <input
                   type="text"
@@ -2353,123 +2345,97 @@ export function FileManagerPage() {
                   {t('fileManager.resultsCount', { showing: filteredAndSortedFiles.length, total: files.length })}
                 </span>
               )}
+
+              <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} />
             </div>
           )}
 
-          {/* Selection toolbar - sticky on mobile below search bar */}
-          {filteredAndSortedFiles.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 mb-4 p-2 bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary sticky top-[52px] z-10 lg:static">
-              {/* Select all / Deselect all */}
+          {/* Select mode action bar - fixed to the bottom of the screen */}
+          {selectionMode && (
+            <SelectionBar count={selectedFiles.length} onClose={selection.exit}>
               {selectedFiles.length === filteredAndSortedFiles.length && selectedFiles.length > 0 ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleDeselectAll}
-                >
+                <Button variant="secondary" size="sm" onClick={handleDeselectAll}>
                   <Square className="w-4 h-4 sm:mr-1" />
                   <span className="hidden sm:inline">{t('fileManager.deselectAll')}</span>
                 </Button>
               ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleSelectAll}
-                >
+                <Button variant="secondary" size="sm" onClick={handleSelectAll}>
                   <CheckSquare className="w-4 h-4 sm:mr-1" />
                   <span className="hidden sm:inline">{t('fileManager.selectAll')}</span>
                 </Button>
               )}
-
-              {selectedFiles.length > 0 && (
-                <>
-                  <span className="text-sm text-bambu-gray ml-2">
-                    {t('fileManager.selected', { count: selectedFiles.length })}
+              {/* Print used to disappear the moment a second sliced file was
+                  selected. Selecting several is now how you say "same job,
+                  different printers" (#671) — one queue item, whichever
+                  machine frees up first. */}
+              {selectedSlicedFiles.length >= 1 && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setPrintFile(selectedSlicedFiles[0])}
+                  disabled={!hasPermission('queue:create')}
+                  title={!hasPermission('queue:create') ? t('fileManager.noPermissionAddToQueue') : undefined}
+                >
+                  <Printer className="w-4 h-4 sm:mr-1" />
+                  <span className="hidden sm:inline">
+                    {selectedSlicedFiles.length > 1
+                      ? t('fileManager.variants.printAlternatives', { count: selectedSlicedFiles.length })
+                      : t('common.print')}
                   </span>
-                  <div className="hidden sm:block flex-1" />
-                  <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 mt-2 sm:mt-0">
-                    {/* Print used to disappear the moment a second sliced file was
-                        selected. Selecting several is now how you say "same job,
-                        different printers" (#671) — one queue item, whichever
-                        machine frees up first. */}
-                    {selectedSlicedFiles.length >= 1 && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => setPrintFile(selectedSlicedFiles[0])}
-                        disabled={!hasPermission('queue:create')}
-                        title={!hasPermission('queue:create') ? t('fileManager.noPermissionAddToQueue') : undefined}
-                      >
-                        <Printer className="w-4 h-4 sm:mr-1" />
-                        <span className="hidden sm:inline">
-                          {selectedSlicedFiles.length > 1
-                            ? t('fileManager.variants.printAlternatives', { count: selectedSlicedFiles.length })
-                            : t('common.print')}
-                        </span>
-                      </Button>
-                    )}
-                    {selectedSlicedFiles.length >= 2 && !selectedSlicedFiles.some(f => f.variant_group_id) && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => groupAsVersionsMutation.mutate(selectedSlicedFiles.map(f => f.id))}
-                        disabled={
-                          groupAsVersionsMutation.isPending
-                          || !hasAnyPermission('library:update_own', 'library:update_all')
-                        }
-                        title={t('fileManager.variants.groupTooltip')}
-                      >
-                        <Layers className="w-4 h-4 sm:mr-1" />
-                        <span className="hidden sm:inline">{t('fileManager.variants.groupAction')}</span>
-                      </Button>
-                    )}
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setShowMoveModal(true)}
-                      disabled={!hasAnyPermission('library:update_own', 'library:update_all')}
-                      title={!hasAnyPermission('library:update_own', 'library:update_all') ? t('fileManager.noPermissionMoveFiles') : undefined}
-                    >
-                      <MoveRight className="w-4 h-4 sm:mr-1" />
-                      <span className="hidden sm:inline">{t('common.move')}</span>
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setShowBulkTagsModal(true)}
-                      disabled={!hasAnyPermission('library:update_own', 'library:update_all')}
-                      title={!hasAnyPermission('library:update_own', 'library:update_all') ? t('fileManager.tags.noPermission') : t('fileManager.tags.bulkTooltip')}
-                    >
-                      <TagIcon className="w-4 h-4 sm:mr-1" />
-                      <span className="hidden sm:inline">{t('fileManager.tags.tagAction')}</span>
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => {
-                        if (selectedFiles.length === 1) {
-                          setDeleteConfirm({ type: 'file', id: selectedFiles[0] });
-                        } else {
-                          setDeleteConfirm({ type: 'bulk', id: 0, count: selectedFiles.length });
-                        }
-                      }}
-                      disabled={!hasAnyPermission('library:delete_own', 'library:delete_all')}
-                      title={!hasAnyPermission('library:delete_own', 'library:delete_all') ? t('fileManager.noPermissionDeleteFiles') : undefined}
-                    >
-                      <Trash2 className="w-4 h-4 sm:mr-1" />
-                      <span className="hidden sm:inline">{t('common.delete')}</span>
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={handleDeselectAll}
-                    >
-                      <X className="w-4 h-4 sm:mr-1" />
-                      <span className="hidden sm:inline">{t('common.clear')}</span>
-                    </Button>
-                  </div>
-                </>
+                </Button>
               )}
-            </div>
+              {selectedSlicedFiles.length >= 2 && !selectedSlicedFiles.some(f => f.variant_group_id) && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => groupAsVersionsMutation.mutate(selectedSlicedFiles.map(f => f.id))}
+                  disabled={
+                    groupAsVersionsMutation.isPending
+                    || !hasAnyPermission('library:update_own', 'library:update_all')
+                  }
+                  title={t('fileManager.variants.groupTooltip')}
+                >
+                  <Layers className="w-4 h-4 sm:mr-1" />
+                  <span className="hidden sm:inline">{t('fileManager.variants.groupAction')}</span>
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowMoveModal(true)}
+                disabled={selectedFiles.length === 0 || !hasAnyPermission('library:update_own', 'library:update_all')}
+                title={!hasAnyPermission('library:update_own', 'library:update_all') ? t('fileManager.noPermissionMoveFiles') : undefined}
+              >
+                <MoveRight className="w-4 h-4 sm:mr-1" />
+                <span className="hidden sm:inline">{t('common.move')}</span>
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowBulkTagsModal(true)}
+                disabled={selectedFiles.length === 0 || !hasAnyPermission('library:update_own', 'library:update_all')}
+                title={!hasAnyPermission('library:update_own', 'library:update_all') ? t('fileManager.tags.noPermission') : t('fileManager.tags.bulkTooltip')}
+              >
+                <TagIcon className="w-4 h-4 sm:mr-1" />
+                <span className="hidden sm:inline">{t('fileManager.tags.tagAction')}</span>
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  if (selectedFiles.length === 1) {
+                    setDeleteConfirm({ type: 'file', id: selectedFiles[0] });
+                  } else {
+                    setDeleteConfirm({ type: 'bulk', id: 0, count: selectedFiles.length });
+                  }
+                }}
+                disabled={selectedFiles.length === 0 || !hasAnyPermission('library:delete_own', 'library:delete_all')}
+                title={!hasAnyPermission('library:delete_own', 'library:delete_all') ? t('fileManager.noPermissionDeleteFiles') : undefined}
+              >
+                <Trash2 className="w-4 h-4 sm:mr-1" />
+                <span className="hidden sm:inline">{t('common.delete')}</span>
+              </Button>
+            </SelectionBar>
           )}
 
           {/* File grid/list */}
@@ -2528,9 +2494,9 @@ export function FileManagerPage() {
                   <FileCard
                     key={file.id}
                     file={file}
-                    isSelected={selectedFiles.includes(file.id)}
+                    isSelected={selectedFileSet.has(file.id)}
                     isHighlighted={highlightedFileId === file.id}
-                    isMobile={isMobile}
+                    selectionMode={selectionMode}
                     t={t}
                     onSelect={handleFileSelect}
                     onDelete={(id) => setDeleteConfirm({ type: 'file', id })}
@@ -2583,22 +2549,24 @@ export function FileManagerPage() {
                     key={file.id}
                     data-file-id={file.id}
                     data-highlighted={highlightedFileId === file.id ? 'true' : undefined}
-                    className={`grid ${listColumns} gap-x-2 px-3 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 cursor-pointer hover:bg-bambu-dark/50 transition-colors ${
-                      selectedFiles.includes(file.id)
+                    className={`grid ${listColumns} gap-x-2 px-3 py-3 items-center border-b border-bambu-dark-tertiary last:border-b-0 hover:bg-bambu-dark/50 transition-colors ${selectionMode ? 'cursor-pointer' : ''} ${
+                      selectedFileSet.has(file.id)
                         ? 'bg-bambu-green/10'
                         : highlightedFileId === file.id
                         ? 'bg-bambu-green/20 ring-1 ring-inset ring-bambu-green/70'
                         : ''
                     }`}
-                    onClick={() => handleFileSelect(file.id)}
+                    onClick={selectionMode ? () => handleFileSelect(file.id) : undefined}
                   >
-                    {/* Checkbox */}
-                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                      selectedFiles.includes(file.id)
-                        ? 'bg-bambu-green border-bambu-green'
-                        : 'border-bambu-gray/50'
-                    }`}>
-                      {selectedFiles.includes(file.id) && <div className="w-2 h-2 bg-white rounded-sm" />}
+                    {/* Checkbox (select mode only) */}
+                    <div>
+                      {selectionMode && (
+                        <SelectionCheckbox
+                          checked={selectedFileSet.has(file.id)}
+                          onToggle={() => handleFileSelect(file.id)}
+                          label={t(selectedFileSet.has(file.id) ? 'fileManager.deselectFile' : 'fileManager.selectFile', { name: file.print_name || file.filename })}
+                        />
+                      )}
                     </div>
                     {/* Name with thumbnail */}
                     <div className="flex items-center gap-3 min-w-0">
@@ -2840,7 +2808,7 @@ export function FileManagerPage() {
           onClose={() => setPrintFile(null)}
           onSuccess={() => {
             setPrintFile(null);
-            setSelectedFiles([]);
+            selection.exit();
             queryClient.invalidateQueries({ queryKey: ['library-files'] });
             queryClient.invalidateQueries({ queryKey: ['queue'] });
             queryClient.invalidateQueries({ queryKey: ['archives'] });

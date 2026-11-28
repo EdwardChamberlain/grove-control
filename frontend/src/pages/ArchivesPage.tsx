@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useHistoryFilters } from '../hooks/useHistoryFilters';
 import { HistoryFilterBar } from '../components/HistoryFilterBar';
 import { HistoryLogTable } from '../components/HistoryLogTable';
+import { SelectModeToggle, SelectionBar, SelectionBarDivider, SelectionCheckbox, useSelection } from '../components/selection';
 import {
   exportIgnoredFilters, filterAndSortArchives, filterLogEntries, getActiveFilterChips, getExportParams,
   getServerFilterBounds, isSlicedFile, needsClientLogFilter, type ViewMode,
@@ -677,20 +678,19 @@ function ArchiveCard({
       data-archive-id={archive.id}
       className={`relative flex flex-col group ${isSelected ? 'ring-2 ring-bambu-green' : ''} ${selectionMode ? 'cursor-pointer' : ''}`}
       style={isHighlighted ? { outline: '4px solid #facc15', outlineOffset: '2px' } : undefined}
-      onClick={selectionMode ? () => onSelect(archive.id) : undefined}
+      onClick={selectionMode ? (e) => {
+        // Buttons and links on the card keep their own action.
+        if (!(e.target as HTMLElement).closest('button, a, input, label')) onSelect(archive.id);
+      } : undefined}
     >
       {/* Selection checkbox */}
       {selectionMode && (
-        <button
-          className="absolute top-2 left-2 z-10 p-1 rounded bg-black/50 hover:bg-black/70 transition-colors"
-          onClick={(e) => { e.stopPropagation(); onSelect(archive.id); }}
-        >
-          {isSelected ? (
-            <CheckSquare className="w-5 h-5 text-bambu-green" />
-          ) : (
-            <Square className="w-5 h-5 text-white" />
-          )}
-        </button>
+        <SelectionCheckbox
+          variant="overlay"
+          checked={isSelected}
+          onToggle={() => onSelect(archive.id)}
+          label={archive.print_name || archive.filename}
+        />
       )}
 
       {/* Thumbnail with plate navigation */}
@@ -1474,7 +1474,8 @@ export function ArchivesPage() {
   const filters = useHistoryFilters();
   const { values, sortBy, setSearch } = filters;
   const { search, filterPrinter, filterUser, collection } = values;
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const selection = useSelection<number>();
+  const { selected: selectedIds, active: selectionMode, toggle: toggleSelect, exit: clearSelection } = selection;
   // Install-step-4 nudge — covers the slicer-side variant of "Store sent files
   // on external storage" that the connection diagnostic can't detect (printer
   // never hears about it). Symptom: archive created via no-3MF fallback. Once
@@ -1492,7 +1493,6 @@ export function ArchivesPage() {
     localStorage.setItem('archiveNo3MFWarningDismissed', 'true');
     setNo3MFWarningDismissed(true);
   };
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [showBatchTag, setShowBatchTag] = useState(false);
   const [showBatchProject, setShowBatchProject] = useState(false);
@@ -1646,7 +1646,7 @@ export function ArchivesPage() {
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['archives'] });
-      setSelectedIds(new Set());
+      selection.exit();
       showToast(`${count} archive${count !== 1 ? 's' : ''} deleted`);
     },
     onError: () => {
@@ -1846,38 +1846,24 @@ export function ArchivesPage() {
 
   // The log and the grid list different things, so a selection made in one means nothing in the other.
   const inLogView = viewMode === 'log';
+  const { clear: clearSelectedIds, exit: exitSelectionMode } = selection;
+  // The calendar has no item selectors, so selecting there would act on items the user cannot see.
   useEffect(() => {
-    setSelectedIds(new Set());
-  }, [inLogView]);
-
-  const selectionMode = isSelectionMode || selectedIds.size > 0;
-
-  const toggleSelect = (id: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+    if (viewMode === 'calendar') exitSelectionMode();
+  }, [viewMode, exitSelectionMode]);
+  useEffect(() => {
+    clearSelectedIds();
+  }, [inLogView, clearSelectedIds]);
 
   const selectAll = () => {
     if (viewMode === 'log') {
       // Only the archives behind the rows on screen, never ones the log doesn't show.
-      setSelectedIds(new Set(logRows.flatMap((e) => (e.archive_id != null && archiveById.has(e.archive_id) ? [e.archive_id] : []))));
+      selection.set(logRows.flatMap((e) => (e.archive_id != null && archiveById.has(e.archive_id) ? [e.archive_id] : [])));
       return;
     }
     if (filteredArchives) {
-      setSelectedIds(new Set(filteredArchives.map((a) => a.id)));
+      selection.set(filteredArchives.map((a) => a.id));
     }
-  };
-
-  const clearSelection = () => {
-    setSelectedIds(new Set());
-    setIsSelectionMode(false);
   };
 
   const activeChips = useMemo(
@@ -1903,13 +1889,8 @@ export function ArchivesPage() {
         e.preventDefault();
         searchInputRef.current?.focus();
         break;
-      case 'Escape':
-        if (selectionMode) {
-          clearSelection();
-        }
-        break;
     }
-  }, [selectionMode]);
+  }, []);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
@@ -1920,25 +1901,16 @@ export function ArchivesPage() {
     <div className="p-4 md:p-8 relative">
       {/* Selection Toolbar */}
       {selectionMode && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl px-4 py-3 flex items-center gap-4">
-          <Button variant="secondary" size="sm" onClick={clearSelection}>
-            <X className="w-4 h-4" />
-            Close
-          </Button>
-          <div className="w-px h-6 bg-bambu-dark-tertiary" />
-          <span className="text-white font-medium">
-            {selectedIds.size} selected
-          </span>
-          <div className="w-px h-6 bg-bambu-dark-tertiary" />
+        <SelectionBar count={selectedIds.size} onClose={clearSelection}>
           <Button variant="secondary" size="sm" onClick={selectAll}>
             Select All
           </Button>
-          <div className="w-px h-6 bg-bambu-dark-tertiary" />
+          <SelectionBarDivider />
           <Button
             variant="secondary"
             size="sm"
             onClick={() => setShowBatchTag(true)}
-            disabled={!hasAnyPermission('archives:update_own', 'archives:update_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:update_own', 'archives:update_all')}
             title={!hasAnyPermission('archives:update_own', 'archives:update_all') ? t('archives.permission.noUpdateArchives') : undefined}
           >
             <Tag className="w-4 h-4" />
@@ -1948,7 +1920,7 @@ export function ArchivesPage() {
             variant="secondary"
             size="sm"
             onClick={() => setShowBatchProject(true)}
-            disabled={!hasAnyPermission('archives:update_own', 'archives:update_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:update_own', 'archives:update_all')}
             title={!hasAnyPermission('archives:update_own', 'archives:update_all') ? t('archives.permission.noUpdateArchives') : undefined}
           >
             <FolderKanban className="w-4 h-4" />
@@ -1957,7 +1929,7 @@ export function ArchivesPage() {
           <Button
             variant="secondary"
             size="sm"
-            disabled={!hasAnyPermission('archives:update_own', 'archives:update_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:update_own', 'archives:update_all')}
             title={!hasAnyPermission('archives:update_own', 'archives:update_all') ? t('archives.permission.noUpdateArchives') : undefined}
             onClick={() => {
               const ids = Array.from(selectedIds);
@@ -1978,13 +1950,13 @@ export function ArchivesPage() {
             size="sm"
             className="bg-red-500 hover:bg-red-600"
             onClick={() => setShowBulkDeleteConfirm(true)}
-            disabled={!hasAnyPermission('archives:delete_own', 'archives:delete_all')}
+            disabled={selectedIds.size === 0 || !hasAnyPermission('archives:delete_own', 'archives:delete_all')}
             title={!hasAnyPermission('archives:delete_own', 'archives:delete_all') ? t('archives.permission.noDelete') : undefined}
           >
             <Trash2 className="w-4 h-4" />
             Delete
           </Button>
-        </div>
+        </SelectionBar>
       )}
 
       {no3MFWarning?.has_fallback && !no3MFWarningDismissed && (
@@ -2077,12 +2049,6 @@ export function ArchivesPage() {
               {t('archives.filters.compare')} ({selectedIds.size})
             </Button>
           )}
-          {!selectionMode && (
-            <Button variant="secondary" onClick={() => setIsSelectionMode(true)}>
-              <CheckSquare className="w-4 h-4" />
-              {t('archives.filters.select')}
-            </Button>
-          )}
           {hasPermission('archives:purge') && (
             <Button
               variant="secondary"
@@ -2112,6 +2078,7 @@ export function ArchivesPage() {
         onManageTags={() => setShowTagManagement(true)}
         onClearLog={() => setShowClearLogConfirm(true)}
         clearLogDisabled={!hasPermission('archives:delete_all') || clearLogMutation.isPending}
+        beforeViewSwitch={viewMode !== 'calendar' ? <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} /> : null}
       />
 
       {/* Pending Uploads Panel (visible when in queue mode with pending files) */}
@@ -2266,8 +2233,7 @@ export function ArchivesPage() {
           archiveIds={Array.from(selectedIds)}
           onClose={() => {
             setShowCompareModal(false);
-            setSelectedIds(new Set());
-            setIsSelectionMode(false);
+            clearSelection();
           }}
         />
       )}

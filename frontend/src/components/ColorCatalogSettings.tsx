@@ -10,6 +10,8 @@ import { ConfirmModal } from './ConfirmModal';
 import { FilamentSwatch } from './FilamentSwatch';
 import { FILAMENT_EFFECT_OPTIONS } from './filamentSwatchHelpers';
 import { ReactSelect } from './ToolbarControls';
+import { SelectModeToggle, SelectionBar, SelectionCheckbox, useSelection } from './selection';
+import { Button } from './Button';
 
 export function ColorCatalogSettings() {
   const { t } = useTranslation();
@@ -32,7 +34,8 @@ export function ColorCatalogSettings() {
   const [saving, setSaving] = useState(false);
 
   // Selection state
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const selection = useSelection<number>({ exclusiveGroup: 'settings-filament-catalogs' });
+  const { selected: selectedIds, active: selectionMode } = selection;
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
   // Sync state
@@ -237,21 +240,12 @@ export function ColorCatalogSettings() {
     }
   };
 
-  const toggleSelect = (id: number) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  const toggleSelect = selection.toggle;
 
+  const allSelected = filteredCatalog.length > 0 && selectedIds.size === filteredCatalog.length;
   const toggleSelectAll = () => {
-    if (selectedIds.size === filteredCatalog.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filteredCatalog.map(e => e.id)));
-    }
+    if (allSelected) selection.clear();
+    else selection.set(filteredCatalog.map(e => e.id));
   };
 
   const handleBulkDelete = async () => {
@@ -260,7 +254,7 @@ export function ColorCatalogSettings() {
     try {
       const result = await api.bulkDeleteColorEntries([...selectedIds]);
       setCatalog(prev => prev.filter(e => !selectedIds.has(e.id)));
-      setSelectedIds(new Set());
+      selection.exit();
       showToast(t('settings.colorCatalog.bulkDeleted', { count: result.deleted }), 'success');
     } catch {
       showToast(t('settings.colorCatalog.bulkDeleteFailed'), 'error');
@@ -374,6 +368,7 @@ export function ColorCatalogSettings() {
             <RotateCcw className="w-4 h-4" />
             <span className="hidden sm:inline">{t('common.reset')}</span>
           </button>
+          <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="!h-auto !px-3 !py-1.5" />
           <button
             onClick={() => setShowAddForm(true)}
             className="px-3 py-1.5 text-sm bg-bambu-green text-white rounded-lg hover:bg-bambu-green/80 transition-colors flex items-center gap-1.5"
@@ -382,26 +377,6 @@ export function ColorCatalogSettings() {
             <span className="hidden sm:inline">{t('common.add')}</span>
           </button>
         </div>
-        {selectedIds.size > 0 && (
-          <div className="flex items-center gap-2 mt-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-            <span className="text-sm text-red-400">
-              {t('settings.colorCatalog.selectedCount', { count: selectedIds.size })}
-            </span>
-            <button
-              onClick={() => setShowBulkDeleteConfirm(true)}
-              className="ml-auto px-3 py-1.5 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center gap-1.5"
-            >
-              <Trash2 className="w-4 h-4" />
-              {t('settings.colorCatalog.deleteSelected')}
-            </button>
-            <button
-              onClick={() => setSelectedIds(new Set())}
-              className="px-3 py-1.5 text-sm text-bambu-gray hover:text-white transition-colors"
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
-        )}
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-bambu-gray">
@@ -532,14 +507,7 @@ export function ColorCatalogSettings() {
             <table className="w-full text-sm">
               <thead className="bg-bambu-dark sticky top-0">
                 <tr>
-                  <th className="px-2 py-2 w-10">
-                    <input
-                      type="checkbox"
-                      checked={filteredCatalog.length > 0 && selectedIds.size === filteredCatalog.length}
-                      onChange={toggleSelectAll}
-                      className="w-4 h-4 accent-bambu-green cursor-pointer"
-                    />
-                  </th>
+                  {selectionMode && <th className="px-2 py-2 w-10" />}
                   <th className="px-3 py-2 text-left text-bambu-gray font-medium w-12"></th>
                   <th className="px-3 py-2 text-left text-bambu-gray font-medium">{t('settings.colorCatalog.manufacturer')}</th>
                   <th className="px-3 py-2 text-left text-bambu-gray font-medium">{t('inventory.material')}</th>
@@ -551,7 +519,7 @@ export function ColorCatalogSettings() {
               <tbody>
                 {filteredCatalog.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-8 text-center text-bambu-gray">
+                    <td colSpan={selectionMode ? 7 : 6} className="px-3 py-8 text-center text-bambu-gray">
                       {search || filterManufacturer ? t('settings.colorCatalog.noMatch') : t('settings.colorCatalog.empty')}
                     </td>
                   </tr>
@@ -561,14 +529,11 @@ export function ColorCatalogSettings() {
                     <tr className={`border-t border-bambu-dark-tertiary hover:bg-bambu-dark ${selectedIds.has(entry.id) ? 'bg-bambu-dark' : ''}`}>
                       {editingId === entry.id ? (
                         <>
-                          <td className="px-2 py-2">
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(entry.id)}
-                              onChange={() => toggleSelect(entry.id)}
-                              className="w-4 h-4 accent-bambu-green cursor-pointer"
-                            />
-                          </td>
+                          {selectionMode && (
+                            <td className="px-2 py-2">
+                              <SelectionCheckbox checked={selectedIds.has(entry.id)} onToggle={() => toggleSelect(entry.id)} />
+                            </td>
+                          )}
                           <td className="px-3 py-2">
                             <input
                               type="color"
@@ -626,14 +591,11 @@ export function ColorCatalogSettings() {
                         </>
                       ) : (
                         <>
-                          <td className="px-2 py-2">
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(entry.id)}
-                              onChange={() => toggleSelect(entry.id)}
-                              className="w-4 h-4 accent-bambu-green cursor-pointer"
-                            />
-                          </td>
+                          {selectionMode && (
+                            <td className="px-2 py-2">
+                              <SelectionCheckbox checked={selectedIds.has(entry.id)} onToggle={() => toggleSelect(entry.id)} />
+                            </td>
+                          )}
                           <td className="px-3 py-2">
                             <FilamentSwatch
                               rgba={entry.hex_color.replace(/^#/, '') + (entry.hex_color.length === 7 ? 'FF' : '')}
@@ -670,7 +632,7 @@ export function ColorCatalogSettings() {
                     </tr>
                     {editingId === entry.id && (
                       <tr className="border-t border-bambu-dark-tertiary/50 bg-bambu-dark">
-                        <td colSpan={2}></td>
+                        <td colSpan={selectionMode ? 2 : 1}></td>
                         <td className="px-3 py-2" colSpan={2}>
                           <input
                             type="text"
@@ -715,6 +677,23 @@ export function ColorCatalogSettings() {
           onConfirm={handleDelete}
           onCancel={() => setDeleteEntry(null)}
         />
+      )}
+
+      {selectionMode && (
+        <SelectionBar count={selectedIds.size} onClose={selection.exit}>
+          <Button variant="secondary" size="sm" onClick={toggleSelectAll}>
+            {allSelected ? t('settings.colorCatalog.deselectAll') : t('settings.colorCatalog.selectAll')}
+          </Button>
+          <Button
+            size="sm"
+            className="bg-red-500 hover:bg-red-600"
+            onClick={() => setShowBulkDeleteConfirm(true)}
+            disabled={selectedIds.size === 0}
+          >
+            <Trash2 className="w-4 h-4" />
+            {t('settings.colorCatalog.deleteSelected')}
+          </Button>
+        </SelectionBar>
       )}
 
       {/* Bulk delete confirmation */}

@@ -189,15 +189,35 @@ describe('KProfilesView — bulk actions', () => {
     const user = userEvent.setup();
     render(<KProfilesView />);
     await screen.findByText('High Flow_Bambu PLA Basic');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: /Select All/ }));
-    await user.click(screen.getByRole('button', { name: /Delete \(2\)/ }));
+    expect(within(screen.getByTestId('selection-bar')).getByText('2 selected')).toBeInTheDocument();
+    await user.click(within(screen.getByTestId('selection-bar')).getByRole('button', { name: 'Delete' }));
 
     const confirm = await screen.findAllByRole('button', { name: /^Delete$/ });
     await user.click(confirm[confirm.length - 1]);
 
     await waitFor(() => expect(captured.filter((c) => c.method === 'DELETE')).toHaveLength(2), { timeout: 3000 });
     expect(captured.filter((c) => c.method === 'DELETE').map((c) => c.body?.slot_id).sort()).toEqual([1, 2]);
+  });
+
+  it('selects a profile from its checkbox and leaves select mode after deleting', async () => {
+    const user = userEvent.setup();
+    render(<KProfilesView />);
+    await screen.findByText('High Flow_Bambu PLA Basic');
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    const bar = within(screen.getByTestId('selection-bar'));
+    expect(bar.getByText('1 selected')).toBeInTheDocument();
+
+    await user.click(bar.getByRole('button', { name: 'Delete' }));
+    const confirm = await screen.findAllByRole('button', { name: /^Delete$/ });
+    await user.click(confirm[confirm.length - 1]);
+
+    await waitFor(() => expect(captured.filter((c) => c.method === 'DELETE')).toHaveLength(1), { timeout: 3000 });
+    await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument(), { timeout: 3000 });
   });
 
   it('exports the current profiles as a JSON download', async () => {

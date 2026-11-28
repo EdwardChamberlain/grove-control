@@ -44,6 +44,18 @@ export default {
     installAppSuccess: 'Grove Control 已安装',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: '多选',
+    exit: '退出选择',
+    count: '已选择 {{count}} 项',
+    selectItem: '选择项目',
+    deselectItem: '取消选择项目',
+    barLabel: '选择操作',
+    selectAll: '全选',
+    deselectAll: '取消全选',
+  },
+
   // Common
   common: {
     plusNMore: '另 {{count}} 个',
@@ -502,10 +514,8 @@ export default {
     },
     // Bulk actions
     bulk: {
-      select: '选择',
       selectAll: '全选',
       selectByLocation: '按位置选择',
-      selected: '已选择{{count}}台',
       actions: {
         stop: '停止',
         pause: '暂停',
@@ -783,7 +793,6 @@ export default {
       exportCsv: '导出为 CSV',
       exportExcel: '导出为 Excel',
       compare: '比较',
-      select: '选择',
       allMaterials: '所有材料',
       allFiles: '所有文件',
       sliced: '已切片 (GCODE)',
@@ -1298,7 +1307,6 @@ export default {
       applyChanges: '应用更改',
       selectAll: '全选',
       deselectAll: '取消全选',
-      selected: '已选择 {{count}} 个',
       hiddenSelected: '{{count}} 项被筛选隐藏',
       editSelected: '编辑所选',
       cancelSelected: '取消所选',
@@ -2342,8 +2350,9 @@ export default {
       exportTooltip: '导出目录为 JSON',
       importTooltip: '从 JSON 导入目录',
       resetTooltip: '重置为默认值',
-      selectedCount: '已选择 {{count}} 项',
       deleteSelected: '删除所选',
+      selectAll: '全选',
+      deselectAll: '取消全选',
       bulkDeleteConfirm: '确定要删除 {{count}} 个条目吗？',
       bulkDeleted: '已删除 {{count}} 个条目',
       bulkDeleteFailed: '删除条目失败',
@@ -2396,8 +2405,9 @@ export default {
       exported: '已导出 {{count}} 种颜色',
       imported: '已导入 {{added}} 种颜色（跳过 {{skipped}} 种）',
       importFailed: '导入失败：无效的 JSON 格式',
-      selectedCount: '已选择 {{count}} 项',
       deleteSelected: '删除所选',
+      selectAll: '全选',
+      deselectAll: '取消全选',
       bulkDeleteConfirm: '确定要删除 {{count}} 种颜色吗？',
       bulkDeleted: '已删除 {{count}} 种颜色',
       bulkDeleteFailed: '删除颜色失败',
@@ -3621,7 +3631,6 @@ export default {
     resultsCount: '{{showing}} / {{total}} 个文件',
     selectAll: '全选',
     deselectAll: '取消全选',
-    selected: '已选择 {{count}} 个',
     adding: '添加中...',
     loadingFiles: '加载文件中...',
     folderIsEmpty: '文件夹为空',
@@ -4074,16 +4083,15 @@ export default {
     unknownSpoolSlot: '槽位',
     bulk: {
       selectAllVisible: '选择所有可见项',
+      deselectVisible: '取消选择可见项',
       selectRow: '选择行',
       selectGroup: '选择组',
-      selectionCount: '已选 {{count}} 个',
       edit: '编辑',
       printLabels: '打印标签',
       resetUsage: '重置使用量',
       restore: '恢复',
       archive: '归档',
       delete: '删除',
-      clearSelection: '清除选择',
       editTitle: '批量编辑料盘',
       editSubtitle: '将应用于选中的 {{count}} 个料盘。仅更新勾选的字段。',
       editHint: '在字段中输入即可标记为更新 — 仅发送已勾选的行。留空字段不会更改料盘（清空字段仅能在单个料盘中操作）。',
@@ -4925,7 +4933,6 @@ export default {
     addProfile: '添加配置',
     export: '导出',
     import: '导入',
-    select: '选择',
     selectAll: '全选',
     delete: '删除',
     // Filters
@@ -6412,8 +6419,8 @@ export default {
     days: '天',
     retentionLabel: '自动删除时间',
     selectAll: '全选',
+    deselectAll: '取消全选',
     selectOne: '选择 {{filename}}',
-    selectionCount: '已选择 {{count}} 项',
     bulkRestore: '还原所选',
     bulkPurge: '删除所选',
     col: {

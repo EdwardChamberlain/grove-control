@@ -44,6 +44,18 @@ export default {
     installAppSuccess: 'Grove Control foi instalado',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: 'Seleção múltipla',
+    exit: 'Sair da seleção',
+    count: '{{count}} selecionados',
+    selectItem: 'Selecionar item',
+    deselectItem: 'Desmarcar item',
+    barLabel: 'Ações de seleção',
+    selectAll: 'Selecionar tudo',
+    deselectAll: 'Desmarcar tudo',
+  },
+
   // Common
   common: {
     plusNMore: '+{{count}} outros',
@@ -502,10 +514,8 @@ export default {
     },
     // Bulk actions
     bulk: {
-      select: 'Selecionar',
       selectAll: 'Selecionar tudo',
       selectByLocation: 'Selecionar por local',
-      selected: '{{count}} selecionado(s)',
       actions: {
         stop: 'Parar',
         pause: 'Pausar',
@@ -783,7 +793,6 @@ export default {
       exportCsv: 'Exportar como CSV',
       exportExcel: 'Exportar como Excel',
       compare: 'Comparar',
-      select: 'Selecionar',
       allMaterials: 'Todos os materiais',
       allFiles: 'Todos os arquivos',
       sliced: 'Fatiado (GCODE)',
@@ -1298,7 +1307,6 @@ export default {
       applyChanges: 'Aplicar Alterações',
       selectAll: 'Selecionar Todos',
       deselectAll: 'Desmarcar Todos',
-      selected: '{{count}} selecionado(s)',
       hiddenSelected: '{{count}} ocultos pelos filtros',
       editSelected: 'Editar Selecionados',
       cancelSelected: 'Cancelar Selecionados',
@@ -2342,8 +2350,9 @@ export default {
       exportTooltip: 'Exportar catálogo para JSON',
       importTooltip: 'Importar catálogo de JSON',
       resetTooltip: 'Redefinir para os padrões',
-      selectedCount: '{{count}} selecionados',
       deleteSelected: 'Excluir Selecionados',
+      selectAll: 'Selecionar tudo',
+      deselectAll: 'Desmarcar tudo',
       bulkDeleteConfirm: 'Tem certeza de que deseja excluir {{count}} entradas?',
       bulkDeleted: '{{count}} entradas excluídas',
       bulkDeleteFailed: 'Falha ao excluir entradas',
@@ -2396,8 +2405,9 @@ export default {
       exported: 'Exportadas {{count}} cores',
       imported: 'Importadas {{added}} cores ({{skipped}} ignoradas)',
       importFailed: 'Falha ao importar: formato JSON inválido',
-      selectedCount: '{{count}} selecionados',
       deleteSelected: 'Excluir Selecionados',
+      selectAll: 'Selecionar tudo',
+      deselectAll: 'Desmarcar tudo',
       bulkDeleteConfirm: 'Tem certeza de que deseja excluir {{count}} cores?',
       bulkDeleted: '{{count}} cores excluídas',
       bulkDeleteFailed: 'Falha ao excluir cores',
@@ -3622,7 +3632,6 @@ export default {
     resultsCount: '{{showing}} de {{total}} arquivos',
     selectAll: 'Selecionar tudo',
     deselectAll: 'Desmarcar tudo',
-    selected: '{{count}} selecionado(s)',
     adding: 'Adicionando...',
     loadingFiles: 'Carregando arquivos...',
     folderIsEmpty: 'A pasta está vazia',
@@ -4075,16 +4084,15 @@ export default {
     unknownSpoolSlot: 'Slot',
     bulk: {
       selectAllVisible: 'Selecionar todos os visíveis',
+      deselectVisible: 'Desmarcar visíveis',
       selectRow: 'Selecionar linha',
       selectGroup: 'Selecionar grupo',
-      selectionCount: '{{count}} selecionados',
       edit: 'Editar',
       printLabels: 'Imprimir etiquetas',
       resetUsage: 'Redefinir uso',
       restore: 'Restaurar',
       archive: 'Arquivar',
       delete: 'Excluir',
-      clearSelection: 'Limpar seleção',
       editTitle: 'Editar carretéis em massa',
       editSubtitle: 'Aplica-se a {{count}} carretéis selecionados. Apenas os campos marcados serão atualizados.',
       editHint: 'Digite em um campo para marcá-lo para atualização — apenas linhas marcadas são enviadas. Deixar um campo vazio mantém os carretéis inalterados (limpar campos só é feito por carretel).',
@@ -4926,7 +4934,6 @@ export default {
     addProfile: 'Adicionar Perfil',
     export: 'Exportar',
     import: 'Importar',
-    select: 'Selecionar',
     selectAll: 'Selecionar Todos',
     delete: 'Excluir',
     // Filters
@@ -6415,8 +6422,8 @@ export default {
     days: 'dias',
     retentionLabel: 'Excluir automaticamente após',
     selectAll: 'Selecionar todos',
+    deselectAll: 'Desmarcar tudo',
     selectOne: 'Selecionar {{filename}}',
-    selectionCount: '{{count}} selecionado(s)',
     bulkRestore: 'Restaurar selecionados',
     bulkPurge: 'Excluir selecionados',
     col: {

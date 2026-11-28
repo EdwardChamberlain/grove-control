@@ -9,6 +9,7 @@ import { isSlicedFile } from '../utils/historyFilters';
 import { Button } from './Button';
 import { Card } from './Card';
 import { ReactSelect } from './ToolbarControls';
+import { SelectionCheckbox } from './selection';
 
 interface HistoryLogTableProps {
   rows: PrintLogEntry[];
@@ -22,7 +23,7 @@ interface HistoryLogTableProps {
   /** The archive behind each entry, by id, for the row actions and selection. */
   archiveById: Map<number, Archive>;
   selectionMode: boolean;
-  selectedIds: Set<number>;
+  selectedIds: ReadonlySet<number>;
   onToggleSelect: (archiveId: number) => void;
   timeFormat: TimeFormat;
   currency: string;
@@ -89,11 +90,10 @@ export function HistoryLogTable({
                     {selectionMode && (
                       <td className="px-4 py-3 w-8">
                         {linked && (
-                          <input
-                            type="checkbox"
-                            aria-label={t('archives.log.selectRow')}
+                          <SelectionCheckbox
+                            label={t('archives.log.selectRow')}
                             checked={selectedIds.has(linked.id)}
-                            onChange={() => onToggleSelect(linked.id)}
+                            onToggle={() => onToggleSelect(linked.id)}
                           />
                         )}
                       </td>

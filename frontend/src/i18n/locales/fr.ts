@@ -44,6 +44,18 @@ export default {
     installAppSuccess: 'Grove Control a été installé',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: 'Sélection multiple',
+    exit: 'Quitter la sélection',
+    count: '{{count}} sélectionné(s)',
+    selectItem: 'Sélectionner l\'élément',
+    deselectItem: 'Désélectionner l\'élément',
+    barLabel: 'Actions de sélection',
+    selectAll: 'Tout sélectionner',
+    deselectAll: 'Tout désélectionner',
+  },
+
   // Common
   common: {
     plusNMore: '+{{count}} autres',
@@ -502,10 +514,8 @@ export default {
     },
     // Bulk actions
     bulk: {
-      select: 'Sélectionner',
       selectAll: 'Tout sélectionner',
       selectByLocation: 'Sélectionner par emplacement',
-      selected: '{{count}} sélectionné(s)',
       actions: {
         stop: 'Arrêter',
         pause: 'Pause',
@@ -783,7 +793,6 @@ export default {
       exportCsv: 'Exporter en CSV',
       exportExcel: 'Exporter en Excel',
       compare: 'Comparer',
-      select: 'Sélectionner',
       allMaterials: 'Tous les matériaux',
       allFiles: 'Tous les fichiers',
       sliced: 'Tranché (GCODE)',
@@ -1298,7 +1307,6 @@ export default {
       applyChanges: 'Appliquer',
       selectAll: 'Tout sélectionner',
       deselectAll: 'Tout désélectionner',
-      selected: '{{count}} sélectionnés',
       hiddenSelected: '{{count}} masqués par les filtres',
       editSelected: 'Modifier la sélection',
       cancelSelected: 'Annuler la sélection',
@@ -2342,8 +2350,9 @@ export default {
       exportTooltip: 'Exporter en JSON',
       importTooltip: 'Importer depuis JSON',
       resetTooltip: 'Réinitialiser par défaut',
-      selectedCount: '{{count}} sélectionnés',
       deleteSelected: 'Supprimer la sélection',
+      selectAll: 'Tout sélectionner',
+      deselectAll: 'Tout désélectionner',
       bulkDeleteConfirm: 'Supprimer {{count}} entrées ?',
       bulkDeleted: '{{count}} entrées supprimées',
       bulkDeleteFailed: 'Échec de la suppression',
@@ -2396,8 +2405,9 @@ export default {
       exported: '{{count}} couleurs exportées',
       imported: '{{added}} couleurs importées ({{skipped}} ignorées)',
       importFailed: 'Échec import : format JSON invalide',
-      selectedCount: '{{count}} sélectionnés',
       deleteSelected: 'Supprimer la sélection',
+      selectAll: 'Tout sélectionner',
+      deselectAll: 'Tout désélectionner',
       bulkDeleteConfirm: 'Supprimer {{count}} couleurs ?',
       bulkDeleted: '{{count}} couleurs supprimées',
       bulkDeleteFailed: 'Échec de la suppression des couleurs',
@@ -3623,7 +3633,6 @@ export default {
     resultsCount: '{{showing}} sur {{total}} fichiers',
     selectAll: 'Tout sélectionner',
     deselectAll: 'Tout désélectionner',
-    selected: '{{count}} sélectionnés',
     adding: 'Ajout...',
     loadingFiles: 'Chargement...',
     folderIsEmpty: 'Dossier vide',
@@ -4076,16 +4085,15 @@ export default {
     unknownSpoolSlot: 'Emplacement',
     bulk: {
       selectAllVisible: 'Tout sélectionner (visible)',
+      deselectVisible: 'Désélectionner les visibles',
       selectRow: 'Sélectionner la ligne',
       selectGroup: 'Sélectionner le groupe',
-      selectionCount: '{{count}} sélectionnée(s)',
       edit: 'Modifier',
       printLabels: 'Imprimer les étiquettes',
       resetUsage: 'Réinitialiser l\'utilisation',
       restore: 'Restaurer',
       archive: 'Archiver',
       delete: 'Supprimer',
-      clearSelection: 'Effacer la sélection',
       editTitle: 'Modification groupée des bobines',
       editSubtitle: 'S\'applique à {{count}} bobines sélectionnées. Seuls les champs cochés seront mis à jour.',
       editHint: 'Tapez dans un champ pour le marquer comme à mettre à jour — seules les lignes cochées sont envoyées. Un champ laissé vide laisse les bobines inchangées (vider un champ se fait par bobine).',
@@ -4927,7 +4935,6 @@ export default {
     addProfile: 'Ajouter Profil',
     export: 'Exporter',
     import: 'Importer',
-    select: 'Choisir',
     selectAll: 'Tout sélectionner',
     delete: 'Supprimer',
     // Filters
@@ -6416,8 +6423,8 @@ export default {
     days: 'jours',
     retentionLabel: 'Supprimer automatiquement après',
     selectAll: 'Tout sélectionner',
+    deselectAll: 'Tout désélectionner',
     selectOne: 'Sélectionner {{filename}}',
-    selectionCount: '{{count}} sélectionné(s)',
     bulkRestore: 'Restaurer la sélection',
     bulkPurge: 'Supprimer la sélection',
     col: {

@@ -42,6 +42,18 @@ export default {
     installApp: '앱 설치',
     installAppSuccess: 'Grove Control가 설치되었습니다'
   },
+  selection: {
+    toggle: '다중 선택',
+    exit: '선택 종료',
+    count: '{{count}}개 선택됨',
+    selectItem: '항목 선택',
+    deselectItem: '항목 선택 해제',
+    barLabel: '선택 작업',
+    selectAll: '모두 선택',
+    deselectAll: '모두 선택 해제',
+  },
+
+  // Common
   common: {
     plusNMore: '외 {{count}}개',
     save: '저장',
@@ -468,10 +480,8 @@ export default {
       haToggleButton: '토글'
     },
     bulk: {
-      select: '선택',
       selectAll: '전체 선택',
       selectByLocation: '위치별 선택',
-      selected: '{{count}}개 선택됨',
       actions: {
         stop: '정지',
         pause: '일시정지',
@@ -741,7 +751,6 @@ export default {
       exportCsv: 'CSV로 내보내기',
       exportExcel: 'Excel로 내보내기',
       compare: '비교',
-      select: '선택',
       allMaterials: '모든 소재',
       allFiles: '모든 파일',
       sliced: '슬라이스됨 (GCODE)',
@@ -1233,7 +1242,6 @@ export default {
       applyChanges: '변경사항 적용',
       selectAll: '전체 선택',
       deselectAll: '전체 해제',
-      selected: '{{count}}개 선택됨',
       hiddenSelected: '{{count}}개가 필터로 숨겨짐',
       editSelected: '선택 항목 편집',
       cancelSelected: '선택 항목 취소'
@@ -2217,8 +2225,9 @@ export default {
       exportTooltip: 'JSON으로 카탈로그 내보내기',
       importTooltip: 'JSON에서 카탈로그 가져오기',
       resetTooltip: '기본값으로 초기화',
-      selectedCount: '{{count}}개 선택됨',
       deleteSelected: '선택 항목 삭제',
+      selectAll: '모두 선택',
+      deselectAll: '모두 선택 해제',
       bulkDeleteConfirm: '{{count}}개 항목을 삭제하시겠습니까?',
       bulkDeleted: '{{count}}개 항목이 삭제되었습니다',
       bulkDeleteFailed: '항목 삭제 실패',
@@ -2271,8 +2280,9 @@ export default {
       exported: '{{count}}개 색상이 내보내졌습니다',
       imported: '{{added}}개 색상 가져옴 ({{skipped}}개 건너뜀)',
       importFailed: '가져오기 실패: 잘못된 JSON 형식',
-      selectedCount: '{{count}}개 선택됨',
       deleteSelected: '선택 항목 삭제',
+      selectAll: '모두 선택',
+      deselectAll: '모두 선택 해제',
       bulkDeleteConfirm: '{{count}}개 색상을 삭제하시겠습니까?',
       bulkDeleted: '{{count}}개 색상이 삭제되었습니다',
       bulkDeleteFailed: '색상 삭제 실패'
@@ -3449,7 +3459,6 @@ export default {
     resultsCount: '전체 {{total}}개 중 {{showing}}개',
     selectAll: '모두 선택',
     deselectAll: '모두 선택 해제',
-    selected: '{{count}}개 선택됨',
     adding: '추가 중...',
     loadingFiles: '파일 불러오는 중...',
     folderIsEmpty: '폴더가 비어 있음',
@@ -3881,16 +3890,15 @@ export default {
     unknownSpoolSlot: '슬롯',
     bulk: {
       selectAllVisible: '표시된 항목 모두 선택',
+      deselectVisible: '표시된 항목 선택 해제',
       selectRow: '행 선택',
       selectGroup: '그룹 선택',
-      selectionCount: '{{count}}개 선택됨',
       edit: '편집',
       printLabels: '라벨 인쇄',
       resetUsage: '사용량 재설정',
       restore: '복원',
       archive: '보관',
       delete: '삭제',
-      clearSelection: '선택 해제',
       editTitle: '스풀 일괄 편집',
       editSubtitle: '선택한 {{count}}개의 스풀에 적용됩니다. 체크한 필드만 업데이트됩니다.',
       editHint: '필드에 입력하면 업데이트할 항목으로 표시됩니다 — 체크된 행만 전송됩니다. 빈 필드는 스풀을 변경하지 않습니다 (필드 비우기는 개별 스풀에서만 가능).',
@@ -4689,7 +4697,6 @@ export default {
     addProfile: '프로필 추가',
     export: '내보내기',
     import: '가져오기',
-    select: '선택',
     selectAll: '모두 선택',
     delete: '삭제',
     searchPlaceholder: '이름 또는 필라멘트로 검색...',
@@ -5907,8 +5914,8 @@ export default {
     days: '일',
     retentionLabel: '자동 삭제 기간',
     selectAll: '모두 선택',
+    deselectAll: '모두 선택 해제',
     selectOne: '{{filename}} 선택',
-    selectionCount: '{{count}}개 선택됨',
     bulkRestore: '선택 항목 복원',
     bulkPurge: '선택 항목 삭제',
     col: {

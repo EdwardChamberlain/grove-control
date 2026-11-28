@@ -44,6 +44,18 @@ export default {
     installAppSuccess: 'Grove Controlをインストールしました',
   },
 
+  // Multi-select (shared selection bar and toggle)
+  selection: {
+    toggle: '複数選択',
+    exit: '選択を終了',
+    count: '{{count}}件選択中',
+    selectItem: '項目を選択',
+    deselectItem: '項目の選択を解除',
+    barLabel: '選択操作',
+    selectAll: 'すべて選択',
+    deselectAll: 'すべて選択解除',
+  },
+
   // Common
   common: {
     plusNMore: '他{{count}}件',
@@ -501,10 +513,8 @@ export default {
     },
     // Bulk actions
     bulk: {
-      select: '選択',
       selectAll: 'すべて選択',
       selectByLocation: '場所で選択',
-      selected: '{{count}}件選択中',
       actions: {
         stop: '停止',
         pause: '一時停止',
@@ -782,7 +792,6 @@ export default {
       exportCsv: 'CSVでエクスポート',
       exportExcel: 'Excelでエクスポート',
       compare: '比較',
-      select: '選択',
       allMaterials: 'すべての素材',
       allFiles: 'すべてのファイル',
       sliced: 'スライス済み (GCODE)',
@@ -1297,7 +1306,6 @@ export default {
       applyChanges: '変更を適用',
       selectAll: 'すべて選択',
       deselectAll: 'すべて選択解除',
-      selected: '{{count}}件選択中',
       hiddenSelected: '{{count}} 件がフィルターで非表示',
       editSelected: '選択を編集',
       cancelSelected: '選択をキャンセル',
@@ -2341,8 +2349,9 @@ export default {
       exportTooltip: 'カタログをJSONにエクスポート',
       importTooltip: 'JSONからカタログをインポート',
       resetTooltip: 'デフォルトにリセット',
-      selectedCount: '{{count}}件選択中',
       deleteSelected: '選択を削除',
+      selectAll: 'すべて選択',
+      deselectAll: 'すべて選択解除',
       bulkDeleteConfirm: '{{count}}件のエントリーを削除してもよろしいですか？',
       bulkDeleted: '{{count}}件のエントリーを削除しました',
       bulkDeleteFailed: 'エントリーの削除に失敗しました',
@@ -2395,8 +2404,9 @@ export default {
       exported: '{{count}}件のカラーをエクスポートしました',
       imported: '{{added}}件のカラーをインポートしました（{{skipped}}件スキップ）',
       importFailed: 'インポートに失敗しました：無効なJSON形式',
-      selectedCount: '{{count}}件選択中',
       deleteSelected: '選択を削除',
+      selectAll: 'すべて選択',
+      deselectAll: 'すべて選択解除',
       bulkDeleteConfirm: '{{count}}件のカラーを削除してもよろしいですか？',
       bulkDeleted: '{{count}}件のカラーを削除しました',
       bulkDeleteFailed: 'カラーの削除に失敗しました',
@@ -3634,7 +3644,6 @@ export default {
     resultsCount: '{{total}}件中{{showing}}件',
     selectAll: 'すべて選択',
     deselectAll: 'すべて選択解除',
-    selected: '{{count}}件選択中',
     adding: '追加中...',
     loadingFiles: 'ファイルを読み込み中...',
     folderIsEmpty: 'フォルダーは空です',
@@ -4087,16 +4096,15 @@ export default {
     unknownSpoolSlot: 'スロット',
     bulk: {
       selectAllVisible: '表示中をすべて選択',
+      deselectVisible: '表示中を選択解除',
       selectRow: '行を選択',
       selectGroup: 'グループを選択',
-      selectionCount: '{{count}} 件選択中',
       edit: '編集',
       printLabels: 'ラベルを印刷',
       resetUsage: '使用量をリセット',
       restore: '復元',
       archive: 'アーカイブ',
       delete: '削除',
-      clearSelection: '選択を解除',
       editTitle: 'スプールを一括編集',
       editSubtitle: '選択中の {{count}} 件に適用されます。チェックを入れた項目のみ更新されます。',
       editHint: '項目に入力すると更新対象としてマークされます。チェック済みの行のみ送信されます。空のままだとスプールは変更されません（項目を空にする操作はスプール個別の編集で行ってください）。',
@@ -4938,7 +4946,6 @@ export default {
     addProfile: 'K-プロファイルを追加',
     export: 'エクスポート',
     import: 'インポート',
-    select: '選択',
     selectAll: 'すべて選択',
     delete: '削除',
     // Filters
@@ -6427,8 +6434,8 @@ export default {
     days: '日',
     retentionLabel: '自動削除までの期間',
     selectAll: 'すべて選択',
+    deselectAll: 'すべて選択解除',
     selectOne: '{{filename}} を選択',
-    selectionCount: '{{count}} 件選択中',
     bulkRestore: '選択したものを復元',
     bulkPurge: '選択したものを削除',
     col: {

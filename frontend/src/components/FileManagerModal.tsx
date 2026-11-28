@@ -17,7 +17,6 @@ import {
   Search,
   ArrowUpDown,
   CheckSquare,
-  Square,
   MinusSquare,
   Box,
 } from 'lucide-react';
@@ -32,6 +31,7 @@ import type { PlateMetadata } from '../types/plates';
 import { useToast } from '../contexts/ToastContext';
 import { formatFileSize } from '../utils/file';
 import { ReactSelect } from './ToolbarControls';
+import { SelectModeToggle, SelectionBar, SelectionBarDivider, SelectionCheckbox, useSelection } from './selection';
 
 interface FileManagerModalProps {
   printerId: number;
@@ -281,7 +281,9 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [currentPath, setCurrentPath] = useState('/');
-  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  // Escape closes this dialog, so the selection hook must not also claim it.
+  const selection = useSelection<string>({ exitOnEscape: false });
+  const { selected: selectedFiles, active: selectionMode } = selection;
   const [searchQuery, setSearchQuery] = useState('');
   const [filesToDelete, setFilesToDelete] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<SortOption>('name-asc');
@@ -324,7 +326,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
     onSuccess: () => {
       showToast(t('printerFiles.toast.filesDeleted', { count: filesToDelete.length }));
       queryClient.invalidateQueries({ queryKey: ['printerFiles', printerId] });
-      setSelectedFiles(new Set());
+      selection.clear();
       setFilesToDelete([]);
     },
     onError: (error: Error) => {
@@ -334,7 +336,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
 
   const navigateToFolder = (path: string) => {
     setCurrentPath(path);
-    setSelectedFiles(new Set());
+    selection.clear();
   };
 
   const navigateUp = () => {
@@ -342,33 +344,20 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
     const parts = currentPath.split('/').filter(Boolean);
     parts.pop();
     setCurrentPath(parts.length ? '/' + parts.join('/') : '/');
-    setSelectedFiles(new Set());
+    selection.clear();
   };
 
-  const toggleFileSelection = (path: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSelectedFiles(prev => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  };
+  const toggleFileSelection = selection.toggle;
 
   const selectAllFiles = () => {
     if (!data?.files) return;
     const filePaths = data.files
       .filter(f => !f.is_directory && (!searchQuery || f.name.toLowerCase().includes(searchQuery.toLowerCase())))
       .map(f => f.path);
-    setSelectedFiles(new Set(filePaths));
+    selection.set(filePaths);
   };
 
-  const deselectAllFiles = () => {
-    setSelectedFiles(new Set());
-  };
+  const deselectAllFiles = selection.clear;
 
   const handleDownload = async () => {
     if (selectedFiles.size === 0) return;
@@ -380,7 +369,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
       api.downloadPrinterFile(printerId, paths[0]).catch((err) => {
         console.error('Printer file download failed:', err);
       });
-      setSelectedFiles(new Set());
+      selection.clear();
       return;
     }
 
@@ -397,7 +386,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       showToast(`Downloaded ${paths.length} files as ZIP`);
-      setSelectedFiles(new Set());
+      selection.clear();
     } catch (error) {
       showToast(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     } finally {
@@ -507,6 +496,7 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
               ))}
             </ReactSelect>
           </div>
+          <SelectModeToggle active={selectionMode} onToggle={selection.toggleMode} className="!h-auto !py-1.5" />
           <Button
             variant="secondary"
             size="sm"
@@ -584,7 +574,9 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
                     return (
                       <div
                         key={file.path}
-                        className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                        className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${
+                          file.is_directory || selectionMode ? 'cursor-pointer' : ''
+                        } ${
                           isSelected
                             ? 'bg-bambu-green/20 border border-bambu-green/50'
                             : 'hover:bg-bambu-dark-tertiary'
@@ -592,21 +584,18 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
                         onClick={() => {
                           if (file.is_directory) {
                             navigateToFolder(file.path);
+                          } else if (selectionMode) {
+                            toggleFileSelection(file.path);
                           }
                         }}
                       >
-                        {/* Checkbox for files only */}
-                        {!file.is_directory ? (
-                          <button
-                            onClick={(e) => toggleFileSelection(file.path, e)}
-                            className="flex-shrink-0 text-bambu-gray hover:text-white"
-                          >
-                            {isSelected ? (
-                              <CheckSquare className="w-5 h-5 text-bambu-green" />
-                            ) : (
-                              <Square className="w-5 h-5" />
-                            )}
-                          </button>
+                        {/* Checkbox for files only, in select mode */}
+                        {selectionMode && !file.is_directory ? (
+                          <SelectionCheckbox
+                            checked={isSelected}
+                            onToggle={() => toggleFileSelection(file.path)}
+                            label={file.name}
+                          />
                         ) : null}
                         <FileIcon
                           className={`w-5 h-5 flex-shrink-0 ${
@@ -643,74 +632,67 @@ export function FileManagerModal({ printerId, printerName, onClose }: FileManage
             )}
           </div>
 
-        {/* Action bar */}
+        {/* Footer: item count (the multi-select bar takes over in select mode) */}
         <div className="flex items-center justify-between p-4 border-t border-bambu-dark-tertiary bg-bambu-dark/50 flex-shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-bambu-gray">
-              {selectedFiles.size > 0
-                ? `${selectedFiles.size} selected`
-                : searchQuery
-                  ? `${data?.files?.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase())).length || 0} of ${data?.files?.length || 0} items`
-                  : `${data?.files?.length || 0} items`
-              }
-            </div>
-            {/* Select All / Deselect All */}
-            {data?.files?.some(f => !f.is_directory) && (
-              <div className="flex items-center gap-2">
-                {selectedFiles.size > 0 ? (
-                  <button
-                    onClick={deselectAllFiles}
-                    className="flex items-center gap-1 text-xs text-bambu-gray hover:text-white transition-colors"
-                  >
-                    <MinusSquare className="w-4 h-4" />
-                    Deselect All
-                  </button>
-                ) : (
-                  <button
-                    onClick={selectAllFiles}
-                    className="flex items-center gap-1 text-xs text-bambu-gray hover:text-white transition-colors"
-                  >
-                    <CheckSquare className="w-4 h-4" />
-                    Select All
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              disabled={selectedFiles.size === 0 || downloadProgress !== null}
-              onClick={handleDownload}
-            >
-              {downloadProgress ? (
-                <>
-                  <Spinner className="w-4 h-4" />
-                  {downloadProgress.current}/{downloadProgress.total}
-                </>
-              ) : (
-                <>
-                  <Download className="w-4 h-4" />
-                  Download{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
-                </>
-              )}
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={selectedFiles.size === 0 || deleteMutation.isPending}
-              onClick={handleDelete}
-              className="text-red-400 hover:text-red-300"
-            >
-              {deleteMutation.isPending ? (
-                <Spinner className="w-4 h-4" />
-              ) : (
-                <Trash2 className="w-4 h-4" />
-              )}
-              {t('printerFiles.deleteButton')}{selectedFiles.size > 1 ? ` (${selectedFiles.size})` : ''}
-            </Button>
+          <div className="text-sm text-bambu-gray">
+            {searchQuery
+              ? `${data?.files?.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase())).length || 0} of ${data?.files?.length || 0} items`
+              : `${data?.files?.length || 0} items`
+            }
           </div>
         </div>
       </div>
+
+      {/* Multi-select bar: sits above the dialog backdrop */}
+      {selectionMode && filesToDelete.length === 0 && !viewerFile && (
+        <SelectionBar count={selectedFiles.size} onClose={selection.exit} className="!z-[60]" reserveSpace={false}>
+          {data?.files?.some(f => !f.is_directory) && (
+            selectedFiles.size > 0 ? (
+              <Button variant="secondary" size="sm" onClick={deselectAllFiles}>
+                <MinusSquare className="w-4 h-4" />
+                {t('selection.deselectAll')}
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm" onClick={selectAllFiles}>
+                <CheckSquare className="w-4 h-4" />
+                {t('selection.selectAll')}
+              </Button>
+            )
+          )}
+          <SelectionBarDivider />
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={selectedFiles.size === 0 || downloadProgress !== null}
+            onClick={handleDownload}
+          >
+            {downloadProgress ? (
+              <>
+                <Spinner className="w-4 h-4" />
+                {downloadProgress.current}/{downloadProgress.total}
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                {t('common.download')}
+              </>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            className="bg-red-500 hover:bg-red-600"
+            disabled={selectedFiles.size === 0 || deleteMutation.isPending}
+            onClick={handleDelete}
+          >
+            {deleteMutation.isPending ? (
+              <Spinner className="w-4 h-4" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            {t('printerFiles.deleteButton')}
+          </Button>
+        </SelectionBar>
+      )}
 
       {/* Delete Confirmation Modal */}
       {filesToDelete.length > 0 && (

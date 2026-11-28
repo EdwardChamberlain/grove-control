@@ -64,7 +64,7 @@ describe('ArchivesPage bulk selection', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -80,6 +80,71 @@ describe('ArchivesPage bulk selection', () => {
     expect(await screen.findByText('2 archives deleted')).toBeInTheDocument();
   });
 
+  it('shows card checkboxes only in select mode and toggles an archive from its checkbox', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes.length).toBeGreaterThan(0);
+    await user.click(boxes[0]);
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
+  it('keeps a button on a card from also toggling the card', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    const card = screen.getAllByText('Benchy')[0].closest('[data-archive-id]') as HTMLElement;
+    const menuButton = within(card).getAllByRole('button').find((b) => b.getAttribute('role') !== 'checkbox') as HTMLElement;
+    await user.click(menuButton);
+
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+  });
+
+  it('has no select toggle in the calendar view and leaves select mode when switching to it', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Calendar view' }));
+    expect(screen.queryByTestId('select-mode-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+  });
+
+  it('disables the bulk actions until an archive is selected', async () => {
+    setView('grid');
+    useArchives();
+    const user = userEvent.setup();
+    render(<ArchivesPage />);
+
+    await screen.findAllByText('Benchy');
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    const bar = within(screen.getByTestId('selection-bar'));
+    for (const name of [/^Tags$/, /^Project$/, /^Favorite$/, /^Delete$/]) {
+      expect(bar.getByRole('button', { name })).toBeDisabled();
+    }
+
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    expect(bar.getByRole('button', { name: /^Favorite$/ })).toBeEnabled();
+  });
+
   it('Escape and Close leave selection mode', async () => {
     setView('grid');
     useArchives();
@@ -87,13 +152,13 @@ describe('ArchivesPage bulk selection', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('2 selected')).not.toBeInTheDocument());
 
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
-    await user.click(screen.getByRole('button', { name: /Close/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
+    await user.click(screen.getByRole('button', { name: 'Exit selection' }));
     expect(screen.queryByRole('button', { name: 'Select All' })).not.toBeInTheDocument();
   });
 
@@ -290,7 +355,7 @@ describe('ArchivesPage selection and the Filters panel', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -312,7 +377,7 @@ describe('ArchivesPage selection and the Filters panel', () => {
     render(<ArchivesPage />);
 
     await screen.findAllByText('Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
 
@@ -335,7 +400,7 @@ describe('ArchivesPage print log selection and limits', () => {
     render(<ArchivesPage />);
 
     await screen.findByText('Log Benchy');
-    await user.click(screen.getByRole('button', { name: /^Select$/ }));
+    await user.click(screen.getByTestId('select-mode-toggle'));
     await user.click(screen.getByRole('button', { name: 'Select All' }));
 
     // Archive 2 (Bracket) has no row in the log and the orphan has no archive: only archive 1 counts.

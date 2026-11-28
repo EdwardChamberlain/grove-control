@@ -582,7 +582,7 @@ describe('QueuePage', () => {
         screen.getByRole('button', { name: 'All Status' }),
         screen.getByRole('button', { name: /By Printer/ }),
         screen.getByRole('button', { name: 'Sort by Position' }),
-        screen.getByRole('button', { name: 'Select All' }),
+        screen.getByTestId('select-mode-toggle'),
       ]) {
         expect(toolbar).toContainElement(control);
       }
@@ -737,7 +737,8 @@ describe('QueuePage', () => {
       await screen.findByText('Benchy');
 
       // Select both pending jobs, then narrow the search to one of them.
-      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
       expect(screen.getByText('2 selected')).toBeInTheDocument();
       await type(user, 'alpha');
 
@@ -755,6 +756,34 @@ describe('QueuePage', () => {
       expect(screen.queryByTestId('queue-hidden-selected')).not.toBeInTheDocument();
     });
 
+    it('leaves select mode after a bulk cancel even if another selected job has left the pending list', async () => {
+      let started = false;
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json(
+            started ? [{ ...searchItems[0], status: 'printing' }, searchItems[1]] : searchItems.slice(0, 2),
+          ),
+        ),
+        http.post('/api/v1/queue/:id/cancel', () => HttpResponse.json({ success: true })),
+      );
+      const user = userEvent.setup();
+      render(<QueuePage />);
+      await screen.findByText('Benchy');
+
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+      // One selected job starts printing elsewhere; a refetch (here, from cancelling a card) shows it.
+      started = true;
+      await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+      await user.click(await screen.findByRole('button', { name: 'Cancel Print' }));
+      await waitFor(() => expect(screen.getByText('1 selected')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: 'Cancel Selected' }));
+      await waitFor(() => expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument());
+    });
+
     it('does not count a selected job that has left the pending list as hidden', async () => {
       let started = false;
       server.use(
@@ -767,7 +796,8 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
       await screen.findByText('Benchy');
-      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
       expect(screen.getByText('2 selected')).toBeInTheDocument();
 
       // Benchy starts printing elsewhere; the page picks that up on refocus.
@@ -811,7 +841,8 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
       await screen.findByText('Benchy');
-      await user.click(screen.getByRole('button', { name: 'Select All' }));
+      await user.click(screen.getByTestId('select-mode-toggle'));
+      await user.click(await screen.findByRole('button', { name: 'Select All' }));
       await type(user, 'alpha');
 
       await user.click(screen.getByRole('button', { name: 'Deselect All' }));
@@ -1710,19 +1741,22 @@ describe('QueuePage', () => {
   });
 
   describe('selection checkbox on the thumbnail', () => {
-    it('renders an accessible checkbox for pending jobs that reveals on hover', async () => {
+    it('shows no job checkboxes until select mode is turned on', async () => {
+      const user = userEvent.setup();
       render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      expect(screen.queryByRole('checkbox', { name: 'Select Test Print 1' })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('selection-bar')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('select-mode-toggle'));
 
       const checkbox = await screen.findByRole('checkbox', { name: 'Select Test Print 1' });
       expect(checkbox).not.toBeChecked();
-      const label = checkbox.closest('label') as HTMLElement;
-      // Keyed on hover capability, so touch screens of any width keep it visible.
-      expect(label.className).toContain('can-hover:opacity-0');
-      expect(label.className).toContain('group-hover:opacity-100');
-      expect(label.className).not.toContain('sm:opacity-0');
+      expect(screen.getByTestId('selection-bar')).toBeInTheDocument();
     });
 
-    it('selects a job from the checkbox and keeps every checkbox visible while something is selected', async () => {
+    it('selects a job from the checkbox or by clicking the card without opening the editor', async () => {
       const user = userEvent.setup();
       server.use(
         http.get('/api/v1/queue/', () => HttpResponse.json([
@@ -1732,13 +1766,50 @@ describe('QueuePage', () => {
       );
       render(<QueuePage />);
 
+      await user.click(await screen.findByTestId('select-mode-toggle'));
       await user.click(await screen.findByRole('checkbox', { name: 'Select Test Print 1' }));
 
       expect(screen.getByRole('checkbox', { name: 'Select Test Print 1' })).toBeChecked();
       expect(screen.getByText('1 selected')).toBeInTheDocument();
-      const other = screen.getByRole('checkbox', { name: 'Select Second Pending' });
-      expect((other.closest('label') as HTMLElement).className).not.toContain('can-hover:opacity-0');
+
+      await user.click(screen.getByText('Second Pending'));
+      expect(screen.getByText('2 selected')).toBeInTheDocument();
       expect(screen.queryByText('Edit Queue Item')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('buttons in select mode', () => {
+    it('keeps the select toggle while select mode is on after the last pending job goes', async () => {
+      const user = userEvent.setup();
+      let items: unknown[] = [mockQueueItems[0]];
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(items)),
+        http.post('/api/v1/queue/:id/cancel', () => {
+          items = [];
+          return HttpResponse.json({ message: 'cancelled' });
+        }),
+      );
+      render(<QueuePage />);
+
+      await user.click(await screen.findByTestId('select-mode-toggle'));
+      // Cancel the only pending job from its card; the queue empties while select mode is on.
+      await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+      await user.click(await screen.findByRole('button', { name: 'Cancel Print' }));
+      await waitFor(() => expect(screen.queryByText('Test Print 1')).not.toBeInTheDocument());
+
+      expect(screen.getByTestId('select-mode-toggle')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('keeps a card button from also toggling the job selection', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      await user.click(await screen.findByTestId('select-mode-toggle'));
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
+
+      await user.click(screen.getAllByRole('button', { name: 'Cancel' })[0]);
+
+      expect(screen.getByText('0 selected')).toBeInTheDocument();
     });
   });
 
@@ -1781,7 +1852,8 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
 
-      await user.click(await screen.findByRole('button', { name: 'Select All' }));
+      await user.click(await screen.findByTestId('select-mode-toggle'));
+    await user.click(await screen.findByRole('button', { name: 'Select All' }));
 
       const edit = screen.getByRole('button', { name: 'Edit Selected' });
       const cancel = screen.getByRole('button', { name: 'Cancel Selected' });
